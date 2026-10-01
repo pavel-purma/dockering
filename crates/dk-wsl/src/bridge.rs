@@ -423,15 +423,31 @@ mod platform {
         use std::time::Duration;
 
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::windows::named_pipe::ClientOptions;
+        use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 
         use super::PipeBridge;
         use crate::discovery::BridgeTool;
 
         const LIVE_DISTRO: &str = "Ubuntu-22.04";
 
+        /// Opens the pipe like bollard's connector (hyper-named-pipe): retry `ERROR_PIPE_BUSY`
+        /// every 50 ms, which happens when clients race the next listening instance.
+        async fn open_client(path: &str) -> NamedPipeClient {
+            const ERROR_PIPE_BUSY: i32 = 231;
+            for _ in 0..100 {
+                match ClientOptions::new().open(path) {
+                    Ok(client) => return client,
+                    Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    Err(error) => panic!("open bridge pipe: {error}"),
+                }
+            }
+            panic!("bridge pipe stayed busy for 5 s");
+        }
+
         async fn ping(path: &str) -> String {
-            let mut client = ClientOptions::new().open(path).expect("open bridge pipe");
+            let mut client = open_client(path).await;
             client
                 .write_all(b"GET /_ping HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n")
                 .await
@@ -442,6 +458,50 @@ mod platform {
                 .expect("response within 15 s")
                 .expect("read response");
             String::from_utf8_lossy(&response).into_owned()
+        }
+
+        /// Status line and body of a raw HTTP/1.1 response (`Content-Length` or chunked).
+        fn parse_response(raw: &str) -> (String, String) {
+            let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw, ""));
+            let status = head.lines().next().unwrap_or_default().to_owned();
+            let chunked = head
+                .to_ascii_lowercase()
+                .contains("transfer-encoding: chunked");
+            if !chunked {
+                return (status, body.to_owned());
+            }
+            let mut decoded = String::new();
+            let mut rest = body;
+            while let Some((size, after)) = rest.split_once("\r\n") {
+                let size = usize::from_str_radix(size.trim(), 16).unwrap_or(0);
+                if size == 0 || after.len() < size {
+                    break;
+                }
+                decoded.push_str(&after[..size]);
+                rest = after[size..].trim_start_matches("\r\n");
+            }
+            (status, decoded)
+        }
+
+        fn assert_ping_ok(raw: &str) {
+            let (status, body) = parse_response(raw);
+            assert!(status.starts_with("HTTP/1.1 200"), "{raw}");
+            assert_eq!(body, "OK", "{raw}");
+        }
+
+        async fn distro_has(program: &str) -> bool {
+            let script = "command -v \"$0\"";
+            crate::runner::run(["-d", LIVE_DISTRO, "--exec", "sh", "-c", script, program])
+                .await
+                .is_ok_and(|output| output.success())
+        }
+
+        #[test]
+        fn parses_chunked_and_plain_ping_responses() {
+            assert_ping_ok(
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nOK\r\n0\r\n\r\n",
+            );
+            assert_ping_ok("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK");
         }
 
         #[test]
@@ -509,12 +569,12 @@ mod platform {
                 response.lines().next(),
                 started.elapsed()
             );
-            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-            assert!(response.ends_with("OK"), "{response}");
+            assert_ping_ok(&response);
 
             // Two concurrent connections → two children; both closed afterwards.
             let (a, b) = tokio::join!(ping(bridge.path()), ping(bridge.path()));
-            assert!(a.ends_with("OK") && b.ends_with("OK"));
+            assert_ping_ok(&a);
+            assert_ping_ok(&b);
             for _ in 0..100 {
                 if bridge.active_connections() == 0 {
                     break;
@@ -524,15 +584,18 @@ mod platform {
             assert_eq!(bridge.active_connections(), 0);
         }
 
-        /// The socat fallback, when the distro has socat installed.
+        /// The socat fallback. Skipped (with a message) when socat isn't installed in the distro.
         #[tokio::test]
         #[ignore = "live: needs running WSL distro Ubuntu-22.04 with socat"]
         async fn eng_011_live_bridge_ping_ubuntu_socat() {
+            if !distro_has("socat").await {
+                eprintln!("SKIPPED: socat is not installed in {LIVE_DISTRO}");
+                return;
+            }
             let bridge = PipeBridge::start(LIVE_DISTRO, BridgeTool::Socat)
                 .await
                 .expect("start bridge");
-            let response = ping(bridge.path()).await;
-            assert!(response.ends_with("OK"), "{response}");
+            assert_ping_ok(&ping(bridge.path()).await);
         }
 
         /// An inactive bridge closes connections without traffic after the idle timeout; an
@@ -580,6 +643,64 @@ mod platform {
             tokio::time::sleep(Duration::from_millis(100)).await;
             let error = ClientOptions::new().open(&path).expect_err("pipe gone");
             assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        }
+
+        /// `shutdown()` also releases the name, even while an `Arc` is still alive.
+        #[tokio::test]
+        async fn eng_011_shutdown_stops_the_listener() {
+            let bridge = PipeBridge::start(LIVE_DISTRO, BridgeTool::Docker)
+                .await
+                .expect("start bridge");
+            bridge.shutdown();
+            assert!(bridge.is_shut_down());
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let error = ClientOptions::new()
+                .open(bridge.path())
+                .expect_err("pipe gone");
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        }
+
+        /// Inactive with no connections → the listener parks (name released, no client can
+        /// spawn a `wsl.exe`); marking it active again reclaims the same name (spec 20 §4.4).
+        /// No client connects here, so no `wsl.exe` is spawned.
+        #[tokio::test]
+        async fn eng_011_inactive_unused_listener_parks_and_resumes() {
+            let bridge = PipeBridge::start_with_idle_timeout(
+                LIVE_DISTRO.into(),
+                BridgeTool::Docker,
+                Duration::from_millis(200),
+            )
+            .expect("start bridge");
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            assert!(!bridge.is_parked(), "active bridges never park");
+
+            bridge.set_active(false);
+            for _ in 0..100 {
+                if bridge.is_parked() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert!(bridge.is_parked());
+            let error = ClientOptions::new()
+                .open(bridge.path())
+                .expect_err("parked pipe is gone");
+            assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+
+            bridge.set_active(true);
+            for _ in 0..100 {
+                if !bridge.is_parked() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert!(!bridge.is_parked());
+            assert!(!bridge.is_shut_down());
+            // The name exists again: verify without connecting by trying to squat it.
+            let squat = crate::win32::PipeSecurity::current_user()
+                .expect("security")
+                .create_pipe(bridge.path(), true);
+            assert!(squat.is_err(), "name must be owned by the resumed bridge");
         }
     }
 }
