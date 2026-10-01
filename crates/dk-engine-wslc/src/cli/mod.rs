@@ -1,6 +1,7 @@
 //! `wslc.exe` CLI fallback transport (spec 20 §5.5). Owner: `engine-integrator`.
 //! PUBLIC (crate) API FIXED — the factory (owned by `windows-platform`) calls these.
 
+pub(crate) mod parse;
 pub(crate) mod runner;
 
 use dk_core::{EngineId, EngineResult};
