@@ -1719,7 +1719,6 @@ dependencies = [
  "serde_json",
  "time",
  "tracing",
- "windows 0.61.3",
 ]
 
 [[package]]
