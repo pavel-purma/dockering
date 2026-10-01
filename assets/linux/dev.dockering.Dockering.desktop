@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Dockering
+Comment=Native desktop client for container engines
+Exec=dockering
+Icon=dev.dockering.Dockering
+Terminal=false
+Categories=Development;System;
+StartupNotify=true
+StartupWMClass=dev.dockering.Dockering
