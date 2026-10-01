@@ -7,6 +7,8 @@
 //!
 //! PUBLIC API FIXED — implemented by `gpui-ui` (terminal worktree).
 
+pub mod keys;
+
 use bytes::Bytes;
 use gpui_kit::{Context, EventEmitter, FocusHandle, Focusable, IntoElement, Render, Window, div};
 
@@ -37,7 +39,10 @@ pub enum TerminalEvent {
     /// Encoded keystrokes / paste / mouse reports to write to the PTY.
     Input(Bytes),
     /// The grid size changed (already debounced 50 ms, TRM-005).
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     /// OSC title.
     Title(String),
     Bell,
