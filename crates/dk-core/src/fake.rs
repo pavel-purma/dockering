@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::channel::{mpsc, oneshot};
 use futures::StreamExt;
+use futures::channel::{mpsc, oneshot};
 use time::OffsetDateTime;
 
 use crate::capabilities::Capabilities;
@@ -135,7 +135,12 @@ impl FakeEngine {
         self.st().calls.clone()
     }
     pub fn calls_to(&self, op: &str) -> Vec<FakeCall> {
-        self.st().calls.iter().filter(|c| c.op == op).cloned().collect()
+        self.st()
+            .calls
+            .iter()
+            .filter(|c| c.op == op)
+            .cloned()
+            .collect()
     }
     pub fn clear_calls(&self) {
         self.st().calls.clear();
@@ -360,12 +365,16 @@ impl Engine for FakeEngine {
         let idx = Self::find_container(&st, id)
             .ok_or_else(|| EngineError::not_found(ResourceKind::Container, id))?;
         let (new_state, status, ev): (ContainerState, String, &str) = match action {
-            ContainerAction::Start | ContainerAction::Restart { .. } => {
-                (ContainerState::Running, "Up Less than a second".into(), "start")
-            }
-            ContainerAction::Stop { .. } => {
-                (ContainerState::Exited, "Exited (0) Less than a second ago".into(), "die")
-            }
+            ContainerAction::Start | ContainerAction::Restart { .. } => (
+                ContainerState::Running,
+                "Up Less than a second".into(),
+                "start",
+            ),
+            ContainerAction::Stop { .. } => (
+                ContainerState::Exited,
+                "Exited (0) Less than a second ago".into(),
+                "die",
+            ),
             ContainerAction::Kill { .. } => (
                 ContainerState::Exited,
                 "Exited (137) Less than a second ago".into(),
@@ -489,7 +498,9 @@ impl Engine for FakeEngine {
         let idx = Self::find_container(&st, id)
             .ok_or_else(|| EngineError::not_found(ResourceKind::Container, id))?;
         if !st.containers[idx].state.is_running() {
-            return Err(EngineError::Conflict(format!("container {id} is not running")));
+            return Err(EngineError::Conflict(format!(
+                "container {id} is not running"
+            )));
         }
         st.exec_count += 1;
         Ok(Box::new(FakeTerminal::new(req.cols, req.rows)))
@@ -500,7 +511,11 @@ impl Engine for FakeEngine {
         let st = self.st();
         let mut images = st.images.clone();
         for img in &mut images {
-            let n = st.containers.iter().filter(|c| c.image_id == img.id).count() as u32;
+            let n = st
+                .containers
+                .iter()
+                .filter(|c| c.image_id == img.id)
+                .count() as u32;
             img.containers = Some(n);
         }
         Ok(images)
@@ -539,7 +554,11 @@ impl Engine for FakeEngine {
             comment: String::new(),
         }])
     }
-    fn pull_image(&self, reference: &str, _auth: Option<RegistryAuth>) -> EngineStream<PullProgress> {
+    fn pull_image(
+        &self,
+        reference: &str,
+        _auth: Option<RegistryAuth>,
+    ) -> EngineStream<PullProgress> {
         let mut st = self.st();
         st.calls.push(FakeCall {
             op: "pull_image",
@@ -639,7 +658,10 @@ impl Engine for FakeEngine {
         self.enter("run_image", &spec.image).await?;
         let mut st = self.st();
         let id = Self::new_id(&mut st);
-        let name = spec.name.clone().unwrap_or_else(|| format!("fake_{}", st.next_id));
+        let name = spec
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("fake_{}", st.next_id));
         let mut c = fixtures::container(&name, ContainerState::Running);
         c.id = id.clone();
         c.image = spec.image.clone();
@@ -870,7 +892,12 @@ impl FakeTerminal {
 
     fn finish(&self, code: i64) {
         self.out_tx.lock().unwrap_or_else(|e| e.into_inner()).take();
-        if let Some(tx) = self.exit_tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(tx) = self
+            .exit_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             let _ = tx.send(Some(code));
         }
     }
@@ -886,7 +913,12 @@ impl TerminalSession for FakeTerminal {
     }
     async fn write(&self, data: Bytes) -> EngineResult<()> {
         let exit = data.as_ref() == b"exit\r" || data.as_ref() == b"exit\n";
-        if let Some(tx) = self.out_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(tx) = self
+            .out_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             let _ = tx.unbounded_send(Ok(data));
         }
         if exit {
@@ -899,7 +931,11 @@ impl TerminalSession for FakeTerminal {
         Ok(())
     }
     async fn wait(&self) -> EngineResult<Option<i64>> {
-        let rx = self.exit_rx.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let rx = self
+            .exit_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         match rx {
             Some(rx) => Ok(rx.await.unwrap_or(None)),
             None => Err(EngineError::protocol("wait() called twice")),
@@ -950,7 +986,10 @@ impl FakeFactory {
     }
     /// Make `connect` fail for `id` (`None` clears).
     pub fn set_connect_error(&self, id: &EngineId, err: Option<EngineError>) {
-        let mut m = self.connect_errors.lock().unwrap_or_else(|e| e.into_inner());
+        let mut m = self
+            .connect_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         match err {
             Some(e) => m.insert(id.clone(), e),
             None => m.remove(id),
@@ -958,7 +997,10 @@ impl FakeFactory {
     }
     /// Ids passed to `connect`, in order.
     pub fn connects(&self) -> Vec<EngineId> {
-        self.connects.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.connects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -992,10 +1034,16 @@ impl EngineFactory for FakeFactory {
             return Err(e.clone());
         }
         let engines = self.engines.lock().unwrap_or_else(|e| e.into_inner());
-        let found = engines.iter().find(|(c, _)| c.id == cfg.id).map(|(_, e)| e.clone());
+        let found = engines
+            .iter()
+            .find(|(c, _)| c.id == cfg.id)
+            .map(|(_, e)| e.clone());
         match found {
             Some(e) => Ok(e),
-            None => Err(EngineError::unreachable(format!("no fake engine '{}'", cfg.id))),
+            None => Err(EngineError::unreachable(format!(
+                "no fake engine '{}'",
+                cfg.id
+            ))),
         }
     }
     fn config_schema(&self) -> Vec<EngineConfigSchema> {
@@ -1032,7 +1080,11 @@ pub mod fixtures {
             h ^= b as u64;
             h = h.wrapping_mul(0x0100_0000_01b3);
         }
-        format!("{h:016x}{:016x}{h:016x}{:016x}", h.rotate_left(17), h.rotate_left(33))
+        format!(
+            "{h:016x}{:016x}{h:016x}{:016x}",
+            h.rotate_left(17),
+            h.rotate_left(33)
+        )
     }
 
     pub fn container(name: &str, state: ContainerState) -> ContainerSummary {
@@ -1069,7 +1121,11 @@ pub mod fixtures {
     }
 
     /// A Compose member: labels `com.docker.compose.{project,service,container-number}`.
-    pub fn compose_container(project: &str, service: &str, state: ContainerState) -> ContainerSummary {
+    pub fn compose_container(
+        project: &str,
+        service: &str,
+        state: ContainerState,
+    ) -> ContainerSummary {
         let name = format!("{project}-{service}-1");
         let mut c = container(&name, state);
         for (k, v) in [

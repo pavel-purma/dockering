@@ -33,7 +33,8 @@ fn u(v: &Value, path: &[&str]) -> Option<u64> {
     for p in path {
         cur = cur.get(*p)?;
     }
-    cur.as_u64().or_else(|| cur.as_f64().map(|f| f.max(0.0) as u64))
+    cur.as_u64()
+        .or_else(|| cur.as_f64().map(|f| f.max(0.0) as u64))
 }
 
 impl RawStats {
@@ -41,12 +42,16 @@ impl RawStats {
     /// Tolerant: missing fields → 0/None (NFR-031).
     pub fn from_docker_json(v: &Value) -> EngineResult<RawStats> {
         if !v.is_object() {
-            return Err(crate::error::EngineError::protocol("stats: expected a JSON object"));
+            return Err(crate::error::EngineError::protocol(
+                "stats: expected a JSON object",
+            ));
         }
         let read = v
             .get("read")
             .and_then(Value::as_str)
-            .and_then(|s| OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok())
+            .and_then(|s| {
+                OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+            })
             .filter(|t| t.year() > 1);
         let online_cpus = u(v, &["cpu_stats", "online_cpus"])
             .filter(|n| *n > 0)
@@ -83,7 +88,12 @@ impl RawStats {
         {
             for e in entries {
                 let val = u(e, &["value"]).unwrap_or(0);
-                match e.get("op").and_then(Value::as_str).map(str::to_ascii_lowercase).as_deref() {
+                match e
+                    .get("op")
+                    .and_then(Value::as_str)
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                {
                     Some("read") => blk_read = blk_read.saturating_add(val),
                     Some("write") => blk_write = blk_write.saturating_add(val),
                     _ => {}
@@ -153,9 +163,7 @@ impl StatsNormalizer {
                 _ => 0.0,
             }
         };
-        let dt = prev
-            .map(|(_, t)| (at - *t).as_seconds_f64())
-            .unwrap_or(0.0);
+        let dt = prev.map(|(_, t)| (at - *t).as_seconds_f64()).unwrap_or(0.0);
         let sample = StatsSample {
             at,
             cpu_percent: cpu,
@@ -203,12 +211,19 @@ pub fn downsample_lttb(points: &[(f64, f64)], max: usize) -> Vec<(f64, f64)> {
         let next_start = end;
         let next_end = (((i + 2) as f64 * bucket) as usize + 1).min(n);
         let next = &points[next_start..next_end.max(next_start + 1).min(n)];
-        let (ax, ay) = next.iter().fold((0.0, 0.0), |(sx, sy), p| (sx + p.0, sy + p.1));
+        let (ax, ay) = next
+            .iter()
+            .fold((0.0, 0.0), |(sx, sy), p| (sx + p.0, sy + p.1));
         let (avg_x, avg_y) = (ax / next.len() as f64, ay / next.len() as f64);
         let (px, py) = points[a];
         let mut best = start;
         let mut best_area = -1.0;
-        for (j, &(x, y)) in points.iter().enumerate().take(end.max(start + 1)).skip(start) {
+        for (j, &(x, y)) in points
+            .iter()
+            .enumerate()
+            .take(end.max(start + 1))
+            .skip(start)
+        {
             let area = ((px - avg_x) * (y - py) - (px - x) * (avg_y - py)).abs();
             if area > best_area {
                 best_area = area;
@@ -288,7 +303,10 @@ mod tests {
             "pids_stats": { "current": 3 }
         });
         let raw = RawStats::from_docker_json(&v).unwrap();
-        assert_eq!((raw.net_rx, raw.net_tx, raw.blk_read, raw.blk_write), (11, 22, 6, 7));
+        assert_eq!(
+            (raw.net_rx, raw.net_tx, raw.blk_read, raw.blk_write),
+            (11, 22, 6, 7)
+        );
         let s = StatsNormalizer::new().push(raw, OffsetDateTime::UNIX_EPOCH);
         assert!((s.cpu_percent - 40.0).abs() < 1e-9);
         assert_eq!(s.mem_used, 200);
@@ -339,13 +357,18 @@ mod tests {
             r.push(s);
         }
         assert_eq!(r.len(), 3);
-        assert_eq!(r.iter().next().unwrap().at, base.at + time::Duration::seconds(2));
+        assert_eq!(
+            r.iter().next().unwrap().at,
+            base.at + time::Duration::seconds(2)
+        );
         assert_eq!(r.since(base.at + time::Duration::seconds(4)).len(), 1);
     }
 
     #[test]
     fn sta_003_downsamples_to_300_points() {
-        let pts: Vec<(f64, f64)> = (0..3600).map(|i| (i as f64, (i as f64 * 0.1).sin())).collect();
+        let pts: Vec<(f64, f64)> = (0..3600)
+            .map(|i| (i as f64, (i as f64 * 0.1).sin()))
+            .collect();
         let d = downsample_lttb(&pts, 300);
         assert_eq!(d.len(), 300);
         assert_eq!(d[0], pts[0]);

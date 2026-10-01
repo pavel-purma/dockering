@@ -163,11 +163,23 @@ mod tests {
         let now = OffsetDateTime::UNIX_EPOCH + Duration::days(20_000);
         assert_eq!(format_relative(now, now), "just now");
         assert_eq!(format_relative(now + Duration::hours(1), now), "just now");
-        assert_eq!(format_relative(now - Duration::seconds(12), now), "12 seconds ago");
-        assert_eq!(format_relative(now - Duration::minutes(1), now), "1 minute ago");
-        assert_eq!(format_relative(now - Duration::hours(2), now), "2 hours ago");
+        assert_eq!(
+            format_relative(now - Duration::seconds(12), now),
+            "12 seconds ago"
+        );
+        assert_eq!(
+            format_relative(now - Duration::minutes(1), now),
+            "1 minute ago"
+        );
+        assert_eq!(
+            format_relative(now - Duration::hours(2), now),
+            "2 hours ago"
+        );
         assert_eq!(format_relative(now - Duration::days(3), now), "3 days ago");
-        assert_eq!(format_relative(now - Duration::days(400), now), "1 year ago");
+        assert_eq!(
+            format_relative(now - Duration::days(400), now),
+            "1 year ago"
+        );
     }
 
     #[test]
@@ -192,7 +204,10 @@ mod tests {
 
     #[test]
     fn img_001_split_repo_tag() {
-        assert_eq!(split_repo_tag("nginx:1.27"), ("nginx".into(), "1.27".into()));
+        assert_eq!(
+            split_repo_tag("nginx:1.27"),
+            ("nginx".into(), "1.27".into())
+        );
         assert_eq!(
             split_repo_tag("localhost:5000/app:dev"),
             ("localhost:5000/app".into(), "dev".into())
@@ -201,7 +216,10 @@ mod tests {
             split_repo_tag("localhost:5000/app"),
             ("localhost:5000/app".into(), "<none>".into())
         );
-        assert_eq!(split_repo_tag("<none>:<none>"), ("<none>".into(), "<none>".into()));
+        assert_eq!(
+            split_repo_tag("<none>:<none>"),
+            ("<none>".into(), "<none>".into())
+        );
         assert_eq!(format_percent(3.7), "3.7%");
         assert_eq!(format_percent(0.0), "0%");
     }
