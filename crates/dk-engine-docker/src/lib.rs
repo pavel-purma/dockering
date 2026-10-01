@@ -1,10 +1,14 @@
 //! dk-engine-docker: `Engine` over the Docker Engine API via bollard (spec 20 §3, 21 §6).
 //!
-//! PUBLIC API FIXED — implemented by `engine-integrator`.
+//! Public API fixed by the skeleton; no bollard types leak out of this crate.
 
+mod connect;
+mod containers;
 mod discovery;
 mod engine;
+mod errors;
 pub mod registry_auth;
+mod resources;
 
 use std::sync::Arc;
 

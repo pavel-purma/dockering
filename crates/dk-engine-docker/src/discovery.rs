@@ -36,7 +36,10 @@ impl EngineFactory for DockerFactory {
         Vec::new()
     }
     async fn connect(&self, cfg: &EngineConfig) -> EngineResult<Arc<dyn Engine>> {
-        Err(EngineError::unreachable(format!("Docker backend not implemented yet ({})", cfg.id)))
+        Err(EngineError::unreachable(format!(
+            "Docker backend not implemented yet ({})",
+            cfg.id
+        )))
     }
     fn config_schema(&self) -> Vec<EngineConfigSchema> {
         Vec::new()
