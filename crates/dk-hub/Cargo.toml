@@ -1,0 +1,37 @@
+[package]
+name = "dk-hub"
+description = "Dockering EngineHub: tokio runtime, registry, supervisor, discovery, stats service, config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-support = ["dk-core/test-support"]
+
+[dependencies]
+dk-core.workspace = true
+dk-engine-docker.workspace = true
+dk-engine-wslc.workspace = true
+dk-wsl.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+directories.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+dk-core = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
+
+[lints]
+workspace = true

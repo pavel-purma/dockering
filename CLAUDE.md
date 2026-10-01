@@ -36,7 +36,7 @@ cargo nextest run --workspace                  # all tests (or: cargo test --wor
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo xtask record-fixtures --engine <id>   # record engine fixtures (needs a live engine; xtask alias in .cargo/config.toml)
-pwsh scripts/dev.ps1 <cargo args>            # Windows: runs cargo inside the VS Build Tools environment
+pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS Build Tools environment
 ```
 
 ## Workflow

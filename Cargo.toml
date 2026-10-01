@@ -1,0 +1,75 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/*"]
+
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pavel-purma/dockering"
+publish = false
+
+[workspace.dependencies]
+# internal
+dk-core = { path = "crates/dk-core" }
+dk-hub = { path = "crates/dk-hub" }
+dk-engine-docker = { path = "crates/dk-engine-docker" }
+dk-engine-wslc = { path = "crates/dk-engine-wslc" }
+dk-wsl = { path = "crates/dk-wsl" }
+dk-terminal = { path = "crates/dk-terminal" }
+
+# UI (only dockering + dk-terminal, ADR-0001)
+gpui-kit = { version = "=0.7.0" }
+
+# engine I/O (only dk-hub + engine crates)
+bollard = { version = "0.21.1", features = ["ssl", "pipe", "http"] }
+tokio = { version = "1.50", features = ["rt-multi-thread", "process", "net", "io-util", "time", "sync", "macros"] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
+
+# shared
+futures = "0.3.32"
+bytes = { version = "1.11", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8.23"
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1.89"
+bitflags = { version = "2.13", features = ["serde"] }
+time = { version = "0.3.47", features = ["serde", "serde-well-known", "formatting", "parsing", "macros"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+directories = "6"
+rand = "0.9"
+alacritty_terminal = "0.26.0"
+portable-pty = "0.9.0"
+windows = "0.61.3"
+windows-sys = "0.59"
+
+# dev
+proptest = "1.10"
+insta = { version = "1", features = ["json"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"

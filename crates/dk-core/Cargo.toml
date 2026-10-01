@@ -1,0 +1,30 @@
+[package]
+name = "dk-core"
+description = "Dockering domain: DTOs, Engine trait, capabilities, errors, grouping and stats math"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Enables `FakeEngine` and the contract suite for other crates' tests.
+test-support = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+time.workspace = true
+bitflags.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+futures = { workspace = true, features = ["executor"] }
+
+[lints]
+workspace = true

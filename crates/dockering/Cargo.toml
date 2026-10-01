@@ -1,0 +1,42 @@
+[package]
+name = "dockering"
+description = "Dockering desktop app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dockering"
+path = "src/main.rs"
+
+[dependencies]
+dk-core.workspace = true
+dk-hub.workspace = true
+dk-terminal.workspace = true
+gpui-kit.workspace = true
+futures.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Com", "Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+dk-core = { workspace = true, features = ["test-support"] }
+dk-hub = { workspace = true, features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints.rust]
+# Only `src/platform/windows.rs` (WSAStartup + CoInitializeSecurity before GPUI, spec 10 §7).
+unsafe_code = "allow"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"

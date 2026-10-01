@@ -1,0 +1,20 @@
+[package]
+name = "dk-terminal"
+description = "Dockering terminal: alacritty_terminal model + GPUI TerminalView element"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+alacritty_terminal.workspace = true
+futures.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+[package]
+name = "dk-engine-docker"
+description = "Dockering engine backend for the Docker Engine API (bollard)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Integration tests against a real dockerd (CI `integration-docker`).
+it = []
+
+[dependencies]
+dk-core.workspace = true
+bollard.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+dk-core = { workspace = true, features = ["test-support"] }
+insta.workspace = true
+
+[lints]
+workspace = true

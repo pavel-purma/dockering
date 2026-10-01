@@ -1,0 +1,39 @@
+[package]
+name = "dk-engine-wslc"
+description = "Dockering engine backend for WSL containers (native COM + wslc.exe CLI fallback)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+dk-core.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Rpc", "Win32_Security", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Networking_WinSock", "Win32_System_Registry", "Win32_System_Diagnostics_Debug"] }
+windows-core = "0.61"
+portable-pty.workspace = true
+
+[dev-dependencies]
+dk-core = { workspace = true, features = ["test-support"] }
+insta.workspace = true
+
+[lints.rust]
+# COM FFI is confined to src/com/ (ADR-0003); everything else is `#![deny(unsafe_code)]` per module.
+unsafe_code = "allow"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
