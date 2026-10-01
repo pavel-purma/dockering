@@ -13,7 +13,16 @@ all-features = true
 
 [advisories]
 # RustSec advisories are checked on every CI run (`cargo deny check`).
-ignore = []
+# Vulnerabilities always fail. The ignores below are *unmaintained* notices for
+# crates we only get transitively through the exactly pinned `gpui-kit` 0.7 and
+# cannot replace ourselves. Re-check them on every gpui-kit upgrade PR; cargo-deny
+# warns (advisory-not-detected) once an ignore becomes stale so it can be removed.
+ignore = [
+  { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, transitive via gpui-base (gpui-kit 0.7)" },
+  { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained proc-macro, transitive via gpui-component and metal (gpui-kit 0.7)" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained, transitive via fontdb/usvg/cosmic-text (gpui-kit 0.7)" },
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: unmaintained, transitive via usvg/resvg (gpui-kit 0.7)" },
+]
 
 [licenses]
 confidence-threshold = 0.93
@@ -30,11 +39,13 @@ allow = [
   "CC0-1.0",
 ]
 # Keep non-project-wide allowances narrow and document why each crate needs it.
+# Only permissive licences may appear here; GPL/AGPL/LGPL must never be excepted.
 exceptions = [
-  # unicode-ident retains this legacy Unicode data-files license alongside MIT/Apache.
-  { crate = "unicode-ident", allow = ["Unicode-DFS-2016"] },
-  # ring includes portions under the OpenSSL license; do not allow it globally.
-  { crate = "ring", allow = ["OpenSSL"] },
+  # 0BSD is a public-domain-equivalent permissive licence; transitive via gpui-component (gpui-kit 0.7).
+  { crate = "enum-iterator", allow = ["0BSD"] },
+  { crate = "enum-iterator-derive", allow = ["0BSD"] },
+  # Permissive BSD-style bzip2 licence; pure-Rust libbzip2 port, transitive via gpui's http client (async-compression).
+  { crate = "libbz2-rs-sys", allow = ["bzip2-1.0.6"] },
 ]
 
 [licenses.private]
