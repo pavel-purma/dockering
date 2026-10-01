@@ -66,7 +66,10 @@ pub fn validate_image_ref(s: &str) -> EngineResult<()> {
     // Tag: after the last ':' that follows the last '/'.
     let last_slash = name_tag.rfind('/').map_or(0, |i| i + 1);
     let (name, tag) = match name_tag[last_slash..].rfind(':') {
-        Some(i) => (&name_tag[..last_slash + i], Some(&name_tag[last_slash + i + 1..])),
+        Some(i) => (
+            &name_tag[..last_slash + i],
+            Some(&name_tag[last_slash + i + 1..]),
+        ),
         None => (name_tag, None),
     };
     if let Some(tag) = tag {
@@ -85,7 +88,9 @@ pub fn validate_image_ref(s: &str) -> EngineResult<()> {
         if comp.is_empty() {
             return Err(err());
         }
-        let is_registry = i == 0 && name.contains('/') && (comp.contains('.') || comp.contains(':') || comp == "localhost");
+        let is_registry = i == 0
+            && name.contains('/')
+            && (comp.contains('.') || comp.contains(':') || comp == "localhost");
         let ok = if is_registry {
             comp.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
@@ -107,9 +112,14 @@ pub fn validate_signal(s: &str) -> EngineResult<()> {
     let ok = !s.is_empty()
         && s.len() <= 16
         && (s.bytes().all(|b| b.is_ascii_digit())
-            || s.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'+' || b == b'-')
+            || s.bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'+' || b == b'-')
                 && s.starts_with(|c: char| c.is_ascii_uppercase()));
-    if ok { Ok(()) } else { Err(invalid("signal", s)) }
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid("signal", s))
+    }
 }
 
 /// Env/label key: non-empty, no `=`, no whitespace/control chars, not starting with `-`.
@@ -117,7 +127,9 @@ pub fn validate_env_key(s: &str) -> EngineResult<()> {
     let ok = !s.is_empty()
         && !s.starts_with('-')
         && s.len() <= 1024
-        && !s.chars().any(|c| c == '=' || c.is_whitespace() || c.is_control());
+        && !s
+            .chars()
+            .any(|c| c == '=' || c.is_whitespace() || c.is_control());
     if ok { Ok(()) } else { Err(invalid("key", s)) }
 }
 
@@ -159,7 +171,17 @@ mod tests {
         ] {
             assert!(validate_image_ref(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "-it", "--rm", "Nginx", "nginx:", "a//b", "nginx:la test", "nginx;ls", "a@sha256:zz"] {
+        for bad in [
+            "",
+            "-it",
+            "--rm",
+            "Nginx",
+            "nginx:",
+            "a//b",
+            "nginx:la test",
+            "nginx;ls",
+            "a@sha256:zz",
+        ] {
             assert!(validate_image_ref(bad).is_err(), "{bad}");
         }
     }
