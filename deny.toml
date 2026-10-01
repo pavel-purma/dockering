@@ -12,6 +12,7 @@ targets = [
 all-features = true
 
 [advisories]
+# RustSec advisories are checked on every CI run (`cargo deny check`).
 ignore = []
 
 [licenses]
@@ -42,6 +43,8 @@ ignore = false
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace-internal `{ path = ... }` deps are unpublished (publish = false).
+allow-wildcard-paths = true
 highlight = "all"
 deny = [
   { crate = "terminal", reason = "Zed terminal code is GPL; Dockering uses alacritty_terminal." },
