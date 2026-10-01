@@ -1,0 +1,3 @@
+The requested operation requires elevation. 
+Error code: ERROR_ELEVATION_REQUIRED
+If this error was unexpected, please consider searching for existing issues or filing a new issue at https://github.com/microsoft/WSL/issues.

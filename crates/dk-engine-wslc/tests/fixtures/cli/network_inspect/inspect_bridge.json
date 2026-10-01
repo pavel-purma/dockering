@@ -1,0 +1,54 @@
+[
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Containers": {
+      "2e4fac8842183f22f337722c3648e5fd5cd5012ae01ea7651948b59f70f87365": {
+        "EndpointID": "5468bd9caa624acdb681942664e1a3c77d451767ba5fe20f85a313e72fd7a674",
+        "IPv4Address": "172.17.0.2/16",
+        "IPv6Address": "",
+        "MacAddress": "02:42:ac:11:00:02",
+        "Name": "dk-fixture-nginx"
+      },
+      "da29ef747f137b8bc4968d9cfa185c35b9c6130ec12c456e8b94bb4b966e483d": {
+        "EndpointID": "4af0a72452210a7402ed124faa93bd1c29123381b3db699c016cd3bf5c0e255b",
+        "IPv4Address": "172.17.0.3/16",
+        "IPv6Address": "",
+        "MacAddress": "02:42:ac:11:00:03",
+        "Name": "dk-cli-fixture"
+      }
+    },
+    "Created": "2026-10-01T23:09:11.462461977Z",
+    "Driver": "bridge",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "172.17.0.1",
+          "Subnet": "172.17.0.0/16"
+        }
+      ],
+      "Driver": "default",
+      "Options": {}
+    },
+    "Id": "525a2c76c8c1ff628898ac0798cedd939e7dca1380fa3613000b4f58fd845722",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {},
+    "Name": "bridge",
+    "Options": {
+      "com.docker.network.bridge.default_bridge": "true",
+      "com.docker.network.bridge.enable_icc": "true",
+      "com.docker.network.bridge.enable_ip_masquerade": "true",
+      "com.docker.network.bridge.host_binding_ipv4": "0.0.0.0",
+      "com.docker.network.bridge.name": "docker0",
+      "com.docker.network.driver.mtu": "1500"
+    },
+    "Scope": "local",
+    "Status": {}
+  }
+]

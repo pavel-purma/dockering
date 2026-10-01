@@ -1,6 +1,8 @@
 //! `wslc.exe` CLI fallback transport (spec 20 §5.5). Owner: `engine-integrator`.
 //! PUBLIC (crate) API FIXED — the factory (owned by `windows-platform`) calls these.
 
+pub(crate) mod runner;
+
 use dk_core::{EngineId, EngineResult};
 
 /// `Engine` implementation over `wslc.exe`.
@@ -19,7 +21,9 @@ impl WslcCliEngine {
         transport_note: Option<String>,
     ) -> EngineResult<WslcCliEngine> {
         let _ = (id, session, wsl_version, transport_note);
-        Err(dk_core::EngineError::unreachable("WSLC CLI transport not implemented yet"))
+        Err(dk_core::EngineError::unreachable(
+            "WSLC CLI transport not implemented yet",
+        ))
     }
 }
 

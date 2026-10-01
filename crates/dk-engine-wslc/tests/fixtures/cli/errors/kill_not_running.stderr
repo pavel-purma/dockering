@@ -1,0 +1,3 @@
+Container 'fef09dc225f2bb1b624850c3cd6d95eb0e10aa314730cc9a084e3bdf84968eb2' is not running.
+Error code: WSLC_E_CONTAINER_NOT_RUNNING
+If this error was unexpected, please consider searching for existing issues or filing a new issue at https://github.com/microsoft/WSL/issues.

@@ -1,0 +1,13 @@
+[
+  {
+    "CreatedAt": "2026-10-01T23:15:51Z",
+    "Driver": "guest",
+    "Labels": {
+      "com.example.fixture": "dk-cli"
+    },
+    "Mountpoint": "/var/lib/docker/volumes/dk-cli-vol/_data",
+    "Name": "dk-cli-vol",
+    "Options": null,
+    "Scope": "local"
+  }
+]

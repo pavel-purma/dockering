@@ -1,0 +1,70 @@
+[
+  {
+    "Config": {
+      "Cmd": [
+        "sh",
+        "-c",
+        "echo out-line; echo err-line >&2; exit 3"
+      ],
+      "Entrypoint": [
+        "/docker-entrypoint.sh"
+      ],
+      "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "NGINX_VERSION=1.31.6",
+        "PKG_RELEASE=1",
+        "DYNPKG_RELEASE=1",
+        "NJS_VERSION=1.0.1",
+        "NJS_RELEASE=1",
+        "ACME_VERSION=0.4.1"
+      ],
+      "Healthcheck": null,
+      "Image": "nginx:alpine",
+      "Labels": {
+        "com.example.fixture": "dk-cli",
+        "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+      },
+      "StopTimeout": null,
+      "User": "",
+      "WorkingDir": "/"
+    },
+    "Created": "2026-10-01T23:27:43.092902515Z",
+    "HostConfig": {
+      "Memory": 0,
+      "NanoCpus": 0,
+      "NetworkMode": "bridge",
+      "Ulimits": []
+    },
+    "Id": "e2bdd5746101d366e60c0f19d4a5703d2a0898176ff47ce044ea626dd3534ada",
+    "Image": "sha256:3dd08163706a20b20622f310ec10258cc96e9007ab357f7201955bc880ac17f4",
+    "Labels": {
+      "com.example.fixture": "dk-cli",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "Mounts": [],
+    "Name": "/dk-cli-exited",
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "Aliases": [],
+          "DriverOpts": {},
+          "Gateway": "",
+          "IPAMConfig": null,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "Links": [],
+          "MacAddress": ""
+        }
+      }
+    },
+    "Ports": {},
+    "State": {
+      "ExitCode": 3,
+      "FinishedAt": "2026-10-01T23:27:43.277615748Z",
+      "Health": null,
+      "Running": false,
+      "StartedAt": "2026-10-01T23:27:43.276319625Z",
+      "Status": "exited"
+    }
+  }
+]

@@ -1,0 +1,3 @@
+Volume 'dk-cli-vol' is in use.
+Error code: ERROR_SHARING_VIOLATION
+If this error was unexpected, please consider searching for existing issues or filing a new issue at https://github.com/microsoft/WSL/issues.

@@ -1,0 +1,63 @@
+[
+  {
+    "Architecture": "amd64",
+    "Author": "",
+    "Comment": "buildkit.dockerfile.v0",
+    "Config": {
+      "Cmd": [
+        "nginx",
+        "-g",
+        "daemon off;"
+      ],
+      "Entrypoint": [
+        "/docker-entrypoint.sh"
+      ],
+      "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "NGINX_VERSION=1.31.6",
+        "PKG_RELEASE=1",
+        "DYNPKG_RELEASE=1",
+        "NJS_VERSION=1.0.1",
+        "NJS_RELEASE=1",
+        "ACME_VERSION=0.4.1"
+      ],
+      "ExposedPorts": {
+        "80/tcp": {}
+      },
+      "Labels": {
+        "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+      },
+      "StopSignal": "SIGQUIT",
+      "User": "",
+      "Volumes": null,
+      "WorkingDir": "/"
+    },
+    "Created": "2026-09-22T22:10:17.223416567Z",
+    "Id": "sha256:3dd08163706a20b20622f310ec10258cc96e9007ab357f7201955bc880ac17f4",
+    "Metadata": {
+      "LastTagTime": "0001-01-01T00:00:00Z"
+    },
+    "Os": "linux",
+    "Parent": "",
+    "RepoDigests": [
+      "nginx@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2"
+    ],
+    "RepoTags": [
+      "nginx:alpine"
+    ],
+    "RootFS": {
+      "Layers": [
+        "sha256:74d97c428c51a828f9051a7a40a53ff1fc99e54fc30323ce36760701b0b7f711",
+        "sha256:379f51bf5b58bf458dfe39fe97ba49d63950929004af1808361bfe01ba73d6d0",
+        "sha256:641b74319bab4250ece7d99c1e71fba36e67931d64b62a1d574a56986d45dae0",
+        "sha256:2a7ed9afc1c38e245bbe331a4bbf99010cc9ff2ae546ee9507373a3a2dc80f0c",
+        "sha256:149ab1e5d6caa8add417a7dc26743baa867bf078b3c6aafc96b8197221a87a1c",
+        "sha256:41473198c04ae23f0434ac3a73f8e52549312be4638d2979bc1df9d209bdb9c0",
+        "sha256:c86f6810da0b81ee848c1e6cc4bc22c0b7bd4f553f81ef3a33c41791b90631a2",
+        "sha256:001b5608a9297e16ed0253a4694ca1cc98fa554c7e39c36ca652742cfc294efc"
+      ],
+      "Type": "layers"
+    },
+    "Size": 62941990
+  }
+]
