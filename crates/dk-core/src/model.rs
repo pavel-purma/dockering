@@ -346,7 +346,15 @@ pub struct EngineInfo {
     /// Daemon identity (`/info.ID`) for de-duplication (ENG-009).
     #[serde(default)]
     pub daemon_id: Option<String>,
+    /// STA-006: max concurrent stats streams for list CPU/memory columns on this engine
+    /// (Docker/WSLC-COM 20, WSL-distro bridge 8, WSLC-CLI 0 = columns hidden).
+    #[serde(default = "default_list_stats_limit")]
+    pub list_stats_limit: u32,
     pub capabilities: Capabilities,
+}
+
+fn default_list_stats_limit() -> u32 {
+    20
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

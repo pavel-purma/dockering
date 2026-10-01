@@ -295,6 +295,7 @@ impl Engine for FakeEngine {
             storage_driver: Some("overlay2".into()),
             root_dir: Some("/var/lib/docker".into()),
             daemon_id: Some(format!("FAKE-{}", self.id)),
+            list_stats_limit: 20,
             capabilities: st.caps,
         })
     }
