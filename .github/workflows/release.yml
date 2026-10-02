@@ -157,7 +157,7 @@ jobs:
           name: release-${{ matrix.target }}
           path: |
             target/dist/${{ matrix.target }}/*.*
-            !target/dist/${{ matrix.target }}/.cargo-packager
+            !target/dist/${{ matrix.target }}/.cargo-packager/**
           if-no-files-found: error
 
   publish:
