@@ -5,6 +5,10 @@
 //! `connect` fails with `Unreachable("WSL is only available on Windows")`, and the crate still
 //! builds. All `unsafe` lives in `win32` (Windows only).
 
+// The parsers/classifiers are platform-neutral (and unit-tested everywhere) but only called from
+// the Windows code paths.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 mod bridge;
 mod discovery;
 mod factory;
