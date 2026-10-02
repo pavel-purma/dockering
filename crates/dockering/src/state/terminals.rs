@@ -20,6 +20,8 @@ type Key = (EngineId, String);
 pub trait ParkedSessions: 'static {
     /// Close every session (TermCmd::Close) and drop the UI side.
     fn close(&mut self, cx: &mut App);
+    /// For re-attaching: the concrete sessions type.
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any>;
 }
 
 struct Parked {

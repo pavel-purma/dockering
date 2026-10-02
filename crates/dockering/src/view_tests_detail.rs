@@ -24,7 +24,12 @@ pub fn open_detail(
     name: &str,
     tab: ContainerTab,
 ) -> Entity<ContainerDetailPage> {
-    h.wait_containers(cx);
+    h.wait_until(cx, "containers loaded", |_, cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .is_some_and(|s| s.read(cx).containers.data().is_some_and(|d| !d.is_empty()))
+    });
     let id = id_of(name);
     h.update(cx, |_, window, cx| {
         window.dispatch_action(
@@ -764,5 +769,344 @@ fn log_006_exit_footer_then_resume_on_start(cx: &mut TestAppContext) {
     wait_lines(&h, cx, &logs, 2);
     assert_eq!(texts(&logs, cx), vec!["before stop", "after start"]);
     assert!(cx.read(|cx| logs.read(cx).exit_footer(cx)).is_none());
+    h.shutdown();
+}
+
+// ── Terminal (TRM-001…012, KBD-060…063) ───────────────────────────────────────────────────
+
+use crate::pages::container_detail::terminal::TerminalTab;
+
+fn terminal_tab(
+    page: &Entity<ContainerDetailPage>,
+    cx: &mut TestAppContext,
+) -> Entity<TerminalTab> {
+    cx.read(|cx| page.read(cx).tabs().terminal.clone())
+        .expect("terminal tab entity")
+}
+
+fn wait_sessions(h: &Harness, cx: &mut TestAppContext, tab: &Entity<TerminalTab>, n: usize) {
+    h.wait_until(cx, "terminal sessions connected", |_, cx| {
+        let t = tab.read(cx);
+        t.sessions().len() == n && t.sessions().iter().all(|s| s.hub_id.is_some())
+    });
+}
+
+fn grid(tab: &Entity<TerminalTab>, cx: &mut TestAppContext) -> String {
+    cx.read(|cx| {
+        tab.read(cx)
+            .active_view()
+            .map(|v| v.read(cx).grid_text())
+            .unwrap_or_default()
+    })
+}
+
+fn leave_terminal(h: &Harness, cx: &mut TestAppContext) {
+    h.draw(cx);
+    let leave = if cfg!(target_os = "macos") {
+        "cmd-shift-f6"
+    } else {
+        "ctrl-shift-f6"
+    };
+    h.press(cx, leave);
+}
+
+fn terminal_focused(h: &Harness, tab: &Entity<TerminalTab>, cx: &mut TestAppContext) -> bool {
+    cx.update_window(h.any_window(), |_, window, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| gpui_kit::Focusable::focus_handle(v.read(cx), cx).is_focused(window))
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn trm_001_not_running_shows_start(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "scratchpad", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    h.draw(cx);
+    assert!(cx.read(|cx| tab.read(cx).sessions().is_empty()));
+    assert_eq!(h.engine.exec_count(), 0, "no exec on a stopped container");
+    // Start (from the header / the tab's Start button) → a session opens.
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "s");
+    wait_sessions(&h, cx, &tab, 1);
+    assert_eq!(h.engine.exec_count(), 1);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_001_opens_session_and_typing_echoes(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    h.wait_until(cx, "prompt", |_, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| v.read(cx).grid_text().contains("fake$"))
+    });
+    h.wait_until(cx, "terminal focused", |window, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| gpui_kit::Focusable::focus_handle(v.read(cx), cx).is_focused(window))
+    });
+    // The loopback FakeTerminal echoes input (TRM-001/003).
+    h.type_text(cx, "echo hi");
+    h.wait_until(cx, "echo", |_, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| v.read(cx).grid_text().contains("echo hi"))
+    });
+    // KBD-060: Tab and single letters go to the shell, not the app.
+    h.engine.clear_calls();
+    h.type_text(cx, "s");
+    h.press(cx, "tab");
+    h.draw(cx);
+    assert!(
+        h.engine.calls_to("stop").is_empty(),
+        "S typed into the shell"
+    );
+    assert!(terminal_focused(&h, &tab, cx), "Tab stays in the terminal");
+    assert!(grid(&tab, cx).contains("echo his"));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_061_leave_terminal_focuses_tab_bar(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    h.wait_until(cx, "terminal focused", |window, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| gpui_kit::Focusable::focus_handle(v.read(cx), cx).is_focused(window))
+    });
+    let leave = if cfg!(target_os = "macos") {
+        "cmd-shift-f6"
+    } else {
+        "ctrl-shift-f6"
+    };
+    h.press(cx, leave);
+    let bar = cx.read(|cx| page.read(cx).tab_bar_focus().clone());
+    assert!(h.is_focused(cx, &bar), "Mod+Shift+F6 → detail tab bar");
+    // Ctrl+Tab from the terminal switches detail tabs (KBD-061).
+    let v = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
+    let f = cx.read(|cx| gpui_kit::Focusable::focus_handle(v.read(cx), cx));
+    h.focus(cx, &f);
+    h.press(cx, "ctrl-tab");
+    assert_eq!(cx.read(|cx| page.read(cx).tab()), ContainerTab::Stats);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_007_sub_tabs_new_switch_close(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    h.wait_until(cx, "terminal focused", |_, cx| {
+        tab.read(cx).active_view().is_some()
+    });
+    h.draw(cx);
+    let mod_shift = if cfg!(target_os = "macos") {
+        "cmd-shift"
+    } else {
+        "ctrl-shift"
+    };
+    h.press(cx, &format!("{mod_shift}-t"));
+    wait_sessions(&h, cx, &tab, 2);
+    assert_eq!(cx.read(|cx| tab.read(cx).active()), 1);
+    assert_eq!(h.engine.exec_count(), 2);
+    h.draw(cx);
+    h.press(cx, "ctrl-pageup");
+    assert_eq!(cx.read(|cx| tab.read(cx).active()), 0);
+    h.draw(cx);
+    h.press(cx, "ctrl-pagedown");
+    assert_eq!(cx.read(|cx| tab.read(cx).active()), 1);
+    h.draw(cx);
+    h.press(cx, &format!("{mod_shift}-w"));
+    h.wait_until(cx, "one session", |_, cx| {
+        tab.read(cx).sessions().len() == 1
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_006_exit_then_reconnect_in_same_sub_tab(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    h.wait_until(cx, "focused", |window, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| gpui_kit::Focusable::focus_handle(v.read(cx), cx).is_focused(window))
+    });
+    // `exit` ends the FakeTerminal (exit code 0); it must arrive as one write.
+    let v = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
+    v.update(cx, |v, cx| {
+        v.paste_text(
+            "exit
+", cx,
+        )
+    });
+    h.wait_until(cx, "exited", |_, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| v.read(cx).is_exited())
+    });
+    assert!(grid(&tab, cx).contains("[process exited with code 0]"));
+    h.press(cx, "enter");
+    h.wait_until(cx, "reconnected", |_, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| !v.read(cx).is_exited() && v.read(cx).grid_text().contains("fake$"))
+    });
+    assert_eq!(
+        cx.read(|cx| tab.read(cx).sessions().len()),
+        1,
+        "same sub-tab"
+    );
+    assert_eq!(h.engine.exec_count(), 2);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_004_shell_and_user_in_exec_request(cx: &mut TestAppContext) {
+    use crate::pages::container_detail::terminal::Shell;
+    let mut config = dk_hub::Config::default();
+    config.terminal.default_shell = "bash".into();
+    let h = start(
+        cx,
+        Setup {
+            config,
+            ..Default::default()
+        },
+    );
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    let shell = cx.read(|cx| tab.read(cx).sessions()[0].shell);
+    assert_eq!(shell, Shell::Bash, "default shell from config (TRM-004)");
+    tab.update(cx, |t, _| t.set_shell(Shell::Sh));
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::term_ext::Reconnect), cx)
+    });
+    h.wait_until(cx, "reconnected", |_, _| h.engine.exec_count() == 2);
+    let shell = cx.read(|cx| tab.read(cx).sessions()[0].shell);
+    assert_eq!(shell, Shell::Sh);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_008_session_survives_navigation(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    let hub_id = cx.read(|cx| tab.read(cx).sessions()[0].hub_id);
+    let view = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
+    // Leave to another page of the same engine (Ctrl+2 inside the terminal goes to the
+    // shell, KBD-062, so leave it first)…
+    leave_terminal(&h, cx);
+    // Our test handles would keep the page alive; the shell's is the only owner.
+    drop((page, tab));
+    h.press(cx, "ctrl-2");
+    h.wait_until(cx, "images page", |_, cx| {
+        *h.shell.read(cx).route() == Route::Images
+    });
+    h.wait_until(cx, "parked", |_, cx| {
+        crate::state::TerminalRegistry::parked_count(cx) == 1
+    });
+    // …and come back: the same session and view are re-attached, no new exec.
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    h.draw(cx);
+    let (again, view2) = cx.read(|cx| {
+        let t = tab.read(cx);
+        (
+            t.sessions().first().and_then(|s| s.hub_id),
+            t.active_view().cloned(),
+        )
+    });
+    assert_eq!(again, hub_id);
+    assert_eq!(view2, Some(view));
+    assert_eq!(h.engine.exec_count(), 1);
+    assert_eq!(cx.read(crate::state::TerminalRegistry::parked_count), 0);
+    // The session is still live: typing echoes.
+    h.wait_until(cx, "focused", |window, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| gpui_kit::Focusable::focus_handle(v.read(cx), cx).is_focused(window))
+    });
+    h.type_text(cx, "again");
+    h.wait_until(cx, "echo", |_, cx| {
+        tab.read(cx)
+            .active_view()
+            .is_some_and(|v| v.read(cx).grid_text().contains("again"))
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_008_closed_on_engine_switch(cx: &mut TestAppContext) {
+    let other = dk_core::fake::FakeEngine::new("other");
+    let h = start(
+        cx,
+        Setup {
+            extra_engines: vec![other],
+            ..Default::default()
+        },
+    );
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    let view = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
+    leave_terminal(&h, cx);
+    drop((page, tab));
+    h.press(cx, "ctrl-1");
+    h.wait_until(cx, "parked", |_, cx| {
+        crate::state::TerminalRegistry::parked_count(cx) == 1
+    });
+    let target: gpui_kit::SharedString = "other".into();
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::SwitchEngine { id: target }), cx)
+    });
+    h.wait_until(cx, "switched", |_, cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .is_some_and(|s| s.read(cx).engine_id().as_str() == "other")
+    });
+    assert_eq!(
+        cx.read(crate::state::TerminalRegistry::parked_count),
+        0,
+        "TRM-008: engine switch closes sessions"
+    );
+    // The hub-side actor was told to close: the view saw the exit.
+    h.wait_until(cx, "session ended", |_, cx| view.read(cx).is_exited());
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn trm_008_closed_on_container_removal(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Terminal);
+    let tab = terminal_tab(&page, cx);
+    wait_sessions(&h, cx, &tab, 1);
+    let view = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
+    h.wait_until(cx, "events", |_, _| h.engine.open_streams().0 > 0);
+    let id = id_of("redis");
+    let mut cs = crate::demo::containers();
+    cs.retain(|c| c.id != id);
+    h.engine.set_containers(cs);
+    h.engine.emit_event(dk_core::fake::fixtures::event(
+        ResourceKind::Container,
+        "destroy",
+        &id,
+    ));
+    h.wait_until(cx, "read-only", |_, cx| view.read(cx).is_read_only());
     h.shutdown();
 }

@@ -277,6 +277,9 @@ impl ContainerDetailPage {
         self.go_tab(next, window, cx);
         if bar_focused {
             window.focus(&self.tab_bar_focus, cx);
+            if let Some(t) = &self.tabs.terminal {
+                t.update(cx, |t, _| t.keep_tab_bar_focus());
+            }
         }
     }
 
