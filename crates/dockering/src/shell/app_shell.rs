@@ -109,6 +109,8 @@ pub struct AppShell {
     restore_focus: Option<FocusHandle>,
     /// Focus the page's primary control after the next render (navigation, KBD-007).
     focus_page_pending: Rc<Cell<bool>>,
+    /// Focus at the previous render (see `ensure_focus_rendered`).
+    last_focus: Option<FocusHandle>,
     action_task: Option<Task<()>>,
     store_subs: Vec<Subscription>,
     _subs: Vec<Subscription>,
@@ -205,6 +207,7 @@ impl AppShell {
             overflow_menu: None,
             restore_focus: None,
             focus_page_pending: Rc::new(Cell::new(true)),
+            last_focus: None,
             action_task: None,
             store_subs: Vec::new(),
             _subs: subs,
@@ -281,7 +284,18 @@ impl AppShell {
                 store.update(cx, |s, cx| s.set_connected(connected, cx));
             }
             // Pages appear/disappear with connection state (SHL-013).
+            let had_page = !matches!(self.page, ShellPage::None);
             self.mount_page(window, cx);
+            if !had_page && !matches!(self.page, ShellPage::None) {
+                // The page just appeared (first connect, reconnect): give it focus unless the
+                // user is elsewhere (KBD-007).
+                let elsewhere = window.focused(cx).is_some_and(|f| {
+                    !self.content_focus.contains(&f, window) && f != self.root_focus
+                });
+                if !elsewhere {
+                    self.focus_page_pending.set(true);
+                }
+            }
         }
     }
 
@@ -431,8 +445,12 @@ impl AppShell {
         }
         // Keep the same page entity when the route didn't change kind (tab switches etc.).
         self.page = match (&route, &self.page) {
+            // Same store: keep the page (search, selection, scroll survive reconnects).
             (Route::Containers, ShellPage::Containers(p))
-                if Some(p.read(cx).table().entity_id()).is_some() =>
+                if self
+                    .store
+                    .as_ref()
+                    .is_some_and(|s| p.read(cx).store_entity().entity_id() == s.entity_id()) =>
             {
                 ShellPage::Containers(p.clone())
             }
@@ -476,6 +494,31 @@ impl AppShell {
         match self.page.primary_focus(cx) {
             Some(h) => window.focus(&h, cx),
             None => window.focus(&self.content_focus, cx),
+        }
+    }
+
+    /// After a render: if focus points at an element that isn't in the frame (e.g. the table
+    /// was replaced by an error panel), move it to the content region so keys and actions
+    /// still reach the shell and page (KBD-007: no focus loss).
+    fn ensure_focus_rendered(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(f) = window.focused(cx) else {
+            return;
+        };
+        // Only judge a handle that was already focused when the last frame was drawn; a
+        // handle focused since then (a popup or input opening) has no node yet.
+        let seen = self.last_focus.replace(f.clone());
+        if seen.as_ref() != Some(&f) {
+            return;
+        }
+        // `context_stack` is empty only when the focused handle has no node in the rendered
+        // frame (deferred popups and dialogs still have one).
+        if window.context_stack().is_empty()
+            && self.overlay() == Overlay::None
+            && !window.has_active_dialog(cx)
+            && self.root_focus.contains(&self.content_focus, window)
+            && !self.root_focus.contains(&f, window)
+        {
+            window.focus(&self.content_focus, cx);
         }
     }
 
@@ -811,6 +854,19 @@ impl AppShell {
         list.update(cx, |l, cx| l.focus_filter(window, cx));
         self.shortcuts = Some(list);
         cx.notify();
+    }
+
+    fn on_run_command(
+        &mut self,
+        a: &palette::RunCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_overlays(window, cx);
+        let action = a.action.0.boxed_clone();
+        // Dispatch from the restored focus on the next effect cycle (window.dispatch_action
+        // defers and resolves the focused element then).
+        window.dispatch_action(action, cx);
     }
 
     fn on_palette_dismiss(
@@ -1233,11 +1289,21 @@ impl AppShell {
                 has_engine: self.store.is_some() && self.connected(cx),
                 on_containers: matches!(self.page, ShellPage::Containers(_)),
             };
-            let el =
-                palette::element(state, ctx, self.store.as_ref(), window, cx).into_any_element();
-            let state = state.clone();
-            let confirm_target = cx.entity().downgrade();
-            let _ = (state, confirm_target);
+            let shell = cx.entity().downgrade();
+            let el = palette::element(state, ctx, self.store.as_ref(), window, cx)
+                // The item's action was dispatched; close (and restore focus unless the
+                // action moved it, e.g. navigation).
+                .on_confirm(move |_, window, cx| {
+                    // Navigation entries ("Go to …") already ran; close if still open.
+                    shell
+                        .update(cx, |this, cx| {
+                            if this.palette.is_some() {
+                                this.close_overlays(window, cx);
+                            }
+                        })
+                        .ok();
+                })
+                .into_any_element();
             return Some(panel(el, 560., cx));
         }
         if let Some(list) = &self.shortcuts {
@@ -1272,6 +1338,8 @@ impl Render for AppShell {
             // Focus the new page's primary control (KBD-007). Handles are valid before their
             // element renders; the key dispatch path is resolved on the next frame.
             self.focus_page(window, cx);
+        } else {
+            self.ensure_focus_rendered(window, cx);
         }
         let title = self.render_title_bar(window, cx);
         let sidebar = self.render_sidebar(window, cx);
@@ -1346,6 +1414,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_shortcuts))
             .on_action(cx.listener(Self::on_palette_dismiss))
+            .on_action(cx.listener(Self::on_run_command))
             .on_action(cx.listener(Self::on_escape_root))
             .on_action(cx.listener(Self::on_list_escape))
             .on_action(cx.listener(|_, _: &list::GroupBy, _, _| {}))

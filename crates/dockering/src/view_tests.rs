@@ -771,3 +771,40 @@ fn con_030_engine_event_triggers_refetch(cx: &mut TestAppContext) {
     });
     h.shutdown();
 }
+
+#[gpui_kit::test]
+fn kbd_020_palette_closes_after_non_navigation_command(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    h.focus_table(cx);
+    let collapsed = cx.read(|cx| {
+        !page
+            .read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .is_expanded("compose:myshop")
+    });
+    assert!(collapsed);
+    h.press(cx, "ctrl-shift-p");
+    h.type_text(cx, "Expand all groups");
+    h.press(cx, "enter");
+    h.wait_until(cx, "palette closed", |_, cx| {
+        h.shell.read(cx).overlay() == Overlay::None
+    });
+    let expanded = cx.read(|cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .is_expanded("compose:myshop")
+    });
+    assert!(expanded, "palette ran the list command on the page");
+    let table_focused = cx
+        .update_window(h.any_window(), |_, window, cx| {
+            page.read(cx).table().focus_handle(cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(table_focused, "focus returned to the invoker (KBD-007)");
+    h.shutdown();
+}

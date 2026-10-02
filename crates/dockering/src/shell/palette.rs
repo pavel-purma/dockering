@@ -4,7 +4,8 @@
 
 use gpui_kit::component::IconName;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
-use gpui_kit::{Action, App, Entity, IntoElement, Window};
+use gpui_kit::prelude::*;
+use gpui_kit::{Action, App, Entity, Window};
 
 use crate::actions::Navigate;
 use crate::commands::{self, CommandContext};
@@ -24,10 +25,30 @@ pub fn build(
 ) -> Command {
     let mut groups: Vec<(commands::CommandGroup, Vec<CommandItem>)> = Vec::new();
     for c in commands::available(&ctx) {
+        // The item dispatches `RunCommand` (closed palette, restored focus, then the real
+        // action), and renders the real action's binding itself (KBD-010).
+        let label = c.label;
+        let action = c.action;
         let item = CommandItem::new()
-            .label(c.label)
+            .label(label)
             .keywords(c.keywords.iter().copied())
-            .action((c.action)());
+            .action(Box::new(RunCommand {
+                action: CommandAction(action()),
+            }))
+            .child(move |window, cx| {
+                let kbd = gpui_kit::component::kbd::Kbd::binding_for_action(
+                    action().as_ref(),
+                    None,
+                    window,
+                );
+                gpui_kit::component::h_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_between()
+                    .child(label)
+                    .children(kbd)
+                    .text_color(gpui_kit::component::ActiveTheme::theme(cx).foreground)
+            });
         match groups.iter_mut().find(|(g, _)| *g == c.group) {
             Some((_, v)) => v.push(item),
             None => groups.push((c.group, vec![item])),
@@ -115,6 +136,36 @@ pub fn element(
     store: Option<&Entity<EngineStore>>,
     _window: &mut Window,
     cx: &App,
-) -> impl IntoElement {
+) -> Command {
     build(state, ctx, store, cx)
+}
+
+/// Wraps a palette command. The palette's own focus isn't inside the page, so the shell
+/// closes the palette, restores focus to the invoker, and then dispatches the wrapped
+/// action from there (page-scoped commands reach the page, KBD-020/KBD-007).
+#[derive(Clone, PartialEq, gpui_kit::Action)]
+#[action(namespace = palette, no_json, no_register)]
+pub struct RunCommand {
+    pub action: CommandAction,
+}
+
+/// `Box<dyn Action>` with the traits an `Action` field needs.
+pub struct CommandAction(pub Box<dyn Action>);
+
+impl Clone for CommandAction {
+    fn clone(&self) -> Self {
+        Self(self.0.boxed_clone())
+    }
+}
+
+impl PartialEq for CommandAction {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.partial_eq(other.0.as_ref())
+    }
+}
+
+impl std::fmt::Debug for CommandAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.name())
+    }
 }

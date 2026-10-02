@@ -154,6 +154,10 @@ impl ContainersPage {
         this
     }
 
+    pub fn store_entity(&self) -> &Entity<EngineStore> {
+        &self.store
+    }
+
     pub fn table(&self) -> &Entity<Table> {
         &self.table
     }

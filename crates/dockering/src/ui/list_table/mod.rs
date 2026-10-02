@@ -249,8 +249,16 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
             return div().into_any_element();
         };
         let selected = self.model.row_selected(row);
-        self.delegate
-            .render_cell(row, row_ix, col, selected, window, cx)
+        // Cells are rows of inline content, vertically centred (tags don't stretch).
+        h_flex()
+            .size_full()
+            .items_center()
+            .overflow_hidden()
+            .child(
+                self.delegate
+                    .render_cell(row, row_ix, col, selected, window, cx),
+            )
+            .into_any_element()
     }
 
     fn context_menu(
