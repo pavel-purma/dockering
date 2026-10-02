@@ -14,6 +14,15 @@
 #![deny(unsafe_code)]
 
 pub mod cli;
+// ADR-0003: the COM transport (version-gated vtables, FFI, threading) is crate-private. Only
+// the in-process fake server and the contract/live tests see it, through feature
+// `test-support` (enabled by this crate's self dev-dependency).
+// In that private build the complete ABI tables (every IDL constant/slot), the fake-server
+// allocators and the raw-JSON test accessors are intentionally unused, hence `dead_code`.
+#[cfg(not(any(test, feature = "test-support")))]
+#[allow(unsafe_code, dead_code)]
+mod com;
+#[cfg(any(test, feature = "test-support"))]
 #[allow(unsafe_code)]
 pub mod com;
 mod factory;

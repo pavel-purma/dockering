@@ -17,10 +17,15 @@ use super::ffi::MtaGuard;
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 /// A fixed set of OS threads, each in the process MTA, executing submitted closures in FIFO
-/// order. Dropping the pool closes the queue; threads exit after their current job.
+/// order.
+///
+/// Dropping the pool closes the queue and **never blocks**: the threads are detached, finish
+/// the jobs already queued (each job owns everything it touches, e.g. an `Arc` of the engine
+/// state, so it stays valid without the pool) and then exit on their own. Pools are often
+/// dropped on hub tokio workers while a COM call is in flight (a discovery or connect timed out
+/// against a cold or hung `wslservice`); joining there would block the worker.
 pub struct RpcPool {
     tx: Mutex<Option<mpsc::Sender<Job>>>,
-    threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 /// Default size: 3 (spec: 2–4). One slow call (e.g. `Stats()` blocks ~1 s server-side, or a
@@ -32,7 +37,6 @@ impl RpcPool {
         let (tx, rx) = mpsc::channel::<Job>();
         let rx = Arc::new(Mutex::new(rx));
         let n = threads.clamp(1, 8);
-        let mut handles = Vec::with_capacity(n);
         for i in 0..n {
             let rx = rx.clone();
             let spawned = std::thread::Builder::new()
@@ -51,14 +55,13 @@ impl RpcPool {
                         }
                     }
                 });
-            match spawned {
-                Ok(h) => handles.push(h),
-                Err(e) => tracing::error!(%e, "failed to spawn WSLC RPC thread"),
+            // Detached: the thread ends when the queue closes (see the type docs).
+            if let Err(e) = spawned {
+                tracing::error!(%e, "failed to spawn WSLC RPC thread");
             }
         }
         Arc::new(Self {
             tx: Mutex::new(Some(tx)),
-            threads: Mutex::new(handles),
         })
     }
 
@@ -90,28 +93,18 @@ impl RpcPool {
         }
     }
 
-    /// Closes the queue and joins the threads (blocking). Called from `Drop`.
+    /// Closes the queue without waiting for the threads (they exit after the queued jobs).
     fn shutdown(&self) {
-        if let Ok(mut g) = self.tx.lock() {
-            g.take();
-        }
-        let handles = self
-            .threads
-            .lock()
-            .map(|mut g| std::mem::take(&mut *g))
-            .unwrap_or_default();
-        let me = std::thread::current().id();
-        for h in handles {
-            // A job that drops the last engine reference runs *on* a pool thread; never
-            // join ourselves.
-            if h.thread().id() != me {
-                let _ = h.join();
-            }
-        }
+        let tx = match self.tx.lock() {
+            Ok(mut g) => g.take(),
+            Err(e) => e.into_inner().take(),
+        };
+        drop(tx);
     }
 }
 
 impl Drop for RpcPool {
+    /// Non-blocking (never joins): safe on async workers and on the pool's own threads.
     fn drop(&mut self) {
         self.shutdown();
     }
@@ -188,6 +181,38 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), 3);
+    }
+
+    /// Review finding 1: dropping a pool while a job is in flight returns immediately; the job
+    /// still completes on its detached thread and delivers its result.
+    #[test]
+    fn drop_does_not_wait_for_in_flight_job() {
+        let pool = RpcPool::new(1);
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let state = Arc::new(Mutex::new(Vec::<u32>::new()));
+        let job_state = state.clone();
+        let fut = pool.run(move || {
+            let _ = started_tx.send(());
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            job_state
+                .lock()
+                .map_err(|_| EngineError::protocol("poisoned"))?
+                .push(7);
+            Ok(7)
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("job started");
+        let t = std::time::Instant::now();
+        drop(pool);
+        let took = t.elapsed();
+        assert!(
+            took < std::time::Duration::from_millis(100),
+            "drop took {took:?}"
+        );
+        // The job owns what it needs, so it finishes and its result is still delivered.
+        assert_eq!(futures::executor::block_on(fut), Ok(7));
+        assert_eq!(*state.lock().expect("lock"), vec![7]);
     }
 
     #[test]

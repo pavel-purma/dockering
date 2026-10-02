@@ -6,7 +6,11 @@
 
 use crate::version::WslVersion;
 
+// The module mirrors the IDL completely (every constant, slot and size table) so offsets are
+// exact and diffs against the next vendored IDL are mechanical; much of it is unused on
+// purpose, and it is crate-private (ADR-0003), hence `dead_code`.
 #[cfg(windows)]
+#[allow(dead_code)]
 pub mod v3_0;
 
 /// A verified ABI module.

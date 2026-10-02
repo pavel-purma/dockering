@@ -489,12 +489,9 @@ impl ContainerDetailPage {
         let has_port = self
             .summary(cx)
             .is_some_and(|c| c.ports.iter().any(|p| port_url(p).is_some()));
-        let external = !AppState::config(cx)
-            .terminal
-            .external_terminal
-            .trim()
-            .is_empty()
-            && caps.contains(Capabilities::EXEC_TTY);
+        let external = self
+            .detail_state()
+            .is_some_and(|s| s.read(cx).external_terminal_available(cx));
         let b = self.more_bounds;
         let pos = gpui_kit::point(b.origin.x - gpui_kit::px(180.), b.origin.y + b.size.height);
         let restore = self.more_focus.clone();

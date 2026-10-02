@@ -15,13 +15,21 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE, S_OK};
-use windows::Win32::Storage::FileSystem::WriteFile;
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, S_OK};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
+    WriteFile,
+};
 use windows::Win32::System::Com::{CoRegisterMallocSpy, IMallocSpy, IMallocSpy_Impl};
-use windows::Win32::System::Pipes::CreatePipe;
+use windows::Win32::System::Pipes::{
+    CreateNamedPipeW, CreatePipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+};
 use windows::Win32::System::Threading::WaitForSingleObject;
 use windows::core::{BOOL, HRESULT, IUnknown, PCSTR, PCWSTR, PSTR, PWSTR, implement};
 
+/// The interface `FakeManager::new_interface` hands out (re-exported for tests only; the
+/// vtable module itself stays crate-private, ADR-0003).
+pub use super::abi::v3_0::IWSLCSessionManager;
 use super::abi::v3_0::*;
 use super::ffi::{CoTaskMemArray, CoTaskMemStr, CoTaskMemWStr, hr, write_fixed};
 
@@ -68,9 +76,15 @@ pub struct FakeState {
     pub killed: Vec<(String, i32)>,
     pub deleted: Vec<(String, i32)>,
     pub created_volumes: Vec<String>,
+    /// Signals delivered to exec'd processes (`IWSLCProcess::Signal`).
+    pub signalled: Vec<i32>,
 }
 
 pub type Shared = Arc<Mutex<FakeState>>;
+
+/// An entry of [`FakeState::events`] that makes `GetNext` return `WSLC_E_EVENTS_LOST` (the
+/// server dropped events for a slow reader) instead of an event.
+pub const EVENTS_LOST_MARKER: &str = "<events-lost>";
 
 /// Live `BeginContainerOperation` tokens (incremented on hand-out, decremented on release).
 pub static OPEN_OPERATIONS: AtomicI64 = AtomicI64::new(0);
@@ -239,6 +253,141 @@ fn pipe_with(data: &[u8]) -> WSLCHandle {
     WSLCHandle {
         Type: WSLC_HANDLE_TYPE_PIPE,
         Handle: r,
+    }
+}
+
+/// A connected, **overlapped** duplex named pipe like the real exec TTY handle (spike F-7).
+/// Returns `(ours, peer)`: `ours` goes to the client; the fake keeps `peer` and never reads or
+/// writes it, so client writes fill the pipe buffer and then pend, and client reads pend until
+/// cancelled. Small buffers make "the other side stopped reading" quick to reach.
+fn stalled_duplex_pipe() -> Option<(HANDLE, HANDLE)> {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let name = format!(
+        r"\\.\pipe\dk-fake-wslc-tty-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    );
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the handle is owned by the
+    // returned tuple (closed by the client / `FakeProcess::drop`).
+    let server = unsafe {
+        CreateNamedPipeW(
+            PCWSTR(wide.as_ptr()),
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            1,
+            1024,
+            1024,
+            0,
+            None,
+        )
+    };
+    if server.is_invalid() {
+        return None;
+    }
+    // SAFETY: opens the client end of the pipe created above (same NUL-terminated name).
+    let peer = unsafe {
+        CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            GENERIC_READ.0 | GENERIC_WRITE.0,
+            FILE_SHARE_NONE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED,
+            None,
+        )
+    };
+    match peer {
+        Ok(peer) => Some((server, peer)),
+        Err(_) => {
+            // SAFETY: closing the server handle created above exactly once.
+            let _ = unsafe { CloseHandle(server) };
+            None
+        }
+    }
+}
+
+/// An exec'd process (`IWSLCContainer::Exec`): a TTY whose other side never drains input and
+/// never produces output (so writes and reads block until cancelled), no exit event, and a
+/// state that becomes "signalled" after `Signal`.
+#[implement(IWSLCProcess)]
+pub struct FakeProcess {
+    state: Shared,
+    /// Handed out once by `GetStdHandle` (ownership moves to the client).
+    tty: Mutex<Option<usize>>,
+    /// The never-drained peer end; closed when the process object is released.
+    peer: usize,
+    signal: Mutex<Option<i32>>,
+}
+
+impl Drop for FakeProcess {
+    fn drop(&mut self) {
+        let leftover = self.tty.lock().unwrap_or_else(|e| e.into_inner()).take();
+        for h in leftover.into_iter().chain(std::iter::once(self.peer)) {
+            // SAFETY: handles created by `stalled_duplex_pipe`, still owned by us, closed once.
+            let _ = unsafe { CloseHandle(HANDLE(h as *mut c_void)) };
+        }
+    }
+}
+
+impl IWSLCProcess_Impl for FakeProcess_Impl {
+    unsafe fn Signal(&self, Signal: i32) -> HRESULT {
+        record(&self.state, "Signal");
+        lock(&self.state).signalled.push(Signal);
+        *self.signal.lock().unwrap_or_else(|e| e.into_inner()) = Some(Signal);
+        S_OK
+    }
+    unsafe fn GetExitEvent(&self, _EventHandle: *mut HANDLE) -> HRESULT {
+        E_NOTIMPL
+    }
+    unsafe fn GetStdHandle(&self, Fd: i32, Handle: *mut WSLCHandle) -> HRESULT {
+        if Handle.is_null() {
+            return E_POINTER;
+        }
+        if Fd != WSLC_FD_TTY && Fd != WSLC_FD_STDOUT {
+            return E_NOTIMPL;
+        }
+        let Some(h) = self.tty.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+            return E_POINTER;
+        };
+        // SAFETY: out-param per IDL; handle ownership transfers to the caller.
+        unsafe {
+            *Handle = WSLCHandle {
+                Type: WSLC_HANDLE_TYPE_PIPE,
+                Handle: HANDLE(h as *mut c_void),
+            }
+        };
+        S_OK
+    }
+    unsafe fn GetFlags(&self, _Flags: *mut i32) -> HRESULT {
+        E_NOTIMPL
+    }
+    unsafe fn GetPid(&self, _Pid: *mut i32) -> HRESULT {
+        E_NOTIMPL
+    }
+    unsafe fn GetState(&self, State: *mut i32, Code: *mut i32) -> HRESULT {
+        if State.is_null() || Code.is_null() {
+            return E_POINTER;
+        }
+        let sig = *self.signal.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: out-params per IDL.
+        unsafe {
+            match sig {
+                Some(n) => {
+                    *State = WSLC_PROCESS_STATE_SIGNALLED;
+                    *Code = n;
+                }
+                None => {
+                    *State = WSLC_PROCESS_STATE_RUNNING;
+                    *Code = 0;
+                }
+            }
+        }
+        S_OK
+    }
+    unsafe fn ResizeTty(&self, _Rows: u32, _Columns: u32) -> HRESULT {
+        record(&self.state, "ResizeTty");
+        S_OK
     }
 }
 
@@ -909,9 +1058,30 @@ impl IWSLCContainer_Impl for FakeContainer_Impl {
         &self,
         _Options: *const WSLCProcessOptions,
         _StartOptions: *const WSLCProcessStartOptions,
-        _Process: *mut Option<IWSLCProcess>,
+        Process: *mut Option<IWSLCProcess>,
     ) -> HRESULT {
-        E_NOTIMPL
+        if let Some(h) = record(&self.state, "Exec") {
+            return h;
+        }
+        if Process.is_null() {
+            return E_POINTER;
+        }
+        if !is_running(&self.state, &self.id) {
+            return HRESULT(hr::WSLC_E_CONTAINER_NOT_RUNNING);
+        }
+        let Some((ours, peer)) = stalled_duplex_pipe() else {
+            return HRESULT(hr::E_FAIL);
+        };
+        let p: IWSLCProcess = FakeProcess {
+            state: self.state.clone(),
+            tty: Mutex::new(Some(ours.0 as usize)),
+            peer: peer.0 as usize,
+            signal: Mutex::new(None),
+        }
+        .into();
+        // SAFETY: out-param per IDL.
+        unsafe { *Process = Some(p) };
+        S_OK
     }
     unsafe fn Inspect(&self, _Size: BOOL, Output: *mut PSTR) -> HRESULT {
         match find(&self.state, &self.id) {
@@ -1006,6 +1176,9 @@ impl IWSLCEventStream_Impl for FakeEvents_Impl {
     unsafe fn GetNext(&self, CancelEvent: HANDLE, EventJson: *mut PSTR) -> HRESULT {
         let i = self.next.fetch_add(1, Ordering::SeqCst) as usize;
         let ev = lock(&self.state).events.get(i).cloned();
+        if ev.as_deref() == Some(EVENTS_LOST_MARKER) {
+            return HRESULT(hr::WSLC_E_EVENTS_LOST);
+        }
         if let Some(ev) = ev {
             // SAFETY: out-param per IDL.
             return unsafe { put_str(EventJson, &ev) };

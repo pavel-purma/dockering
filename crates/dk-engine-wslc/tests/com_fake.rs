@@ -290,6 +290,42 @@ fn events_stream_and_cancel_on_drop() {
     assert_eq!(v["Actor"]["ID"], "2e4fac884218");
 }
 
+/// Spec 20 §5.4 / review finding 3: `WSLC_E_EVENTS_LOST` surfaces as exactly
+/// `Protocol("events lost")` (what the hub maps to `Feed::Lagged`) and the stream continues.
+#[test]
+fn events_lost_reports_gap_and_stream_continues() {
+    let _serial = serial();
+    let (e, state) = engine();
+    {
+        let mut g = state.lock().expect("state");
+        let first = g.events[0].clone();
+        let second = first.replace("\"start\"", "\"die\"");
+        g.events = vec![first, fake::EVENTS_LOST_MARKER.into(), second];
+    }
+    let items = with_timeout(Duration::from_secs(5), async move {
+        let s = e.events(dk_core::EventFilter {
+            since: Some(time::OffsetDateTime::UNIX_EPOCH),
+            ..Default::default()
+        });
+        s.take(3).collect::<Vec<_>>().await
+    });
+    assert_eq!(items.len(), 3, "{items:?}");
+    assert_eq!(items[0].as_ref().map(|e| e.action.as_str()), Ok("start"));
+    assert_eq!(
+        items[1],
+        Err(EngineError::Protocol("events lost".into())),
+        "exact message the hub maps to Feed::Lagged"
+    );
+    assert!(
+        items[1]
+            .as_ref()
+            .is_err_and(dk_core::EngineError::is_events_lost),
+        "{:?}",
+        items[1]
+    );
+    assert_eq!(items[2].as_ref().map(|e| e.action.as_str()), Ok("die"));
+}
+
 #[test]
 fn images_volumes_networks_prune() {
     let _serial = serial();
@@ -373,4 +409,87 @@ fn recorded_fixtures_parse() {
             .is_some_and(|a| !a.is_empty())
     );
     assert!(read("inspect_container.json")["State"]["Status"].is_string());
+}
+
+fn with_timeout_on_thread<T: Send + 'static>(
+    d: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(d).expect("timed out")
+}
+
+/// Resolves after `d` (no tokio in this crate's tests).
+async fn sleep(d: Duration) {
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(d);
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
+}
+
+/// Review finding 2 (TRM-008): a write to a TTY whose peer never reads blocks; `close()` must
+/// interrupt it promptly (not queue behind it) and the write must fail.
+#[test]
+fn exec_close_interrupts_a_stuck_write() {
+    let _serial = serial();
+    let (e, state) = engine();
+    // `TerminalSession` isn't `Sync`, so the future (borrowing it twice) is built and polled
+    // on the watchdog's worker thread.
+    let (write_res, close_res, close_took, write_pending_before_close) =
+        with_timeout_on_thread(Duration::from_secs(20), move || {
+            block_on(async move {
+                let req = dk_core::ExecRequest {
+                    cmd: vec!["sh".into()],
+                    tty: true,
+                    env: vec![],
+                    user: None,
+                    working_dir: None,
+                    cols: 80,
+                    rows: 24,
+                };
+                let term = e.exec("2e4fac884218", req).await.expect("exec");
+                let pending = std::sync::atomic::AtomicBool::new(true);
+                // Far more than the 1 KiB pipe buffer: the write pends until someone reads.
+                let write = async {
+                    let r = term.write(bytes::Bytes::from(vec![b'x'; 256 * 1024])).await;
+                    pending.store(false, Ordering::SeqCst);
+                    r
+                };
+                let close = async {
+                    sleep(Duration::from_millis(300)).await;
+                    let still_pending = pending.load(Ordering::SeqCst);
+                    let t = std::time::Instant::now();
+                    let r = term.close().await;
+                    (r, t.elapsed(), still_pending)
+                };
+                let (w, (c, took, still_pending)) = futures::join!(write, close);
+                // A write after close fails right away too.
+                let after = term.write(bytes::Bytes::from_static(b"y")).await;
+                assert!(after.is_err(), "write after close: {after:?}");
+                let exit = term.wait().await;
+                assert_eq!(exit, Ok(Some(129)), "SIGHUP → signalled exit");
+                (w, c, took, still_pending)
+            })
+        });
+    assert!(
+        write_pending_before_close,
+        "the write should block on the stalled pipe"
+    );
+    assert_eq!(close_res, Ok(()));
+    assert!(
+        close_took < Duration::from_secs(1),
+        "close took {close_took:?}"
+    );
+    assert!(
+        matches!(&write_res, Err(EngineError::Protocol(m)) if m == "TTY closed"),
+        "{write_res:?}"
+    );
+    let g = state.lock().expect("state");
+    assert!(g.calls.iter().any(|c| c == "Exec"));
+    assert_eq!(g.signalled, vec![1], "close sends SIGHUP");
 }

@@ -1156,6 +1156,47 @@ fn sta_001_samples_render_and_history_replays(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// STA-003 / spec 10 §3.3: a full history replay (900 samples = the 15 min ring) is applied in
+/// chunks with one notify each, not one notify per sample.
+#[gpui_kit::test]
+fn sta_003_history_replay_is_batched(cx: &mut TestAppContext) {
+    const N: usize = 900;
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    wait_stats_stream(&h, cx, 1);
+    // Leave the tab: our stream is dropped, the hub's upstream lingers 5 s and keeps filling
+    // the history ring.
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "right");
+    assert!(!cx.read(|cx| stats.read(cx).is_streaming()));
+    let redis = id_of("redis");
+    let base = time::OffsetDateTime::now_utc() - time::Duration::seconds(N as i64);
+    for i in 0..N {
+        h.engine.push_stats(
+            &redis,
+            dk_core::fake::fixtures::stats_sample(
+                base + time::Duration::seconds(i as i64),
+                (i % 100) as f64,
+                64 * 1024 * 1024,
+            ),
+        );
+    }
+    // Let the upstream push everything into the ring.
+    std::thread::sleep(std::time::Duration::from_millis(300)); // nfr-001-allow: test harness only
+    let before = cx.read(|cx| stats.read(cx).stream_notifies());
+    h.press(cx, "left");
+    h.wait_until(cx, "history replayed", |_, cx| {
+        stats.read(cx).samples().len() == N
+    });
+    let notifies = cx.read(|cx| stats.read(cx).stream_notifies()) - before;
+    assert!(
+        notifies <= 30,
+        "{N} replayed samples caused {notifies} notifies (expected a few chunks)"
+    );
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn sta_006_stats_only_while_visible(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
@@ -1289,5 +1330,87 @@ fn sta_010_disk_usage_on_demand(cx: &mut TestAppContext) {
         cx.read(|cx| stats.read(cx).disk()),
         Some((Some(12_000), Some(98_000_000)))
     );
+    h.shutdown();
+}
+
+/// Spec 10 §4.2 / spec 20 §5.4 (WSLC events lost): when the hub reports `Feed::Lagged`, both the
+/// `EngineStore` and the container detail state do a full refetch **and keep the subscription**
+/// (later events still apply). The lag is real: the UI isn't pumped while the engine floods
+/// events past the hub's ring.
+#[gpui_kit::test]
+fn eng_events_lagged_full_refetch_and_subscription_stays(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let _page = open_detail(&h, cx, "scratchpad", ContainerTab::Overview);
+    let id = id_of("scratchpad");
+    // Two subscribers (store + detail) share the engine's one upstream stream.
+    h.wait_until(cx, "subscribed", |_, _| h.engine.open_streams().0 > 0);
+    h.draw(cx);
+    h.engine.clear_calls();
+    // Volume events: by themselves they refetch only volumes (store) and nothing (detail), so a
+    // containers list / inspect refetch can only come from the `Lagged` handling.
+    for i in 0..4000 {
+        h.engine.emit_event(dk_core::fake::fixtures::event(
+            ResourceKind::Volume,
+            "create",
+            &format!("v{i}"),
+        ));
+    }
+    // Let the hub overrun its ring while the UI side reads nothing.
+    std::thread::sleep(std::time::Duration::from_millis(300)); // nfr-001-allow: test harness only
+    h.wait_until(cx, "full refetch after lag", |_, _| {
+        !h.engine.calls_to("list_containers").is_empty()
+            && !h.engine.calls_to("list_networks").is_empty()
+            && !h.engine.calls_to("inspect_container").is_empty()
+    });
+    // Still subscribed: the store is in events mode (not polling) and a later event applies.
+    let mode = cx.read(|cx| h.shell.read(cx).store().map(|s| s.read(cx).live_mode()));
+    assert_eq!(mode, Some(crate::state::LiveMode::Events));
+    let mut cs = crate::demo::containers();
+    if let Some(c) = cs.iter_mut().find(|c| c.id == id) {
+        c.state = ContainerState::Running;
+        c.status_text = "Up 1 second".into();
+    }
+    h.engine.set_containers(cs);
+    h.engine.emit_event(dk_core::fake::fixtures::event(
+        ResourceKind::Container,
+        "start",
+        &id,
+    ));
+    h.wait_until(
+        cx,
+        "event after the lag still refreshes the detail",
+        |_, cx| detail_running(&h, cx),
+    );
+    h.shutdown();
+}
+
+/// TRM-009 v1 limitation: with a template configured, the external terminal is offered only
+/// for transports the host `docker exec` reaches; the fake engine reports transport `fake`,
+/// so the menu item / toolbar button stay hidden and the palette action is a no-op.
+#[gpui_kit::test]
+fn trm_009_external_terminal_hidden_for_unsupported_transport(cx: &mut TestAppContext) {
+    let mut setup = Setup::default();
+    setup.config.terminal.external_terminal = "wt.exe {cmd}".into();
+    let h = start(cx, setup);
+    let page = open_detail(&h, cx, "redis", ContainerTab::Overview);
+    h.wait_until(cx, "engine info", |_, cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .is_some_and(|s| s.read(cx).info().is_some())
+    });
+    let available = cx.read(|cx| {
+        page.read(cx)
+            .detail_state()
+            .map(|s| s.read(cx).external_terminal_available(cx))
+    });
+    assert_eq!(available, Some(false), "transport `fake` hides TRM-009");
+    let transport = cx.read(|cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .and_then(|s| s.read(cx).info().and_then(|i| i.transport.clone()))
+    });
+    assert_eq!(transport.as_deref(), Some("fake"));
     h.shutdown();
 }

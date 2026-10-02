@@ -98,6 +98,21 @@ impl ContainerDetailState {
             .unwrap_or_default()
     }
 
+    /// TRM-009: whether "Open in external terminal" is offered: a template is configured, the
+    /// engine has `EXEC_TTY`, and its transport is one the host `docker exec` reaches (v1
+    /// limitation, see [`super::terminal::HOST_DOCKER_EXEC_TRANSPORTS`]).
+    pub fn external_terminal_available(&self, cx: &App) -> bool {
+        let configured = !crate::state::AppState::config(cx)
+            .terminal
+            .external_terminal
+            .trim()
+            .is_empty();
+        let info = self.store.as_ref().and_then(|s| s.read(cx).info());
+        configured
+            && self.capabilities(cx).contains(Capabilities::EXEC_TTY)
+            && super::terminal::external_terminal_supported(info)
+    }
+
     /// The summary for the header: from inspect, or the list row while inspect loads.
     pub fn summary<'a>(&'a self, cx: &'a App) -> Option<&'a ContainerSummary> {
         self.details

@@ -5,8 +5,13 @@
 //! - `abi`: version-gated vtable declarations; `abi::select` is the only way in.
 //!
 //! `unsafe` is allowed in this module tree only; every block carries a `// SAFETY:` note.
+//!
+//! Visibility (ADR-0003): this module is crate-private in normal builds (`lib.rs`); with
+//! feature `test-support` it is public for the fake server and the contract/live tests. Even
+//! then the vtable declarations (`abi`) stay crate-private: only the ABI selection metadata and
+//! the one interface the fake hands out are re-exported, under that cfg.
 
-pub mod abi;
+pub(crate) mod abi;
 pub mod convert;
 #[cfg(windows)]
 pub mod engine;
@@ -14,14 +19,20 @@ pub mod engine;
 pub mod fake;
 pub mod ffi;
 #[cfg(windows)]
-pub mod pool;
+pub(crate) mod pool;
 #[cfg(windows)]
-pub mod stream;
+pub(crate) mod stream;
 #[cfg(windows)]
-pub mod win32;
+pub(crate) mod win32;
 
+#[cfg(all(windows, any(test, feature = "test-support")))]
+pub use engine::{SelfCheck, SessionEntry};
 #[cfg(windows)]
-pub use engine::{SelfCheck, SessionEntry, WslcComEngine, list_sessions};
+pub use engine::{WslcComEngine, list_sessions};
+
+/// ABI selection for tests (`WslcComEngine::connect` takes the selected module). No vtables.
+#[cfg(any(test, feature = "test-support"))]
+pub use abi::{AbiInfo, AbiModule, MODULES, select};
 
 /// See [`crate::init_process_com_security`].
 pub fn init_process_com_security() -> bool {
