@@ -3,19 +3,26 @@
 
 pub mod bridge;
 pub mod config;
+mod events;
 mod handle;
 mod hub;
 pub mod logging;
 pub mod paths;
+mod registry;
 pub mod single_instance;
 mod stats_service;
+mod supervisor;
 mod terminal;
+
+#[cfg(test)]
+mod tests;
 
 pub use bridge::{Feed, HubCall, HubEvent, HubStream, STREAM_CAPACITY, TermCmd, TerminalHandle};
 pub use config::{Config, ThemeMode, UiState};
 pub use handle::{ConfigHandle, HubHandle, HubOptions};
 pub use hub::EngineHub;
 pub use paths::Paths;
+pub use supervisor::backoff_delay;
 
 /// The backend factories for this OS (spec 21 §8): Docker everywhere; WSL distro + WSLC on
 /// Windows (their crates compile everywhere and discover nothing elsewhere).
@@ -37,6 +44,5 @@ pub fn init_platform() -> bool {
 /// Load `config.toml` + `state.json` synchronously (startup only, before the first window).
 /// Missing/corrupt files → defaults (a corrupt file is renamed to `*.bak` and logged).
 pub fn load_config(paths: &Paths) -> (Config, UiState) {
-    let _ = paths;
-    unimplemented!("rust-core")
+    config::load(paths)
 }

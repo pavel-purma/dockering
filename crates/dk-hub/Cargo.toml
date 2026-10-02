@@ -15,7 +15,7 @@ dk-core.workspace = true
 dk-engine-docker.workspace = true
 dk-engine-wslc.workspace = true
 dk-wsl.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 tokio-util.workspace = true
 futures.workspace = true
 bytes.workspace = true
@@ -27,11 +27,17 @@ time.workspace = true
 tracing.workspace = true
 directories.workspace = true
 rand.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO"] }
 
 [dev-dependencies]
 dk-core = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
+async-trait.workspace = true
 
 [lints]
 workspace = true

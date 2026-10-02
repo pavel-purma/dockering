@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use dk_core::{EngineError, EngineResult, EngineStatus, EngineId, Capabilities};
+use dk_core::{Capabilities, EngineError, EngineId, EngineResult, EngineStatus};
 use futures::Stream;
 use futures::channel::{mpsc, oneshot};
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -95,7 +95,10 @@ pub enum HubEvent {
     Added(EngineStatus),
     Removed(EngineId),
     StatusChanged(EngineStatus),
-    CapabilitiesChanged { id: EngineId, capabilities: Capabilities },
+    CapabilitiesChanged {
+        id: EngineId,
+        capabilities: Capabilities,
+    },
     ActiveChanged(Option<EngineId>),
     /// ENG-022: the engine reconnected; stores resubscribe and refetch everything.
     Reconnected(EngineId),

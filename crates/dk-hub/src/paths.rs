@@ -15,7 +15,12 @@ pub struct Paths {
 impl Paths {
     /// Per-user OS directories. `None` if no home directory can be determined.
     pub fn for_user() -> Option<Paths> {
-        unimplemented!("rust-core")
+        let dirs = directories::ProjectDirs::from("dev", "dockering", "Dockering")?;
+        Some(Paths {
+            config_dir: dirs.config_dir().to_path_buf(),
+            data_dir: dirs.data_dir().to_path_buf(),
+            log_dir: dirs.data_local_dir().join("logs"),
+        })
     }
 
     /// Everything under one root (tests, portable mode).

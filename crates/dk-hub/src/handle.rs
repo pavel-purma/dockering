@@ -1,7 +1,5 @@
-//! `HubHandle`: the UI's only door into the hub (spec 10 §3.3).
-//!
-//! API SKELETON — signatures are fixed (other crates build against them); bodies are
-//! implemented by `rust-core`.
+//! `HubHandle`: the UI's only door into the hub (spec 10 §3.3). Signatures are fixed (other
+//! crates build against them); bodies live in `hub.rs` and the service modules.
 
 use std::future::Future;
 use std::path::PathBuf;
