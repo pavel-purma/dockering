@@ -797,8 +797,7 @@ impl LogsView {
             .into_any_element()
     }
 
-    fn render_lines(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let focused = self.focus.is_focused(window);
+    fn render_lines(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let mono = theme.mono_font_family.clone();
         let fg = theme.foreground;
@@ -874,7 +873,7 @@ impl LogsView {
             .size_full()
             .rounded(theme.radius)
             .border_1()
-            .border_color(if focused { theme.ring } else { theme.border })
+            .border_color(theme.border)
             .bg(theme.background)
             .font_family(mono)
             .text_xs()

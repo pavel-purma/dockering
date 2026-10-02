@@ -1,9 +1,9 @@
-//! Small shared widgets: copy-id, port link, relative time, focus ring, action tooltips.
+//! Small shared widgets: section heading, copy-id, port link, relative time, action tooltips.
 
 use dk_core::PortMapping;
 use dk_core::format::{format_port, format_relative, short_id};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex};
+use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{App, ElementId, IntoElement, SharedString, Styled, div};
 use time::OffsetDateTime;
@@ -12,14 +12,30 @@ use crate::actions::{CopyText, OpenUrl};
 use crate::state::Ticker;
 use crate::strings as s;
 
-/// The theme focus ring on custom focusable elements (KBD-003). GPUI Kit controls draw
-/// their own; use this for `div`s with `track_focus`.
-pub fn focus_ring<E: Styled>(el: E, focused: bool, cx: &App) -> E {
-    if focused {
-        el.border_1().border_color(cx.theme().ring)
-    } else {
-        el.border_1().border_color(gpui_kit::transparent_black())
-    }
+/// A titled group of content without a surrounding border (spec 30 §4): the title, then a
+/// hairline that runs to the right edge, then the content. The content (a table, a list)
+/// keeps its own border; the group itself only marks where it starts.
+pub fn section(title: impl Into<SharedString>, body: impl IntoElement, cx: &App) -> gpui_kit::Div {
+    v_flex()
+        .w_full()
+        .gap_3()
+        // Space above the heading separates it from the previous group's content.
+        .pt_3()
+        .child(
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .child(title.into()),
+                )
+                .child(div().flex_1().h(gpui_kit::px(1.)).bg(cx.theme().border)),
+        )
+        .child(body)
 }
 
 /// `abcdef123456` + copy button (SHL-008). The button dispatches [`CopyText`].
@@ -94,7 +110,7 @@ pub fn relative_time(t: OffsetDateTime, cx: &App) -> String {
     format_relative(t, Ticker::now_in(cx))
 }
 
-/// A focusable wrapper with a visible ring around a GPUI Kit `Button`, so the caller owns
+/// A focusable wrapper around a GPUI Kit `Button`, so the caller owns
 /// the focus handle (S-8.5: the component `Button` keeps its own keyed handle). Use it when
 /// focus must be set programmatically (initial dialog focus, F6 region defaults, menu
 /// restore targets). Enter/Space on the wrapper run `on_activate`; the inner button is
@@ -104,15 +120,13 @@ pub fn focus_wrap(
     handle: &gpui_kit::FocusHandle,
     button: Button,
     on_activate: impl Fn(&gpui_kit::KeyDownEvent, &mut gpui_kit::Window, &mut App) + 'static,
-    window: &gpui_kit::Window,
+    _window: &gpui_kit::Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let focused = handle.is_focused(window);
     div()
         .id(id)
         .track_focus(&handle.clone().tab_stop(true))
         .rounded(cx.theme().radius)
-        .map(|el| focus_ring(el, focused, cx))
         .on_key_down(move |e: &gpui_kit::KeyDownEvent, window, cx| {
             if matches!(e.keystroke.key.as_str(), "enter" | "space")
                 && !e.keystroke.modifiers.modified()

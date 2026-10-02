@@ -1174,7 +1174,6 @@ impl AppShell {
         let insecure = status
             .as_ref()
             .is_some_and(|s| s.config.endpoint.is_insecure_tcp());
-        let focused = self.switcher_btn_focus.is_focused(window);
         // The GPUI Kit `TitleBar` marks the whole bar as a window drag area. On Windows a
         // drag area under the pointer answers `WM_NCHITTEST` with `HTCAPTION`, which turns
         // the click into a window drag and never reaches our controls. Every interactive
@@ -1208,11 +1207,7 @@ impl AppShell {
                             .items_center()
                             .rounded(cx.theme().radius)
                             .border_1()
-                            .border_color(if focused {
-                                cx.theme().ring
-                            } else {
-                                cx.theme().border
-                            })
+                            .border_color(cx.theme().border)
                             .cursor_pointer()
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(EngineSwitcher), cx)
@@ -1345,9 +1340,8 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let route = self.history.current().clone();
-        // The cursor ring is drawn on the item; the region itself has no ring (a border
-        // around the whole sidebar shifted the layout on focus). Keyboard focus only: a click
-        // on a settings section focuses the sidebar (SET-080) without showing a ring.
+        // The cursor item is tinted while the sidebar has keyboard focus. Keyboard only: a
+        // click on a settings section focuses the sidebar (SET-080) without showing a cursor.
         let focused = self.sidebar_focus.is_focused(window) && window.last_input_was_keyboard();
         let cursor = self.sidebar_cursor;
         let counts = self.store.as_ref().map(|s| {
@@ -1438,7 +1432,7 @@ impl AppShell {
 
     fn render_status_bar(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let status = self.active_status(cx);
@@ -1448,7 +1442,6 @@ impl AppShell {
             .and_then(|s| s.read(cx).info().cloned())
             .or_else(|| status.as_ref().and_then(|s| s.info.clone()));
         let state = status.as_ref().map(|s| s.state.clone());
-        let focused = self.status_focus.is_focused(window);
         let left = h_flex()
             .gap_2()
             .items_center()
@@ -1477,9 +1470,6 @@ impl AppShell {
         div()
             .id("status-region")
             .track_focus(&self.status_focus)
-            .when(focused, |this| {
-                this.border_1().border_color(cx.theme().ring)
-            })
             .child(
                 StatusBar::new()
                     .left(left)

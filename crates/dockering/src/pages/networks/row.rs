@@ -12,7 +12,6 @@ use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div};
 
 use super::model::{NetworkRow, sort_keys};
 use crate::actions::{OnRow, RowCommand, list};
-use crate::assets::Lucide;
 use crate::keymap::ctx;
 use crate::pages::resources::chrome::{dash, hinted, mono_cell, name_cell, text_cell};
 use crate::strings as s;
@@ -43,7 +42,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .right(),
         ColumnSpec::new(col::COMPOSE, s::COL_COMPOSE, 130.),
         ColumnSpec::new(col::CREATED, s::COL_CREATED, 110.).sortable(),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).pin_right(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 60.).pin_right(),
     ]
 }
 
@@ -140,22 +139,8 @@ impl ListDelegate for NetworksDelegate {
                     return Spinner::new().small().into_any_element();
                 }
                 let key = row.key.clone();
-                let tip = if r.builtin {
-                    s::BUILTIN_NETWORK
-                } else if !self.can_manage {
-                    s::NETWORK_MGMT_UNSUPPORTED
-                } else {
-                    s::ACTION_DELETE
-                };
                 h_flex()
                     .gap_0p5()
-                    .child(crate::pages::resources::chrome::row_button(
-                        ("delete", row_ix),
-                        Lucide::Trash,
-                        tip,
-                        !self.can_delete(r),
-                        on_row(&key, RowCommand::Delete),
-                    ))
                     .child(crate::pages::resources::chrome::row_menu_button(
                         ("more", row_ix),
                         on_row(&key, RowCommand::ContextMenu),

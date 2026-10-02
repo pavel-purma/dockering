@@ -401,6 +401,15 @@ impl<G: Clone, I: Clone> ListModel<G, I> {
         Some(next)
     }
 
+    /// What the selection actions (SHL-005) act on: every checked item, even just one;
+    /// with nothing checked, the same as [`Self::targets`].
+    pub fn selection_targets(&self) -> Vec<SharedString> {
+        if self.selected.is_empty() {
+            return self.targets();
+        }
+        self.selected.iter().cloned().collect()
+    }
+
     /// What a command acts on (KBD-038): the multi-selection when ≥ 2 items are selected,
     /// otherwise the cursor row (a group row stands for its members).
     pub fn targets(&self) -> Vec<SharedString> {
@@ -538,6 +547,18 @@ mod tests {
         assert_eq!(m.targets(), vec![s("redis")]);
         m.set_cursor(Some(s("g:shop")));
         assert_eq!(m.targets().len(), 3);
+    }
+
+    #[test]
+    fn shl_005_selection_targets_use_a_single_checked_row() {
+        let mut m = M::new(false);
+        m.set_nodes(tree());
+        m.toggle_selected("redis");
+        m.set_cursor(Some(s("g:shop")));
+        assert_eq!(m.selection_targets(), vec![s("redis")]);
+        assert_eq!(m.targets().len(), 3, "keys still act on the cursor row");
+        m.clear_selection();
+        assert_eq!(m.selection_targets().len(), 3);
     }
 
     #[test]

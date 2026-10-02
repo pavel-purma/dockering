@@ -607,7 +607,6 @@ impl ContainerDetailPage {
             crumbs.push(Crumb::here(project.project.clone()));
         }
         crumbs.push(Crumb::here(name.clone()));
-        let crumb_focused = self.breadcrumb_focus.is_focused(window);
         let running = summary.as_ref().is_some_and(|c| c.state.is_running());
         let paused = summary
             .as_ref()
@@ -781,7 +780,6 @@ impl ContainerDetailPage {
                     .track_focus(&self.breadcrumb_focus)
                     .rounded(cx.theme().radius)
                     .px_1()
-                    .map(|el| crate::ui::focus_ring(el, crumb_focused, cx))
                     // KBD-042: Enter on the focused breadcrumb goes to the parent list.
                     .on_key_down(|e: &gpui_kit::KeyDownEvent, w, cx| {
                         if e.keystroke.key == "enter" && !e.keystroke.modifiers.modified() {

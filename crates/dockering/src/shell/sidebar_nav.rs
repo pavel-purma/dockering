@@ -2,8 +2,7 @@
 //! GPUI Kit `SidebarMenuItem` paints hover and the active page with the same token, so the
 //! selected page doesn't stand out. Here hover is a quiet neutral tint, and the active page
 //! gets an accent tint and an accent icon. The keyboard cursor (sidebar region focused)
-//! draws the focus ring on the item itself, not around the whole region, so focus never
-//! changes the sidebar's size (KBD-003).
+//! gets the hover tint; nothing draws a focus ring.
 //!
 //! The same items render the main pages and, on Settings routes, *Back to <Page>* plus the
 //! settings sections (SET-080), so both menus look and behave alike.
@@ -108,14 +107,16 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
     let accent = accent_text(theme.is_dark());
     let label = item.label.clone();
     let route = item.route.clone();
+    let hover_bg = theme.sidebar_accent;
+    // The keyboard cursor reads like hover: no ring, no border.
     let (bg, fg) = if item.active {
         (theme.primary.opacity(0.16), theme.foreground)
+    } else if item.cursor {
+        (hover_bg, theme.foreground)
     } else {
         (transparent_black(), theme.muted_foreground)
     };
-    let hover_bg = theme.sidebar_accent;
     let hover_fg = theme.foreground;
-    let ring = theme.ring;
     let badge_bg = if item.active {
         theme.primary.opacity(0.22)
     } else {
@@ -145,13 +146,6 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
         .cursor_pointer()
         .bg(bg)
         .text_color(fg)
-        // Always 1 px, transparent unless it's the cursor: focus never shifts layout.
-        .border_1()
-        .border_color(if item.cursor {
-            ring
-        } else {
-            transparent_black()
-        })
         .when(item.active, |this| {
             this.font_weight(gpui_kit::FontWeight::MEDIUM)
         })
@@ -178,7 +172,7 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
             this.tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
         })
         // A mouse click navigates without moving focus into the sidebar region, so the
-        // new page takes focus (KBD-007) and no focus ring appears on the sidebar.
+        // new page takes focus (KBD-007) and no cursor appears on the sidebar.
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .on_click(move |_, window, cx| {
             window.dispatch_action(

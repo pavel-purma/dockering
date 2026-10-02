@@ -10,16 +10,16 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
 │ TitleBar:  ◧ Dockering          [● Ubuntu-22.04 (WSL) ▾]          ⟳   ☾   ⚙        │
 ├───────────────┬──────────────────────────────────────────────────────────────────────┤
-│ Sidebar       │ Page header:  Containers                     [Search…    ] [Filter▾]│
-│               │               12 running · 3 stopped          [Group ▾] [⋮ Prune ] │
+│ Sidebar       │ Containers                                        [Filter] [Group▾] │
+│               │ [Search…        ]                       12 running · 3 stopped  [⋮] │
 │ ▣ Containers 12├──────────────────────────────────────────────────────────────────────┤
 │ ◫ Images     34│ DataTable / Tree-table                                              │
 │ ⛁ Volumes     9│ ☐  Name ▴          Image         Status      CPU   Ports      Actions│
-│ ⇄ Networks    5│ ▾  myshop (compose) 3/3 running              4.1%            ▶ ■ 🗑 │
-│               │ ☐   ├ web-1        nginx:1.27    Up 2h       0.3%  8080:80 ↗ ■ ⟳ 🗑 │
-│               │ ☐   ├ api-1        myshop/api    Up 2h       3.7%  3000      ■ ⟳ 🗑 │
-│               │ ☐   └ db-1         postgres:16   Up 2h       0.1%  5432      ■ ⟳ 🗑 │
-│               │ ☐  redis           redis:7       Exited (0)                   ▶ 🗑 │
+│ ⇄ Networks    5│ ▾  myshop (compose) 3/3 running              4.1%            ■ ⟳ ⋮ │
+│               │ ☐   ├ web-1        nginx:1.27    Up 2h       0.3%  8080:80 ↗ ■ ⟳ ⋮ │
+│               │ ☐   ├ api-1        myshop/api    Up 2h       3.7%  3000      ■ ⟳ ⋮ │
+│               │ ☐   └ db-1         postgres:16   Up 2h       0.1%  5432      ■ ⟳ ⋮ │
+│               │ ☐  redis           redis:7       Exited (0)                   ▶ ⟳ ⋮ │
 │               │                                                                      │
 ├───────────────┴──────────────────────────────────────────────────────────────────────┤
 │ StatusBar: ● Connected · Docker 27.3.1 · API 1.47 · linux/amd64        RAM —  CPU — │
@@ -31,10 +31,10 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings |
 | Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…", "Rescan" |
 | Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
-| Page header | `h_flex` + `Input` (search) + `DropdownButton`/`Select` (filters, group-by) + `Button`s | |
+| Page header | `v_flex` of two rows: the title on the left and the view controls (filters, group-by, page buttons) on the right; then the search `Input` on the left and, on the right, the summary counts (or the selection actions while rows are checked, SHL-005) followed by the page `⋮`. A small gap separates the header from the table | `chrome::page_header` |
 | Lists | `DataTable` (`TableState` + `TableDelegate`) | Grouped containers: the delegate flattens a tree into rows with `depth` and `expanded`, and renders a disclosure chevron in column 0 (CON-011) |
 | Detail pages | `TabBar::segmented()` + `Tab` (icon + label) | SHL-025 |
-| Key/value panels | `DescriptionList`, `GroupBox` | |
+| Key/value panels | `DescriptionList` under a section heading | `ui::section` |
 | Charts | `AreaChart`, `LineChart` | |
 | Raw JSON | `Input` in multi-line code-editor mode, read-only, with JSON syntax highlighting (`highlighter`) | |
 | Confirmations | `Dialog` / `AlertDialog` | |
@@ -49,7 +49,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 - **SHL-021** Windows/Linux: no menu bar. The same commands are in the title-bar overflow menu (`Alt` focuses it) and in the command palette.
 - **SHL-022** Single instance per user. A second launch focuses the existing window and exits (10 §7).
 - **SHL-023** Linux: a `.desktop` file and Wayland `app_id` = `dev.dockering.Dockering`, so the dock/taskbar icon matches.
-- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Its focus ring follows the control's rounded outline (KBD-003) and, like the sidebar cursor ring, shows only after keyboard input, so a mouse navigation doesn't ring the tab bar it focuses (KBD-007). Inner tab bars (Stats window, terminal sessions) keep their own style.
+- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Inner tab bars (Stats window, terminal sessions) keep their own style.
 - **SHL-024** UI language is **English only** in v1. All strings go through one module (`strings.rs`) so they can be localised later. OS high-contrast settings: the System theme follows the OS light/dark setting. A dedicated high-contrast theme is post-v1. UI zoom is `Mod+=` / `Mod+-` / `Mod+0` (scales the rem size).
 
 ## 2. Navigation model
@@ -79,7 +79,8 @@ pub enum Route {
 - **SHL-002** Destructive actions (delete, prune, force-remove, kill) need a confirmation `Dialog`. The dialog says what will be removed and reclaimed. "Don't ask again" is offered only for delete of a *stopped* container.
 - **SHL-003** Errors from actions → error `Notification` with the engine message and a *Copy details* action. Errors from list loads → inline panel with *Retry*.
 - **SHL-004** Lists keep the previous data while refreshing. Rows never flicker or reorder unless the sort key changed.
-- **SHL-005** Selection: checkbox column plus `Shift`/`Ctrl`-click. A bulk action bar appears when 2 or more rows are selected (Start, Stop, Delete).
+- **SHL-005** Selection: checkbox column plus `Shift`/`Ctrl`-click. The checkbox column's header is a select-all checkbox: checked when every visible row is; a click selects every visible row, or clears a non-empty selection. While any row is checked (even one), the selection actions (count, page-specific actions such as Start/Stop, Delete, Clear) replace the summary counts in the page header's second row, left of the page `⋮`, and act on exactly the checked rows. Networks has no checkbox column.
+- **SHL-026** Row actions column: fixed icon slots in the same position on every row: start/stop (toggles with state), restart, then `⋮` (the row menu with every other action, including Delete). Pages without start/restart show only the slots they have, ending with `⋮`. Delete is never an inline row button: it's reached through `⋮`, the context menu, `Del`, or the selection actions.
 - **SHL-006** Search is a case-insensitive substring match over name, image, id prefix, and compose project. It is debounced by 120 ms and runs on `background_spawn` above 2,000 rows.
 - **SHL-007** Relative times ("2 hours ago") refresh every 30 s through a single app-wide ticker, not per row.
 - **SHL-008** Ids are shortened to 12 characters with a copy-to-clipboard button. Sizes use SI units (`1.2 GB`), as Docker Desktop does.
@@ -93,7 +94,8 @@ pub enum Route {
 
 - Docker-Desktop-like density: 36 px rows, 13 px UI font, 12 px monospaced font for ids and ports.
 - Status chips (`Tag::color`, soft: tinted background, coloured label, leading dot): Running = green, Paused = amber, Exited(0) = grey, Exited(≠0)/Dead = red, Restarting = sky with a spinner, Created = grey outline. Health shows as a second, outlined chip. *In use* chips use the same soft green.
-- Sidebar: hover is a neutral tint, the active page an accent tint with an accent icon. While the sidebar region has keyboard focus, the cursor item shows the focus ring; the region itself draws no border, so focus never changes the layout.
+- Sidebar: hover is a neutral tint, the active page an accent tint with an accent icon. While the sidebar region has keyboard focus, the cursor item gets the hover tint. Nothing draws a focus ring (KBD-003).
+- Groups of content (detail sections, settings groups) have no surrounding border: a muted semibold title followed by a 1 px `border`-coloured line that runs to the right edge, then the content. Tables and lists inside keep their own border (`ui::section`).
 - Ports render as links (`8080:80 ↗`). Clicking one opens `http://localhost:8080` in the default browser via `cx.open_url`.
 - Icons come from the bundled GPUI Kit icon set (Lucide). App-specific icons go in `assets/icons/`.
 

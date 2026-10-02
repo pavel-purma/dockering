@@ -9,7 +9,6 @@
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::description_list::DescriptionList;
-use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -74,45 +73,43 @@ pub(super) fn blocks(
 ) -> Vec<AnyElement> {
     let hub = AppState::hub(cx);
     let log_dir = hub.paths().log_dir.display().to_string();
-    let logging = GroupBox::new()
-        .outline()
-        .title(s::DIAG_LOGGING)
-        .child(
-            v_flex()
-                .gap_3()
-                .child(this.key_row(Key::LogLevel, s::DIAG_LOG_LEVEL, s::DIAG_LOG_LEVEL_DESC, cx))
-                .child(super::setting_row(
-                    s::DIAG_LOGS_FOLDER,
-                    None,
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_family(cx.theme().mono_font_family.clone())
-                                .text_color(cx.theme().muted_foreground)
-                                .child(log_dir),
-                        )
-                        .child(
-                            Button::new("diag-open-logs")
-                                .small()
-                                .outline()
-                                .icon(IconName::FolderOpen)
-                                .label(s::CMD_OPEN_LOGS_FOLDER)
-                                .on_click(super::dispatch_here(&this.focus, OpenLogsFolder)),
-                        )
-                        .into_any_element(),
-                    None,
-                    cx,
-                )),
-        )
-        .into_any_element();
+    let logging = crate::ui::section(
+        s::DIAG_LOGGING,
+        v_flex()
+            .gap_3()
+            .child(this.key_row(Key::LogLevel, s::DIAG_LOG_LEVEL, s::DIAG_LOG_LEVEL_DESC, cx))
+            .child(super::setting_row(
+                s::DIAG_LOGS_FOLDER,
+                None,
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_color(cx.theme().muted_foreground)
+                            .child(log_dir),
+                    )
+                    .child(
+                        Button::new("diag-open-logs")
+                            .small()
+                            .outline()
+                            .icon(IconName::FolderOpen)
+                            .label(s::CMD_OPEN_LOGS_FOLDER)
+                            .on_click(super::dispatch_here(&this.focus, OpenLogsFolder)),
+                    )
+                    .into_any_element(),
+                None,
+                cx,
+            )),
+        cx,
+    )
+    .into_any_element();
 
-    let support = GroupBox::new()
-        .outline()
-        .title(s::DIAG_SUPPORT)
-        .child(super::setting_row(
+    let support = crate::ui::section(
+        s::DIAG_SUPPORT,
+        super::setting_row(
             s::COPY_DIAGNOSTICS,
             Some(s::COPY_DIAGNOSTICS_DESC),
             Button::new("diag-copy")
@@ -125,8 +122,10 @@ pub(super) fn blocks(
                 .into_any_element(),
             None,
             cx,
-        ))
-        .into_any_element();
+        ),
+        cx,
+    )
+    .into_any_element();
 
     // ENG-110: transport and WSL version per engine (connected at least once).
     let engines = this.engine_list.read(cx).engines().to_vec();
@@ -162,10 +161,9 @@ pub(super) fn blocks(
         };
         list = list.item(e.config.name.clone(), value, 1);
     }
-    let transports = GroupBox::new()
-        .outline()
-        .title(s::DIAG_ENGINES)
-        .child(if engines.is_empty() {
+    let transports = crate::ui::section(
+        s::DIAG_ENGINES,
+        if engines.is_empty() {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
@@ -173,41 +171,42 @@ pub(super) fn blocks(
                 .into_any_element()
         } else {
             list.into_any_element()
-        })
-        .into_any_element();
+        },
+        cx,
+    )
+    .into_any_element();
 
-    let about = GroupBox::new()
-        .outline()
-        .title(s::DIAG_ABOUT)
-        .child(
-            v_flex()
-                .gap_3()
-                .child(super::setting_row(
-                    s::DIAG_VERSION,
-                    None,
-                    div()
-                        .text_sm()
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .child(format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")))
-                        .into_any_element(),
-                    None,
-                    cx,
-                ))
-                .child(super::setting_row(
-                    s::VIEW_LICENSES,
-                    Some(s::VIEW_LICENSES_DESC),
-                    Button::new("diag-licenses")
-                        .small()
-                        .outline()
-                        .icon(IconName::ExternalLink)
-                        .label(s::VIEW_LICENSES)
-                        .on_click(super::dispatch_here(&this.focus, ViewLicenses))
-                        .into_any_element(),
-                    None,
-                    cx,
-                )),
-        )
-        .into_any_element();
+    let about = crate::ui::section(
+        s::DIAG_ABOUT,
+        v_flex()
+            .gap_3()
+            .child(super::setting_row(
+                s::DIAG_VERSION,
+                None,
+                div()
+                    .text_sm()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .child(format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")))
+                    .into_any_element(),
+                None,
+                cx,
+            ))
+            .child(super::setting_row(
+                s::VIEW_LICENSES,
+                Some(s::VIEW_LICENSES_DESC),
+                Button::new("diag-licenses")
+                    .small()
+                    .outline()
+                    .icon(IconName::ExternalLink)
+                    .label(s::VIEW_LICENSES)
+                    .on_click(super::dispatch_here(&this.focus, ViewLicenses))
+                    .into_any_element(),
+                None,
+                cx,
+            )),
+        cx,
+    )
+    .into_any_element();
 
     vec![logging, support, transports, about]
 }

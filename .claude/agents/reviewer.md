@@ -19,7 +19,7 @@ The diff (`git diff main...HEAD`, or as given), `CLAUDE.md`, the relevant `docs/
 6. **WSLC COM safety** (ADR-0003). `unsafe` only in `dk-engine-wslc/src/com/` with `// SAFETY:`. No vtable call without a verified ABI module. `CoTaskMemFree` / handle ownership is correct. COM calls only on the COM worker pool.
 7. **Cross-platform.** `cfg` correctness, and the crate still compiles on non-Windows. Path handling (no hard-coded `/` or `\\`).
 8. **Errors and UX.** Errors mapped to `EngineError` with hints. The four UI states are present. Destructive actions confirm.
-   **Keyboard** (KBD-*): new controls are focusable with a visible focus ring, commands are `Action`s with a binding or palette entry, there are no binding conflicts, focus is restored, there are no traps, and keystroke tests exist.
+   **Keyboard** (KBD-*): new controls are focusable and draw no focus ring (KBD-003), commands are `Action`s with a binding or palette entry, there are no binding conflicts, focus is restored, there are no traps, and keystroke tests exist.
 9. **Performance & deps.** NFR-010…013 budgets aren't regressed (perf note in the PR for UI-heavy changes). `cargo deny` is clean, and new deps have allowed licences (REL-003).
 10. **Tests.** Every requirement ID touched has a test at the right layer. No real sleeps. No Docker dependency outside `it` tests.
 

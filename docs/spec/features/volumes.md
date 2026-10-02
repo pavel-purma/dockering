@@ -8,7 +8,7 @@
 
 | ID | Requirement |
 |---|---|
-| VOL-001 | List columns: ☐ · Name · Driver · Compose project (if labelled) · Created · Size · Status (*In use* by N containers) · Actions (Delete). |
+| VOL-001 | List columns: ☐ · Name · Driver · Compose project (if labelled) · Created · Size · Status (*In use* by N containers) · Actions (`⋮`; Delete is in the `⋮` menu, SHL-026). |
 | VOL-002 | Size and in-use counts come from `disk_usage()`, loaded lazily on the Volumes page only, after the list renders, with skeleton cells in the meantime. Without `DISK_USAGE` (e.g. WSLC), or when the call fails, Size shows "—" and in-use is computed from container mounts. |
 | VOL-003 | Sort by name, created, or size. Filter: *All* / *In use* / *Unused*. Search by name. |
 | VOL-004 | *Create volume* dialog: name (optional), driver (default `local`), driver options (key/value rows), labels. |

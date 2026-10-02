@@ -1,7 +1,7 @@
 //! Settings page (`Route::Settings { section }`, SET-001…070, ENG-104/105/109/110).
 //!
 //! Layout: the section nav is the app sidebar in Settings mode (SET-080, `shell::app_shell`),
-//! so this page is only the scrolling content column of GPUI Kit `GroupBox` groups with
+//! so this page is only the scrolling content column of titled sections (`ui::section`) with
 //! `Switch`, `NumberInput`, `Input`, and `Select` controls.
 //!
 //! The GPUI Kit `Settings` container isn't used: its virtualised page list drops off-screen
@@ -20,7 +20,6 @@ pub mod mapping;
 
 use std::collections::HashMap;
 
-use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInput};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::switch::Switch;
@@ -434,6 +433,7 @@ impl SettingsPage {
                 group(
                     s::SET_GROUP_APPEARANCE,
                     vec![self.key_row(Key::Theme, s::SET_THEME, s::SET_THEME_DESC, cx)],
+                    cx,
                 ),
                 group(
                     s::SET_GROUP_BEHAVIOUR,
@@ -457,6 +457,7 @@ impl SettingsPage {
                             cx,
                         ),
                     ],
+                    cx,
                 ),
             ],
             S::Containers => vec![
@@ -477,10 +478,12 @@ impl SettingsPage {
                             cx,
                         ),
                     ],
+                    cx,
                 ),
                 group(
                     s::SET_GROUP_UPDATES,
                     vec![self.key_row(Key::Polling, s::SET_POLLING, s::SET_POLLING_DESC, cx)],
+                    cx,
                 ),
             ],
             S::Logs => vec![group(
@@ -501,6 +504,7 @@ impl SettingsPage {
                         cx,
                     ),
                 ],
+                cx,
             )],
             S::Terminal => vec![
                 group(
@@ -515,6 +519,7 @@ impl SettingsPage {
                             cx,
                         ),
                     ],
+                    cx,
                 ),
                 group(
                     s::SET_GROUP_SESSION,
@@ -534,6 +539,7 @@ impl SettingsPage {
                             cx,
                         ),
                     ],
+                    cx,
                 ),
             ],
             S::Stats => vec![group(
@@ -552,6 +558,7 @@ impl SettingsPage {
                         cx,
                     ),
                 ],
+                cx,
             )],
             S::Diagnostics => diagnostics::blocks(self, window, cx),
             S::Engines => engines::blocks(self, window, cx),
@@ -610,13 +617,9 @@ pub(crate) fn dispatch_here(
     move |_, window, cx| page.dispatch_action(&action, window, cx)
 }
 
-/// A titled GPUI Kit `GroupBox` of setting rows.
-fn group(title: &'static str, rows: Vec<AnyElement>) -> AnyElement {
-    GroupBox::new()
-        .outline()
-        .title(title)
-        .child(v_flex().gap_3().children(rows))
-        .into_any_element()
+/// A titled section of setting rows.
+fn group(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
+    crate::ui::section(title, v_flex().gap_3().children(rows), cx).into_any_element()
 }
 
 /// One setting: title and description on the left, the control (and its inline validation

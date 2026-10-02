@@ -56,11 +56,9 @@ pub fn apply(mode: ThemeMode, scale: f32, window: Option<&mut Window>, cx: &mut 
         theme.primary_hover = accent.opacity(0.9);
         theme.primary_active = accent.opacity(0.8);
         theme.primary_foreground = Hsla::white();
-        theme.ring = if dark {
-            accent.blend(Hsla::white().opacity(0.25))
-        } else {
-            accent
-        };
+        // No focus rings anywhere: GPUI Kit controls skip the outer ring, and the focused
+        // border they still tint with `ring` matches their normal border.
+        theme.ring = theme.input;
         theme.link = accent_text;
         theme.link_hover = accent_text.opacity(0.85);
         theme.button_primary = accent;
@@ -88,7 +86,7 @@ pub fn apply(mode: ThemeMode, scale: f32, window: Option<&mut Window>, cx: &mut 
             theme.table_head = theme.background.blend(Hsla::black().opacity(0.07));
         }
         theme.font_size = px(BASE_FONT_SIZE * clamp_scale(scale));
-        theme.focus_ring = true;
+        theme.focus_ring = false;
     });
 }
 

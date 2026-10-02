@@ -7,7 +7,7 @@
 Settings is a full page (route `Settings { section }`, so deep links and back/forward work). The
 section nav is the **app sidebar in Settings mode** (SET-080): the page draws no column of its own; its
 content column is capped at 900 px and centred in the space right of the sidebar.
-The content column holds GPUI Kit primitives: `GroupBox` groups with
+The content column holds titled sections (`ui::section`, spec 30 §4) with
 `Switch`, `NumberInput`, `Input`, and `Select` controls, plus inline validation messages.
 
 The GPUI Kit `Settings` container is **not** used. Its virtualised page list drops off-screen

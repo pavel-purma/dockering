@@ -28,7 +28,6 @@ use crate::keymap::ctx;
 use crate::nav::Route;
 use crate::strings as s;
 use crate::ui::notify;
-use crate::ui::widgets::focus_ring;
 
 /// A detail fetch: `None` before the first result.
 #[derive(Debug, Clone)]
@@ -107,18 +106,15 @@ pub fn segmented_tabs(
 }
 
 /// The focus wrapper of a detail tab control: one Tab stop in the `DetailTabs` key context
-/// (`←/→` → `detail::PrevTab/NextTab`, KBD-040). The ring follows the control's rounded
-/// outline instead of boxing the whole row (KBD-003, SHL-025), and shows for keyboard focus
-/// only: navigation focuses the tab bar (KBD-007), so a mouse click would otherwise ring it.
+/// (`←/→` → `detail::PrevTab/NextTab`, KBD-040). It hugs the control (SHL-025).
 pub fn tab_bar_frame(
     id: &'static str,
     key_context: &str,
     focus: &FocusHandle,
     bar: TabBar,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let focused = focus.is_focused(window) && window.last_input_was_keyboard();
     div()
         .id(id)
         .key_context(key_context)
@@ -126,7 +122,6 @@ pub fn tab_bar_frame(
         .self_start()
         .p(px(2.))
         .rounded(cx.theme().radius_lg + px(2.))
-        .map(|el| focus_ring(el, focused, cx))
         .child(bar)
 }
 
@@ -171,10 +166,9 @@ pub fn header(
     title: impl Into<SharedString>,
     chips: Vec<AnyElement>,
     actions: Vec<AnyElement>,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> AnyElement {
-    let focused = focus.is_focused(window);
     h_flex()
         .id("detail-header")
         .key_context(ctx::DETAIL_HEADER)
@@ -183,7 +177,6 @@ pub fn header(
         .items_center()
         .p_1()
         .rounded(cx.theme().radius)
-        .map(|el| focus_ring(el, focused, cx))
         .child(
             Button::new("detail-back")
                 .ghost()
@@ -374,7 +367,6 @@ impl LinkList {
                 .track_focus(&self.focus)
                 .p_2()
                 .rounded(cx.theme().radius)
-                .map(|el| focus_ring(el, focused, cx))
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .child(empty)
@@ -388,7 +380,6 @@ impl LinkList {
             .id(id)
             .track_focus(&self.focus)
             .rounded(cx.theme().radius)
-            .map(|el| focus_ring(el, focused, cx))
             .on_key_down(
                 cx.listener(move |this, e: &gpui_kit::KeyDownEvent, window, cx| {
                     if e.keystroke.modifiers.modified() {

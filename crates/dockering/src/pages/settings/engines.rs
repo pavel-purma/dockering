@@ -625,53 +625,52 @@ pub(super) fn blocks(
     cx: &mut Context<SettingsPage>,
 ) -> Vec<AnyElement> {
     let rescanning = this.engines.rescanning;
-    let discovery = GroupBox::new()
-        .outline()
-        .title(s::ENGINES_DISCOVERY)
-        .child(
-            v_flex()
-                .gap_3()
-                .child(this.bool_row(
-                    BoolKey::ShowAllDistros,
-                    s::SET_SHOW_ALL_DISTROS,
-                    s::SET_SHOW_ALL_DISTROS_DESC,
-                    cx,
-                ))
-                .child(this.bool_row(
-                    BoolKey::ShowAllSessions,
-                    s::SET_SHOW_ALL_SESSIONS,
-                    s::SET_SHOW_ALL_SESSIONS_DESC,
-                    cx,
-                ))
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            Button::new("eng-rescan")
-                                .small()
-                                .outline()
-                                .icon(IconName::RefreshCw)
-                                .label(s::RESCAN)
-                                .loading(rescanning)
-                                .tooltip_with_action(s::RESCAN, &Rescan, None)
-                                .on_click(super::dispatch_here(&this.focus, Rescan)),
-                        )
-                        .child(crate::ui::widgets::focus_wrap(
-                            "eng-add-wrap",
-                            &this.engines.add_focus,
-                            Button::new("eng-add")
-                                .small()
-                                .primary()
-                                .icon(IconName::Plus)
-                                .label(s::ADD_ENGINE)
-                                .on_click(super::dispatch_here(&this.focus, AddEngine)),
-                            |_, w, cx| w.dispatch_action(Box::new(AddEngine), cx),
-                            window,
-                            cx,
-                        )),
-                ),
-        )
-        .into_any_element();
+    let discovery = crate::ui::section(
+        s::ENGINES_DISCOVERY,
+        v_flex()
+            .gap_3()
+            .child(this.bool_row(
+                BoolKey::ShowAllDistros,
+                s::SET_SHOW_ALL_DISTROS,
+                s::SET_SHOW_ALL_DISTROS_DESC,
+                cx,
+            ))
+            .child(this.bool_row(
+                BoolKey::ShowAllSessions,
+                s::SET_SHOW_ALL_SESSIONS,
+                s::SET_SHOW_ALL_SESSIONS_DESC,
+                cx,
+            ))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("eng-rescan")
+                            .small()
+                            .outline()
+                            .icon(IconName::RefreshCw)
+                            .label(s::RESCAN)
+                            .loading(rescanning)
+                            .tooltip_with_action(s::RESCAN, &Rescan, None)
+                            .on_click(super::dispatch_here(&this.focus, Rescan)),
+                    )
+                    .child(crate::ui::widgets::focus_wrap(
+                        "eng-add-wrap",
+                        &this.engines.add_focus,
+                        Button::new("eng-add")
+                            .small()
+                            .primary()
+                            .icon(IconName::Plus)
+                            .label(s::ADD_ENGINE)
+                            .on_click(super::dispatch_here(&this.focus, AddEngine)),
+                        |_, w, cx| w.dispatch_action(Box::new(AddEngine), cx),
+                        window,
+                        cx,
+                    )),
+            ),
+        cx,
+    )
+    .into_any_element();
     let list = this.engine_list.read(cx);
     let engines: Vec<EngineStatus> = list.engines().to_vec();
     let merged: Vec<Vec<(EngineId, String)>> =

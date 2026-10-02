@@ -53,7 +53,7 @@ Disconnect or ignore the mouse. Run on **each OS**, and on Windows **and** Linux
 | 18 | `Mod+2`, `G`, type `alpine:3.20`, `Enter` | Pull notification with progress; *Cancel* reachable | | | | | |
 | 19 | `Mod+Shift+N` | Newest toast focused; `Tab` to its action; `Esc` dismisses (KBD-074, no automated test) | | | | | |
 | 20 | `Mod+3`, `N`, fill the form, `Mod+Shift+Enter` adds a row, `Mod+Enter` | Volume created | | | | | |
-| 21 | `Mod+,`, arrows in the section nav, `Tab` through every control | Every control reachable, visible focus ring, no trap | | | | | |
+| 21 | `Mod+,`, arrows in the section nav, `Tab` through every control | Every control reachable, no trap | | | | | |
 | 22 | Settings → Engines → *Add engine…*, `Esc` | Dialog closes; focus back on the invoker | | | | | |
 | 23 | `Mod+/` (and `F1`), type to filter | Shortcut reference shows only this OS's bindings | | | | | |
 | 24 | `F6` / `Shift+F6` repeatedly | Cycles Title bar → Sidebar → Content → Status bar and restores focus | | | | | |
@@ -126,7 +126,7 @@ Required for every release, and **before shipping any new ABI module**.
 ## 7. Visual review (light + dark)
 
 - [ ] Screenshots in **light and dark** of: first run, Containers (grouped, with the bulk bar), container detail (each tab), Images + pull notification, Volumes, Networks, Settings (each section), engine switcher, shortcut reference, a destructive confirm, an error toast
-- [ ] Focus ring visible on every focusable element, with ≥ 3:1 contrast in both themes (KBD-003)
+- [ ] No focus ring or accent border on any focused control (KBD-003)
 - [ ] The Network/Disk overlaid line charts are aligned (shared axes, no doubled labels) (STA-004)
 - [ ] HiDPI and mixed-DPI monitors render crisply (NFR-041). UI zoom (`Mod+=`/`Mod+-`/`Mod+0`) persists.
 - [ ] `reviewer` signs off on the screenshot set

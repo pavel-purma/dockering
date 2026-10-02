@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use dk_core::format::format_size;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex};
@@ -24,7 +23,7 @@ use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::{copy_id, relative_time};
 
 pub mod col {
-    pub const SELECT: &str = "select";
+    pub const SELECT: &str = crate::ui::list_table::SELECT_COLUMN;
     pub const NAME: &str = super::sort_keys::NAME;
     pub const TAG: &str = super::sort_keys::TAG;
     pub const ID: &str = "id";
@@ -45,7 +44,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 90.),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 110.).pin_right(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 90.).pin_right(),
     ]
 }
 
@@ -78,7 +77,7 @@ impl ListDelegate for ImagesDelegate {
         row: &ListRow<(), ImageRow>,
         row_ix: usize,
         column: &ColumnSpec,
-        selected: bool,
+        _selected: bool,
         _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -87,17 +86,6 @@ impl ListDelegate for ImagesDelegate {
         };
         let muted = cx.theme().muted_foreground;
         match column.key {
-            col::SELECT => {
-                let key = row.key.clone();
-                Checkbox::new(("row-check", row_ix))
-                    .checked(selected)
-                    .tab_stop(false)
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        window.dispatch_action(on_row(&key, RowCommand::ToggleSelected), cx)
-                    })
-                    .into_any_element()
-            }
             col::NAME => h_flex()
                 .gap_1()
                 .items_center()
@@ -151,13 +139,6 @@ impl ListDelegate for ImagesDelegate {
                         s::RUN,
                         self.read_only,
                         Box::new(RunRow { row: key.clone() }),
-                    ))
-                    .child(row_button(
-                        ("delete", row_ix),
-                        Lucide::Trash,
-                        s::ACTION_DELETE,
-                        self.read_only,
-                        on_row(&key, RowCommand::Delete),
                     ))
                     .child(row_menu_button(
                         ("more", row_ix),

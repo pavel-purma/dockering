@@ -1,14 +1,17 @@
-//! Shared page chrome for the Images, Volumes and Networks lists (spec 30 §1 "Page header"):
-//! title row, search box, a focusable segmented filter (KBD-039), the overflow trigger, the
-//! bulk bar (SHL-005), the four list states (SHL-004), and menu items that show their key
-//! hint (KBD-036). Pages compose these; the logic stays in the page.
+//! Shared page chrome for the list pages (spec 30 §1 "Page header"): the header layout
+//! (title + view controls, search + selection actions), a focusable segmented filter
+//! (KBD-039), the overflow trigger, the selection actions (SHL-005), the four list states
+//! (SHL-004), and menu items that show their key hint (KBD-036). Pages compose these; the
+//! logic stays in the page.
 
 use dk_core::EngineError;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, h_flex};
+use gpui_kit::component::{
+    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, h_flex, v_flex,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     Action, AnyElement, App, Entity, FocusHandle, IntoElement, SharedString, Window, div, px,
@@ -18,32 +21,7 @@ use crate::actions::{SetFilter, SortByColumn, list};
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, RowMenuTrigger, SortState};
 use crate::ui::menu::TrackBounds as _;
-use crate::ui::widgets::{focus_ring, focus_wrap};
-
-/// The page title with a muted summary (`12 images · 1.2 GB`) and a refresh spinner.
-pub fn title_row(
-    title: &'static str,
-    summary: impl Into<SharedString>,
-    loading: bool,
-    cx: &App,
-) -> gpui_kit::Div {
-    h_flex()
-        .gap_3()
-        .items_center()
-        .child(
-            div()
-                .text_xl()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .child(title),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(summary.into()),
-        )
-        .when(loading, |this| this.child(Spinner::new().small()))
-}
+use crate::ui::widgets::focus_wrap;
 
 /// The search field (SHL-006).
 pub fn search_box(state: &Entity<InputState>) -> AnyElement {
@@ -65,15 +43,13 @@ pub fn filter_segment(
     focus: &FocusHandle,
     options: &'static [(&'static str, &'static str)],
     current: &'static str,
-    window: &Window,
+    _window: &Window,
     cx: &App,
 ) -> AnyElement {
-    let focused = focus.is_focused(window);
     div()
         .id(id)
         .track_focus(focus)
         .rounded(cx.theme().radius)
-        .map(|el| focus_ring(el, focused, cx))
         .on_key_down(move |e: &gpui_kit::KeyDownEvent, window, cx| {
             let ix = options.iter().position(|(v, _)| *v == current).unwrap_or(0);
             let next = match e.keystroke.key.as_str() {
@@ -161,29 +137,86 @@ pub fn overflow_trigger(
     )
 }
 
-/// SHL-005: shown when ≥ 2 rows are selected. `delete_disabled` gates the action.
-pub fn bulk_bar(selected: usize, delete_disabled: bool, cx: &App) -> Option<AnyElement> {
-    if selected < 2 {
+/// The page header (spec 30 §1). Top row: the title (and a refresh spinner) on the left,
+/// the view controls (filters, page buttons) on the right. Second row: the search on the
+/// left; on the right the muted summary (`12 images · 1.2 GB`), replaced by the selection
+/// actions while any row is checked (SHL-005), then the page `⋮` overflow.
+#[allow(clippy::too_many_arguments)]
+pub fn page_header(
+    id: &'static str,
+    title: &'static str,
+    loading: bool,
+    controls: impl IntoIterator<Item = AnyElement>,
+    search: &Entity<InputState>,
+    summary: impl Into<SharedString>,
+    selection: Option<AnyElement>,
+    overflow: AnyElement,
+    cx: &App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let summary = selection.unwrap_or_else(|| {
+        div()
+            .debug_selector(|| "page-summary".into())
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .child(summary.into())
+            .into_any_element()
+    });
+    v_flex()
+        .id(id)
+        .key_context(crate::keymap::ctx::TOOLBAR)
+        .gap_2()
+        .px_4()
+        .pt_3()
+        .pb_3()
+        .child(
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+                .when(loading, |this| this.child(Spinner::new().small()))
+                .child(div().flex_1())
+                .children(controls),
+        )
+        .child(
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(search_box(search))
+                .child(div().flex_1())
+                .child(summary)
+                .child(overflow),
+        )
+}
+
+/// SHL-005: the selection actions, shown while any row is checked. `leading` are page
+/// specific buttons placed before Delete; `delete_disabled` gates the delete action.
+pub fn selection_actions(
+    selected: usize,
+    leading: Vec<Button>,
+    delete_disabled: bool,
+    cx: &App,
+) -> Option<AnyElement> {
+    if selected == 0 {
         return None;
     }
     Some(
         h_flex()
             .id("bulk-bar")
-            .mx_4()
-            .mb_2()
-            .px_3()
-            .py_1()
+            .debug_selector(|| "selection-actions".into())
             .gap_2()
             .items_center()
-            .rounded(cx.theme().radius)
-            .bg(cx.theme().accent)
             .child(
                 div()
                     .text_sm()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().muted_foreground)
                     .child(s::selected_count(selected)),
             )
-            .child(div().flex_1())
+            .children(leading)
             .child(
                 Button::new("bulk-delete")
                     .small()

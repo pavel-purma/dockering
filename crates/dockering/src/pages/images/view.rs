@@ -1,6 +1,6 @@
-//! The Images page (IMG-001…007): toolbar (search, filter, Pull, overflow), bulk bar, the
-//! `ListTable`, and every image command. Keys, buttons and menus dispatch the same actions
-//! (KBD-002): `U` run, `G` pull, `C` copy id, `Del` delete, `Enter` detail.
+//! The Images page (IMG-001…007): header (title, filter, Pull, overflow; search, selection
+//! actions), the `ListTable`, and every image command. Keys, buttons and menus dispatch the
+//! same actions (KBD-002): `U` run, `G` pull, `C` copy id, `Del` delete, `Enter` detail.
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -10,7 +10,7 @@ use dk_core::{Capabilities, ContainerSummary, EngineId, ImageSummary};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
@@ -226,6 +226,16 @@ impl ImagesPage {
             .collect()
     }
 
+    /// The checked rows, for the selection actions (SHL-005).
+    fn selection_targets(&self, cx: &App) -> Vec<ImageRow> {
+        let t = self.table.read(cx);
+        let m = t.model(cx);
+        m.selection_targets()
+            .iter()
+            .filter_map(|k| m.find_item(k).cloned())
+            .collect()
+    }
+
     fn open_detail(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(r) = self.row(key, cx) else {
             return;
@@ -389,7 +399,7 @@ impl ImagesPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let targets = self.targets(cx);
+        let targets = self.selection_targets(cx);
         self.confirm_delete(targets, window, cx);
     }
 
@@ -643,73 +653,65 @@ impl ImagesPage {
         let (count, size) = model::totals(self.images(cx));
         let ro = self.read_only(cx);
         let this = cx.entity().downgrade();
-        v_flex()
-            .id("images-toolbar")
-            .key_context(ctx::TOOLBAR)
-            .gap_2()
-            .px_4()
-            .pt_3()
-            .pb_2()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(chrome::title_row(
-                        s::PAGE_IMAGES,
-                        s::total_count_size(s::IMAGE, count, &format_size(size)),
-                        res.loading,
-                        cx,
-                    ))
-                    .child(div().flex_1())
-                    .child(chrome::search_box(&self.search))
-                    .child(chrome::filter_segment(
-                        "image-filter",
-                        &self.filter_focus,
-                        ImageFilter::OPTIONS,
-                        self.filter.as_str(),
-                        window,
-                        cx,
-                    ))
-                    .child(
-                        chrome::header_button(
-                            "pull-wrap",
-                            &self.pull_focus,
-                            Button::new("pull-image")
-                                .small()
-                                .primary()
-                                .icon(IconName::ArrowDown)
-                                .label(s::PULL)
-                                .disabled(ro)
-                                .tooltip(crate::keymap::tooltip_for(
-                                    s::PULL_IMAGE,
-                                    &image::Pull,
-                                    ctx::LIST_KEYS,
-                                )),
-                            Box::new(image::Pull),
-                            window,
-                            cx,
-                        )
-                        .debug_selector(|| "pull-image-trigger".into()),
-                    )
-                    .child(
-                        chrome::overflow_trigger(
-                            "images-overflow",
-                            &self.overflow_focus,
-                            move |window, cx| {
-                                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
-                            },
-                            window,
-                            cx,
-                        )
-                        .on_bounds({
-                            let this = cx.entity().downgrade();
-                            move |b, _, cx| {
-                                this.update(cx, |p, _| p.overflow_bounds = b).ok();
-                            }
-                        }),
-                    ),
+        let controls = [
+            chrome::filter_segment(
+                "image-filter",
+                &self.filter_focus,
+                ImageFilter::OPTIONS,
+                self.filter.as_str(),
+                window,
+                cx,
+            ),
+            chrome::header_button(
+                "pull-wrap",
+                &self.pull_focus,
+                Button::new("pull-image")
+                    .small()
+                    .primary()
+                    .icon(IconName::ArrowDown)
+                    .label(s::PULL)
+                    .disabled(ro)
+                    .tooltip(crate::keymap::tooltip_for(
+                        s::PULL_IMAGE,
+                        &image::Pull,
+                        ctx::LIST_KEYS,
+                    )),
+                Box::new(image::Pull),
+                window,
+                cx,
             )
-            .into_any_element()
+            .debug_selector(|| "pull-image-trigger".into())
+            .into_any_element(),
+        ];
+        let overflow = chrome::overflow_trigger(
+            "images-overflow",
+            &self.overflow_focus,
+            move |window, cx| {
+                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
+            },
+            window,
+            cx,
+        )
+        .on_bounds({
+            let this = cx.entity().downgrade();
+            move |b, _, cx| {
+                this.update(cx, |p, _| p.overflow_bounds = b).ok();
+            }
+        })
+        .into_any_element();
+        let selected = self.table.read(cx).model(cx).selected().len();
+        chrome::page_header(
+            "images-toolbar",
+            s::PAGE_IMAGES,
+            res.loading,
+            controls,
+            &self.search,
+            s::total_count_size(s::IMAGE, count, &format_size(size)),
+            chrome::selection_actions(selected, Vec::new(), ro, cx),
+            overflow,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -743,8 +745,6 @@ impl RoutedPage for ImagesPage {}
 impl Render for ImagesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let toolbar = self.render_toolbar(window, cx);
-        let selected = self.table.read(cx).model(cx).selected().len();
-        let bulk = chrome::bulk_bar(selected, self.read_only(cx), cx);
         let res = self.store.read(cx).resource(Collection::Images);
         let has_data = self.store.read(cx).images.data().is_some();
         let body = chrome::list_body(
@@ -755,6 +755,7 @@ impl Render for ImagesPage {
             self.table.clone().into_any_element(),
             cx,
         );
+        // The page `⋮` ends the header (right of the search row): Shift+Tab lands on it.
         let prev = self.overflow_focus.clone();
         self.table
             .update(cx, |t, _| t.set_tab_neighbours(Some(prev), None));
@@ -775,7 +776,6 @@ impl Render for ImagesPage {
             .on_action(cx.listener(Self::on_sort_menu))
             .on_action(cx.listener(Self::on_focus_filter))
             .child(toolbar)
-            .children(bulk)
             .child(div().flex_1().min_h_0().child(body))
             .when_some(self.menu.as_ref(), |this, m| this.child(m.render()))
     }

@@ -7,7 +7,6 @@ use std::ops::Range;
 use dk_core::grouping::AggregateState;
 use dk_core::{Capabilities, ContainerState, ContainerSummary};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
@@ -25,7 +24,7 @@ use crate::ui::status_chip::{Tone, container_chip, health_chip, tone_tag};
 use crate::ui::widgets::{port_link, relative_time};
 
 pub mod col {
-    pub const SELECT: &str = "select";
+    pub const SELECT: &str = crate::ui::list_table::SELECT_COLUMN;
     pub const NAME: &str = super::sort_keys::NAME;
     pub const IMAGE: &str = super::sort_keys::IMAGE;
     pub const STATUS: &str = super::sort_keys::STATUS;
@@ -99,41 +98,37 @@ impl ContainersDelegate {
                     )
                 })
         };
+        // Fixed slots so the icons line up across rows: start/stop, restart, ⋮. Delete
+        // lives in the ⋮ menu and the selection actions.
         h_flex()
             .gap_0p5()
-            .map(|this| {
-                if running {
-                    this.child(btn(
-                        "stop",
-                        Lucide::Square.into(),
-                        s::ACTION_STOP,
-                        RowCommand::Stop,
-                        key.clone(),
-                    ))
-                    .child(btn(
-                        "restart",
-                        IconName::RotateCw.into(),
-                        s::ACTION_RESTART,
-                        RowCommand::Restart,
-                        key.clone(),
-                    ))
-                } else {
-                    this.child(btn(
-                        "start",
-                        IconName::Play.into(),
-                        s::ACTION_START,
-                        RowCommand::Start,
-                        key.clone(),
-                    ))
-                }
+            .child(if running {
+                btn(
+                    "stop",
+                    Lucide::Square.into(),
+                    s::ACTION_STOP,
+                    RowCommand::Stop,
+                    key.clone(),
+                )
+            } else {
+                btn(
+                    "start",
+                    IconName::Play.into(),
+                    s::ACTION_START,
+                    RowCommand::Start,
+                    key.clone(),
+                )
             })
-            .child(btn(
-                "delete",
-                Lucide::Trash.into(),
-                s::ACTION_DELETE,
-                RowCommand::Delete,
-                key.clone(),
-            ))
+            .child(
+                btn(
+                    "restart",
+                    IconName::RotateCw.into(),
+                    s::ACTION_RESTART,
+                    RowCommand::Restart,
+                    key.clone(),
+                )
+                .when(!running, |b| b.disabled(true)),
+            )
             .child(row_menu_button(
                 ("more", row_ix),
                 Box::new(OnRow {
@@ -155,7 +150,6 @@ impl ContainersDelegate {
         }
         let disabled = self.read_only;
         let any_running = info.group.aggregate.running > 0;
-        let all_running = info.group.aggregate.state == AggregateState::Running;
         let btn = |id: &'static str,
                    icon: gpui_kit::component::Icon,
                    tip: &'static str,
@@ -179,23 +173,24 @@ impl ContainersDelegate {
                     )
                 })
         };
+        // Same slots as member rows: start/stop all, restart all, ⋮ (start all for a
+        // partly running group and delete all are in the ⋮ menu).
         h_flex()
             .gap_0p5()
-            .when(!all_running, |this| {
-                this.child(btn(
-                    "g-start",
-                    IconName::Play.into(),
-                    s::ACTION_START_ALL,
-                    RowCommand::Start,
-                ))
-            })
-            .when(any_running, |this| {
-                this.child(btn(
+            .child(if any_running {
+                btn(
                     "g-stop",
                     Lucide::Square.into(),
                     s::ACTION_STOP_ALL,
                     RowCommand::Stop,
-                ))
+                )
+            } else {
+                btn(
+                    "g-start",
+                    IconName::Play.into(),
+                    s::ACTION_START_ALL,
+                    RowCommand::Start,
+                )
             })
             .child(btn(
                 "g-restart",
@@ -203,30 +198,13 @@ impl ContainersDelegate {
                 s::ACTION_RESTART_ALL,
                 RowCommand::Restart,
             ))
-            .child(btn(
-                "g-delete",
-                Lucide::Trash.into(),
-                s::ACTION_DELETE_ALL,
-                RowCommand::Delete,
+            .child(row_menu_button(
+                ("g-more", row_ix),
+                Box::new(OnRow {
+                    row: key.clone(),
+                    action: RowCommand::ContextMenu,
+                }),
             ))
-            .into_any_element()
-    }
-
-    fn checkbox(&self, row_ix: usize, key: &SharedString, checked: bool) -> AnyElement {
-        let key = key.clone();
-        Checkbox::new(("row-check", row_ix))
-            .checked(checked)
-            .tab_stop(false)
-            .on_click(move |_, window, cx| {
-                cx.stop_propagation();
-                window.dispatch_action(
-                    Box::new(OnRow {
-                        row: key.clone(),
-                        action: RowCommand::ToggleSelected,
-                    }),
-                    cx,
-                )
-            })
             .into_any_element()
     }
 }
@@ -249,7 +227,7 @@ pub fn columns(show_stats: bool) -> Vec<ColumnSpec> {
     }
     v.push(ColumnSpec::new(col::PORTS, s::COL_PORTS, 150.));
     v.push(ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable());
-    v.push(ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 150.).pin_right());
+    v.push(ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 110.).pin_right());
     v
 }
 
@@ -266,7 +244,7 @@ impl ListDelegate for ContainersDelegate {
         row: &ListRow<GroupInfo, ContainerSummary>,
         row_ix: usize,
         column: &ColumnSpec,
-        selected: bool,
+        _selected: bool,
         _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -275,7 +253,6 @@ impl ListDelegate for ContainersDelegate {
             RowKind::Group {
                 group, expanded, ..
             } => match column.key {
-                col::SELECT => self.checkbox(row_ix, &row.key, selected),
                 col::NAME => {
                     let tooltip = group.group.working_dir.clone();
                     h_flex()
@@ -343,7 +320,6 @@ impl ListDelegate for ContainersDelegate {
                 _ => div().into_any_element(),
             },
             RowKind::Item(c) => match column.key {
-                col::SELECT => self.checkbox(row_ix, &row.key, selected),
                 col::NAME => {
                     let oneoff = c.compose.as_ref().is_some_and(|ci| ci.oneoff);
                     h_flex()
