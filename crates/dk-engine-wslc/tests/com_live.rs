@@ -331,3 +331,107 @@ fn live_cli_preference_and_unknown_config() {
     let info = block_on(e.info()).expect("info");
     assert_eq!(info.transport.as_deref(), Some("com"));
 }
+
+/// PullImage with a Rust `#[implement(IProgressCallback)]` (spec 20 §5.4, S-3). Pulls a small
+/// image (`busybox:1.37`, ~4 MB) and removes it again unless it was already present.
+#[test]
+#[ignore = "needs WSL ≥ 3.0 with WSLC and network access"]
+fn live_pull_with_progress_callback() {
+    init();
+    let e = Arc::new(block_on(com_engine()));
+    let reference = "busybox:1.37";
+    let had = block_on(e.list_images())
+        .expect("images")
+        .iter()
+        .any(|i| i.repo_tags.iter().any(|t| t == reference));
+    let e2 = e.clone();
+    let events = with_timeout(Duration::from_secs(180), async move {
+        e2.pull_image(reference, None).collect::<Vec<_>>().await
+    })
+    .expect("pull finishes");
+    let layers = events
+        .iter()
+        .filter(|p| matches!(p, Ok(dk_core::PullProgress::Layer { .. })))
+        .count();
+    eprintln!(
+        "pull: {} events, {layers} layer events, last = {:?}",
+        events.len(),
+        events.last()
+    );
+    for ev in events.iter().take(8) {
+        eprintln!("  {ev:?}");
+    }
+    assert!(
+        matches!(events.last(), Some(Ok(dk_core::PullProgress::Done { .. }))),
+        "{:?}",
+        events.last()
+    );
+    let tagged = block_on(e.list_images())
+        .expect("images")
+        .iter()
+        .any(|i| i.repo_tags.iter().any(|t| t == reference));
+    assert!(tagged, "pulled image listed");
+    if !had {
+        let removed = block_on(e.remove_image(reference, false)).expect("remove pulled image");
+        eprintln!("removed: {removed:?}");
+    }
+}
+
+/// Records real COM outputs (raw JSON) as fixtures under `tests/fixtures/com-3.0.1/` when
+/// `DK_RECORD_FIXTURES=1`. Volatile fields are kept verbatim (the fake replays them).
+#[test]
+#[ignore = "needs WSL ≥ 3.0 with WSLC; set DK_RECORD_FIXTURES=1 to write files"]
+fn live_record_fixtures() {
+    init();
+    let e = block_on(com_engine());
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/com-3.0.1");
+    let write = std::env::var("DK_RECORD_FIXTURES").is_ok_and(|v| v == "1");
+    let save = |name: &str, v: &serde_json::Value| {
+        let text = serde_json::to_string_pretty(v).expect("json");
+        eprintln!("{name}: {} bytes", text.len());
+        if write {
+            std::fs::create_dir_all(&dir).expect("mkdir");
+            std::fs::write(dir.join(name), text + "\n").expect("write");
+        }
+    };
+    save(
+        "list_networks.json",
+        &block_on(e.list_networks_json()).expect("networks"),
+    );
+    save(
+        "list_volumes.json",
+        &block_on(e.list_volumes_json()).expect("volumes"),
+    );
+    if let Some(id) = running_container(&e) {
+        save(
+            "inspect_container.json",
+            &block_on(e.inspect_container_json(&id)).expect("inspect"),
+        );
+        save("stats.json", &block_on(e.stats_json(&id)).expect("stats"));
+        let image = block_on(e.list_containers(ContainerQuery::default()))
+            .expect("list")
+            .into_iter()
+            .find(|c| c.id == id)
+            .map(|c| c.image)
+            .expect("image");
+        save(
+            "inspect_image.json",
+            &block_on(e.inspect_image_json(&image)).expect("inspect image"),
+        );
+        let nets = block_on(e.list_networks_json()).expect("networks");
+        if let Some(n) = nets[0]["Name"].as_str() {
+            save(
+                "inspect_network.json",
+                &block_on(e.inspect_network_json(n)).expect("inspect network"),
+            );
+        }
+    }
+    let ev = with_timeout(Duration::from_secs(5), {
+        let s = e.events_json(0);
+        async move { s.take(3).collect::<Vec<_>>().await }
+    });
+    if let Some(ev) = ev {
+        let arr: Vec<serde_json::Value> = ev.into_iter().filter_map(Result::ok).collect();
+        save("events.json", &serde_json::Value::Array(arr));
+    }
+}

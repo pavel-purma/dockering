@@ -1,0 +1,35 @@
+[
+  {
+    "Created": "2026-10-01T22:08:52.308502666Z",
+    "Driver": "null",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "Id": "03c2fb106c3fd0a83522c7e249838d2850ece6b28194bc69817bc6e238287c64",
+    "Internal": false,
+    "Labels": {},
+    "Name": "none",
+    "Scope": "local"
+  },
+  {
+    "Created": "2026-10-01T22:08:52.323746043Z",
+    "Driver": "host",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "Id": "7986d99c1b8a9e5bab84db6b4e4868408cddc63259479cea6784c12f96b5062f",
+    "Internal": false,
+    "Labels": {},
+    "Name": "host",
+    "Scope": "local"
+  },
+  {
+    "Created": "2026-10-01T23:09:11.462461977Z",
+    "Driver": "bridge",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "Id": "525a2c76c8c1ff628898ac0798cedd939e7dca1380fa3613000b4f58fd845722",
+    "Internal": false,
+    "Labels": {},
+    "Name": "bridge",
+    "Scope": "local"
+  }
+]

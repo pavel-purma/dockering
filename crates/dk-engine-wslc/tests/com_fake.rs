@@ -324,3 +324,35 @@ fn unsupported_and_capabilities() {
     ));
     block_on(e.ping()).expect("ping");
 }
+
+/// Recorded real outputs (WSL 3.0.1, `com_live::live_record_fixtures`) through the pure
+/// converters (no docker_json dependency).
+#[test]
+fn recorded_fixtures_parse() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/com-3.0.1");
+    let read = |n: &str| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join(n)).expect(n)).expect(n)
+    };
+    let stats = read("stats.json");
+    let mut norm = dk_core::stats::StatsNormalizer::new();
+    let s = dk_engine_wslc::com::engine::stats_sample(
+        &mut norm,
+        &stats,
+        time::OffsetDateTime::now_utc(),
+    )
+    .expect("real Stats() JSON parses");
+    assert_eq!(s.online_cpus, 20);
+    assert!(s.mem_limit > 0);
+    let events = read("events.json");
+    for ev in events.as_array().expect("array") {
+        let a = dk_engine_wslc::com::convert::adapt_event_json(ev.clone());
+        assert!(a["id"].as_str().is_some_and(|s| s.len() == 64), "{a}");
+        assert!(a["status"].is_string());
+    }
+    assert!(
+        read("list_networks.json")
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+    );
+    assert!(read("inspect_container.json")["State"]["Status"].is_string());
+}
