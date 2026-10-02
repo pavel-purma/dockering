@@ -83,6 +83,7 @@ pub struct TerminalView {
     report_button: Option<u8>,
     last_report_cell: Option<(usize, usize)>,
     scroll_remainder: f32,
+    pub(crate) last_prepaint: Duration,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -121,6 +122,7 @@ impl TerminalView {
             report_button: None,
             last_report_cell: None,
             scroll_remainder: 0.0,
+            last_prepaint: Duration::ZERO,
             _subscriptions: vec![intercept, focus_in, focus_out],
         }
     }

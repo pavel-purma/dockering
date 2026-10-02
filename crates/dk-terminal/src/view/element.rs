@@ -625,6 +625,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> Frame {
+        let started = std::time::Instant::now();
         let metrics = self.metrics(window, cx);
         let origin = point(bounds.origin.x + PADDING, bounds.origin.y + PADDING);
         let avail_w = (bounds.size.width - PADDING * 2.0).max(px(0.));
@@ -799,6 +800,7 @@ impl TerminalView {
                 )
             });
 
+        self.last_prepaint = started.elapsed();
         Frame {
             geometry,
             rows: shaped_rows,
@@ -810,6 +812,12 @@ impl TerminalView {
             hitbox,
             mouse_reporting: self.mouse_reporting(false),
         }
+    }
+
+    /// Time spent building and shaping the grid in the last frame (TRM-010 diagnostics).
+    #[doc(hidden)]
+    pub fn last_prepaint_time(&self) -> std::time::Duration {
+        self.last_prepaint
     }
 
     /// Number of rows reshaped in the last frame (cache misses).
