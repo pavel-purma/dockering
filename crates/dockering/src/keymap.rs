@@ -1098,6 +1098,16 @@ pub fn hint_for(action_name: &str, context: &str) -> Option<String> {
         .map(|b| display_keys(&resolve_keys(b.keys, os), os))
 }
 
+/// Tooltip text with a shortcut from a binding predicate, independent of focus.
+/// GPUI Kit's `tooltip_with_action` expects a concrete `KeyContext`, not a predicate:
+/// passing `ListTable > DataTable` makes GPUI 0.3.7's parser recurse forever on `>`.
+pub fn tooltip_for(label: &str, action: &dyn Action, predicate: &str) -> String {
+    match hint_for(action.name(), predicate) {
+        Some(keys) => format!("{label} ({keys})"),
+        None => label.to_owned(),
+    }
+}
+
 /// Bindings in display form for the shortcut reference (KBD-022), current OS only.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceRow {
@@ -1186,6 +1196,22 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn predicate_tooltips_keep_shortcut_hints() {
+        assert_eq!(
+            tooltip_for("Pull image", &image::Pull, LIST_KEYS),
+            "Pull image (G)"
+        );
+        assert_eq!(
+            tooltip_for("Create volume", &volume::Create, LIST_KEYS),
+            "Create volume (N)"
+        );
+        assert_eq!(
+            tooltip_for("Pull image", &image::Pull, DIALOG),
+            "Pull image"
+        );
+    }
 
     fn normalized(keys: &str, os: Os) -> String {
         // Canonical modifier order so `shift-ctrl-x` == `ctrl-shift-x`.

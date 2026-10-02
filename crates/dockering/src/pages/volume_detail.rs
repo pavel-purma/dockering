@@ -4,8 +4,7 @@
 
 use dk_core::format::{format_size, format_timestamp};
 use dk_core::{Capabilities, EngineId, VolumeDetails};
-use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{IconName, Sizable, v_flex};
+use gpui_kit::component::{IconName, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable,
@@ -276,7 +275,10 @@ impl VolumeDetailPage {
                     s::COL_STATUS,
                     if n > 0 {
                         crate::pages::resources::detail::chip_value(
-                            Tag::success().small().child(s::in_use_by(n)),
+                            crate::ui::status_chip::tone_tag(
+                                crate::ui::status_chip::Tone::Success,
+                                s::in_use_by(n),
+                            ),
                         )
                     } else {
                         text_value(Some(s::NOT_USED), cx)
@@ -406,10 +408,11 @@ impl Render for VolumeDetailPage {
                 self.name.clone(),
                 if in_use > 0 {
                     vec![
-                        Tag::success()
-                            .small()
-                            .child(s::in_use_by(in_use))
-                            .into_any_element(),
+                        crate::ui::status_chip::tone_tag(
+                            crate::ui::status_chip::Tone::Success,
+                            s::in_use_by(in_use),
+                        )
+                        .into_any_element(),
                     ]
                 } else {
                     vec![]

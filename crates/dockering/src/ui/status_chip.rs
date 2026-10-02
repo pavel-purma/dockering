@@ -1,14 +1,52 @@
 //! Container and engine status chips (spec 30 §4). Colour is never the only signal: every
 //! chip carries a text label (spec 30 §5).
+//!
+//! Chips are *soft*: a tinted background, a coloured label and a leading dot, built on GPUI
+//! Kit `Tag::color` palette scales. The kit's solid `success`/`warning` variants put a
+//! saturated fill behind text of the same hue, which fails contrast in the dark theme.
 
 use dk_core::{ContainerState, EngineState, Health};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{ActiveTheme, Sizable, h_flex};
+use gpui_kit::component::{ActiveTheme, ColorName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Hsla, IntoElement, div, px};
+use gpui_kit::{App, Hsla, IntoElement, SharedString, div, px};
 
 use crate::strings as s;
+
+/// The semantic hue of a chip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Success,
+    Warning,
+    Danger,
+    Info,
+    Neutral,
+}
+
+impl Tone {
+    fn color(self) -> ColorName {
+        match self {
+            Tone::Success => ColorName::Emerald,
+            Tone::Warning => ColorName::Amber,
+            Tone::Danger => ColorName::Red,
+            Tone::Info => ColorName::Sky,
+            Tone::Neutral => ColorName::Neutral,
+        }
+    }
+}
+
+/// A soft chip with a leading status dot: `● Running`, `● In use`.
+pub fn tone_tag(tone: Tone, label: impl Into<SharedString>) -> Tag {
+    let color = tone.color();
+    Tag::color(color).small().child(
+        h_flex()
+            .gap_1p5()
+            .items_center()
+            .child(dot(color.scale(500)).size(px(6.)))
+            .child(label.into()),
+    )
+}
 
 /// `Running` = green, `Paused` = amber, `Exited(0)` = grey, `Exited(≠0)`/`Dead` = red,
 /// `Restarting` = blue + spinner, `Created` = grey outline.
@@ -17,34 +55,42 @@ pub fn container_chip(state: ContainerState, exit_code: Option<i64>) -> impl Int
         (ContainerState::Exited, Some(code)) => format!("Exited ({code})"),
         (state, _) => state.label().to_owned(),
     };
-    let tag = match state {
-        ContainerState::Running => Tag::success(),
-        ContainerState::Paused => Tag::warning(),
-        ContainerState::Restarting => Tag::info(),
-        ContainerState::Exited if exit_code.unwrap_or(0) != 0 => Tag::danger(),
-        ContainerState::Dead => Tag::danger(),
-        ContainerState::Created => Tag::secondary().outline(),
-        _ => Tag::secondary(),
+    let tone = match state {
+        ContainerState::Running => Tone::Success,
+        ContainerState::Paused => Tone::Warning,
+        ContainerState::Restarting => Tone::Info,
+        ContainerState::Exited if exit_code.unwrap_or(0) != 0 => Tone::Danger,
+        ContainerState::Dead => Tone::Danger,
+        _ => Tone::Neutral,
     };
-    tag.small().child(
-        h_flex()
-            .gap_1()
-            .items_center()
-            .when(state == ContainerState::Restarting, |this| {
-                this.child(Spinner::new().xsmall())
-            })
-            .child(label),
-    )
+    if state == ContainerState::Restarting {
+        return Tag::color(tone.color())
+            .small()
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(Spinner::new().xsmall())
+                    .child(label),
+            )
+            .into_any_element();
+    }
+    tone_tag(tone, label)
+        .when(state == ContainerState::Created, |this| this.outline())
+        .into_any_element()
 }
 
-/// Health as a second chip.
+/// Health as a second chip (outlined, so it reads as secondary to the state chip).
 pub fn health_chip(health: Health) -> impl IntoElement {
-    let tag = match health {
-        Health::Healthy => Tag::success().outline(),
-        Health::Unhealthy => Tag::danger().outline(),
-        Health::Starting => Tag::info().outline(),
+    let tone = match health {
+        Health::Healthy => Tone::Success,
+        Health::Unhealthy => Tone::Danger,
+        Health::Starting => Tone::Info,
     };
-    tag.small().child(health.label())
+    Tag::color(tone.color())
+        .outline()
+        .small()
+        .child(health.label())
 }
 
 /// Status dot colour for engines (ENG-100): green connected, amber connecting/degraded,
@@ -76,7 +122,7 @@ pub fn engine_state_label(state: &EngineState) -> &'static str {
 }
 
 /// A small coloured dot.
-pub fn dot(color: Hsla) -> impl IntoElement {
+pub fn dot(color: Hsla) -> gpui_kit::Div {
     div().size(px(8.)).rounded_full().bg(color).flex_shrink_0()
 }
 

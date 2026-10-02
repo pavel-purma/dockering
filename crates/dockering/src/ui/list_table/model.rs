@@ -488,6 +488,14 @@ mod tests {
     }
 
     #[test]
+    fn con_011_list_default_expands_groups() {
+        // `ListTable` builds its model with `default_expanded = true` (CON-011).
+        let mut m = M::new(true);
+        m.set_nodes(tree());
+        assert_eq!(keys(&m), ["g:shop", "web", "api", "db", "redis", "scratch"]);
+    }
+
+    #[test]
     fn con_010_groups_start_collapsed_and_flatten_on_expand() {
         let mut m = M::new(false);
         m.set_nodes(tree());

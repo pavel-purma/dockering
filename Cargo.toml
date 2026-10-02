@@ -2,7 +2,11 @@
 resolver = "3"
 members = ["crates/*", "xtask"]
 default-members = ["crates/*"]
+exclude = ["vendor/gpui-pre-windows"]
 
+[patch.crates-io]
+# Keep the optional DirectX debug-layer probe at warning severity (see vendor/README.md).
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 
 [workspace.package]
 version = "0.1.0"

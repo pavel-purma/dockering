@@ -675,20 +675,27 @@ impl ImagesPage {
                         window,
                         cx,
                     ))
-                    .child(chrome::header_button(
-                        "pull-wrap",
-                        &self.pull_focus,
-                        Button::new("pull-image")
-                            .small()
-                            .primary()
-                            .icon(IconName::ArrowDown)
-                            .label(s::PULL)
-                            .disabled(ro)
-                            .tooltip_with_action(s::PULL_IMAGE, &image::Pull, Some(ctx::LIST_KEYS)),
-                        Box::new(image::Pull),
-                        window,
-                        cx,
-                    ))
+                    .child(
+                        chrome::header_button(
+                            "pull-wrap",
+                            &self.pull_focus,
+                            Button::new("pull-image")
+                                .small()
+                                .primary()
+                                .icon(IconName::ArrowDown)
+                                .label(s::PULL)
+                                .disabled(ro)
+                                .tooltip(crate::keymap::tooltip_for(
+                                    s::PULL_IMAGE,
+                                    &image::Pull,
+                                    ctx::LIST_KEYS,
+                                )),
+                            Box::new(image::Pull),
+                            window,
+                            cx,
+                        )
+                        .debug_selector(|| "pull-image-trigger".into()),
+                    )
                     .child(
                         chrome::overflow_trigger(
                             "images-overflow",

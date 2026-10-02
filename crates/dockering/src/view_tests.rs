@@ -113,7 +113,7 @@ fn containers_loading_state_is_first_load(cx: &mut TestAppContext) {
 // ── grouping & keyboard ───────────────────────────────────────────────────────────────
 
 #[gpui_kit::test]
-fn con_010_compose_group_collapsed_then_expands(cx: &mut TestAppContext) {
+fn con_010_compose_group_expanded_then_collapses(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     let page = h.wait_containers(cx);
     let member = id_of("myshop-web-1");
@@ -127,11 +127,69 @@ fn con_010_compose_group_collapsed_then_expands(cx: &mut TestAppContext) {
                 .is_some()
         })
     };
-    assert!(!visible(cx), "groups start collapsed");
+    assert!(
+        visible(cx),
+        "groups start expanded: every container is visible"
+    );
     h.focus_table(cx);
     h.select_row(cx, "compose:myshop");
     h.press(cx, "enter");
-    assert!(visible(cx), "Enter on a group row expands it (KBD-032)");
+    assert!(!visible(cx), "Enter on a group row toggles it (KBD-032)");
+    h.press(cx, "enter");
+    assert!(visible(cx));
+    h.shutdown();
+}
+
+/// A click anywhere on a row dispatches `OnRow { Open }` (CON-033): a group row toggles,
+/// an item row opens its detail.
+#[gpui_kit::test]
+fn con_033_row_click_toggles_group_and_opens_item(cx: &mut TestAppContext) {
+    use crate::actions::{OnRow, RowCommand};
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    let expanded = |cx: &mut TestAppContext| {
+        cx.read(|cx| {
+            page.read(cx)
+                .table()
+                .read(cx)
+                .model(cx)
+                .is_expanded("compose:myshop")
+        })
+    };
+    let click = |cx: &mut TestAppContext, row: &str| {
+        let table = cx.read(|cx| page.read(cx).table().clone());
+        let row: gpui_kit::SharedString = row.to_owned().into();
+        cx.update_window(h.any_window(), |_, window, cx| {
+            let f = gpui_kit::Focusable::focus_handle(table.read(cx), cx);
+            f.dispatch_action(
+                &OnRow {
+                    row,
+                    action: RowCommand::Open,
+                },
+                window,
+                cx,
+            );
+        })
+        .expect("window");
+        cx.run_until_parked();
+    };
+    h.draw(cx);
+    assert!(expanded(cx));
+    click(cx, "compose:myshop");
+    assert!(!expanded(cx), "click on a group row collapses it");
+    h.draw(cx);
+    click(cx, "compose:myshop");
+    assert!(expanded(cx), "and expands it again");
+    let redis = id_of("redis");
+    h.draw(cx);
+    click(cx, &redis);
+    assert_eq!(
+        h.read(cx, |s, _, _| s.route().clone()),
+        Route::ContainerDetail {
+            id: redis,
+            tab: crate::nav::ContainerTab::Overview
+        }
+    );
     h.shutdown();
 }
 
@@ -780,29 +838,23 @@ fn kbd_020_palette_closes_after_non_navigation_command(cx: &mut TestAppContext) 
     let h = start(cx, Setup::default());
     let page = h.wait_containers(cx);
     h.focus_table(cx);
-    let collapsed = cx.read(|cx| {
-        !page
-            .read(cx)
-            .table()
-            .read(cx)
-            .model(cx)
-            .is_expanded("compose:myshop")
-    });
-    assert!(collapsed);
+    let expanded = |cx: &mut TestAppContext| {
+        cx.read(|cx| {
+            page.read(cx)
+                .table()
+                .read(cx)
+                .model(cx)
+                .is_expanded("compose:myshop")
+        })
+    };
+    assert!(expanded(cx), "groups start expanded");
     h.press(cx, "ctrl-shift-p");
-    h.type_text(cx, "Expand all groups");
+    h.type_text(cx, "Collapse all groups");
     h.press(cx, "enter");
     h.wait_until(cx, "palette closed", |_, cx| {
         h.shell.read(cx).overlay() == Overlay::None
     });
-    let expanded = cx.read(|cx| {
-        page.read(cx)
-            .table()
-            .read(cx)
-            .model(cx)
-            .is_expanded("compose:myshop")
-    });
-    assert!(expanded, "palette ran the list command on the page");
+    assert!(!expanded(cx), "palette ran the list command on the page");
     let table_focused = cx
         .update_window(h.any_window(), |_, window, cx| {
             page.read(cx).table().focus_handle(cx).is_focused(window)

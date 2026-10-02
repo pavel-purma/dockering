@@ -18,9 +18,10 @@ use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div, px};
 use super::model::{GroupInfo, sort_keys};
 use crate::actions::{OnRow, RowCommand};
 use crate::assets::Lucide;
+use crate::pages::resources::chrome::name_cell;
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
-use crate::ui::status_chip::{container_chip, health_chip};
+use crate::ui::status_chip::{Tone, container_chip, health_chip, tone_tag};
 use crate::ui::widgets::{port_link, relative_time};
 
 pub mod col {
@@ -88,6 +89,7 @@ impl ContainersDelegate {
                 .disabled(disabled)
                 .tab_stop(false)
                 .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
                     window.dispatch_action(
                         Box::new(OnRow {
                             row: key.clone(),
@@ -167,6 +169,7 @@ impl ContainersDelegate {
                 .disabled(disabled)
                 .tab_stop(false)
                 .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
                     window.dispatch_action(
                         Box::new(OnRow {
                             row: key.clone(),
@@ -215,6 +218,7 @@ impl ContainersDelegate {
             .checked(checked)
             .tab_stop(false)
             .on_click(move |_, window, cx| {
+                cx.stop_propagation();
                 window.dispatch_action(
                     Box::new(OnRow {
                         row: key.clone(),
@@ -245,7 +249,7 @@ pub fn columns(show_stats: bool) -> Vec<ColumnSpec> {
     }
     v.push(ColumnSpec::new(col::PORTS, s::COL_PORTS, 150.));
     v.push(ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable());
-    v.push(ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 150.).fixed());
+    v.push(ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 150.).pin_right());
     v
 }
 
@@ -273,31 +277,20 @@ impl ListDelegate for ContainersDelegate {
             } => match column.key {
                 col::SELECT => self.checkbox(row_ix, &row.key, selected),
                 col::NAME => {
-                    let key = row.key.clone();
                     let tooltip = group.group.working_dir.clone();
                     h_flex()
                         .id(("group-name", row_ix))
-                        .gap_1()
+                        .gap_1p5()
                         .items_center()
+                        // The whole row toggles the group (CON-011); the chevron is a cue.
                         .child(
-                            Button::new(("chevron", row_ix))
-                                .ghost()
-                                .xsmall()
-                                .tab_stop(false)
-                                .icon(if *expanded {
-                                    IconName::ChevronDown
-                                } else {
-                                    IconName::ChevronRight
-                                })
-                                .on_click(move |_, window, cx| {
-                                    window.dispatch_action(
-                                        Box::new(OnRow {
-                                            row: key.clone(),
-                                            action: RowCommand::ToggleGroup,
-                                        }),
-                                        cx,
-                                    )
-                                }),
+                            Icon::new(if *expanded {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .small()
+                            .text_color(muted),
                         )
                         .child(
                             div()
@@ -317,14 +310,12 @@ impl ListDelegate for ContainersDelegate {
                 }
                 col::STATUS => {
                     let a = group.group.aggregate;
-                    let tag = match a.state {
-                        AggregateState::Running => Tag::success(),
-                        AggregateState::Partial => Tag::warning(),
-                        AggregateState::Exited => Tag::secondary(),
+                    let tone = match a.state {
+                        AggregateState::Running => Tone::Success,
+                        AggregateState::Partial => Tone::Warning,
+                        AggregateState::Exited => Tone::Neutral,
                     };
-                    tag.small()
-                        .child(s::group_running(a.running, a.total))
-                        .into_any_element()
+                    tone_tag(tone, s::group_running(a.running, a.total)).into_any_element()
                 }
                 col::CPU if self.show_stats => {
                     let sum: f64 = group
@@ -354,7 +345,6 @@ impl ListDelegate for ContainersDelegate {
             RowKind::Item(c) => match column.key {
                 col::SELECT => self.checkbox(row_ix, &row.key, selected),
                 col::NAME => {
-                    let key = row.key.clone();
                     let oneoff = c.compose.as_ref().is_some_and(|ci| ci.oneoff);
                     h_flex()
                         .gap_1()
@@ -367,22 +357,7 @@ impl ListDelegate for ContainersDelegate {
                                 muted
                             },
                         ))
-                        .child(
-                            Button::new(("name", row_ix))
-                                .link()
-                                .xsmall()
-                                .tab_stop(false)
-                                .label(c.name.clone())
-                                .on_click(move |_, window, cx| {
-                                    window.dispatch_action(
-                                        Box::new(OnRow {
-                                            row: key.clone(),
-                                            action: RowCommand::Open,
-                                        }),
-                                        cx,
-                                    )
-                                }),
-                        )
+                        .child(name_cell(c.name.clone()))
                         .when(oneoff, |this| {
                             this.child(Tag::secondary().outline().small().child(s::ONEOFF_TAG))
                         })

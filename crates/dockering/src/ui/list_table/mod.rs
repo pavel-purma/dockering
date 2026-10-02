@@ -8,6 +8,10 @@
 //! - `←/→` collapse/expand, `Mod+←/→` all, `Home/End`, `Space`, `Shift+↑/↓`, `Mod+A`, `Esc`,
 //!   `Enter`, `/` quick find, `Shift+F10` context menu (KBD-031…037);
 //! - sorting by header click / `Mod+Shift+O` and persisted column widths (CON-002/003);
+//! - an optional column pinned to the right edge (`ColumnSpec::pin_right`, the row
+//!   actions), always visible while the other columns scroll horizontally;
+//! - a click anywhere on a row opens it (item → detail, group → expand/collapse, CON-033).
+//!   Controls inside cells (checkbox, buttons, links) stop propagation so they don't;
 //! - id-stable refresh and focus-to-next-row after deletes (KBD-007).
 //!
 //! Pages implement [`ListDelegate`] (cells, columns, menus) and handle the [`ListEvent`]s.
@@ -27,7 +31,7 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::table::{
     Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Size, h_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, Size, StyleSized, h_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -50,6 +54,8 @@ pub struct ColumnSpec {
     pub sortable: bool,
     pub resizable: bool,
     pub right: bool,
+    /// Pinned to the right edge of the table, outside the horizontal scroll (at most one).
+    pub pinned_right: bool,
 }
 
 impl ColumnSpec {
@@ -62,6 +68,7 @@ impl ColumnSpec {
             sortable: false,
             resizable: true,
             right: false,
+            pinned_right: false,
         }
     }
     pub fn sortable(mut self) -> Self {
@@ -76,6 +83,31 @@ impl ColumnSpec {
         self.right = true;
         self
     }
+    /// Pin to the right edge, always visible (implies a fixed width).
+    pub fn pin_right(mut self) -> Self {
+        self.pinned_right = true;
+        self.resizable = false;
+        self
+    }
+}
+
+/// Splits off the right-pinned column. GPUI Kit `DataTable` only pins columns on the left,
+/// so the pinned column isn't a table column: rows and the header reserve its width as
+/// right padding and draw it there (see `Adapter::render_tr`).
+fn split_pinned(columns: Vec<ColumnSpec>) -> (Vec<ColumnSpec>, Option<ColumnSpec>) {
+    let mut pinned = None;
+    let rest = columns
+        .into_iter()
+        .filter_map(|c| {
+            if c.pinned_right && pinned.is_none() {
+                pinned = Some(c);
+                None
+            } else {
+                Some(c)
+            }
+        })
+        .collect();
+    (rest, pinned)
 }
 
 /// Supplied by the page: rendering and row text. `G` = group payload, `I` = item payload.
@@ -157,7 +189,10 @@ pub enum ListEvent {
 pub struct Adapter<D: ListDelegate> {
     pub delegate: D,
     pub model: ListModel<D::Group, D::Item>,
+    /// The table's (scrolling) columns.
     columns: Vec<ColumnSpec>,
+    /// The right-pinned column, drawn in each row's right padding.
+    pinned: Option<ColumnSpec>,
     loading: bool,
     /// Pending visible range to report (set during render, read by the owner).
     pending_visible: Option<Range<usize>>,
@@ -231,13 +266,83 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         cx.notify();
     }
 
+    fn render_header(
+        &mut self,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
+        let header = div().id("header");
+        let Some(pinned) = self.pinned.as_ref() else {
+            return header;
+        };
+        header.pr(pinned.width).relative().child(
+            h_flex()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(pinned.width)
+                .items_center()
+                .table_cell_size(Size::Small)
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(pinned.name.clone()),
+        )
+    }
+
     fn render_tr(
         &mut self,
         row_ix: usize,
-        _: &mut Window,
-        _: &mut Context<TableState<Self>>,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
-        div().id(("row", row_ix))
+        let key = self.model.row(row_ix).map(|r| r.key.clone());
+        // The pinned cell (also reserves its width on the filler rows below the data).
+        let pinned = self.pinned.as_ref().map(|col| {
+            let cell = self.model.row(row_ix).map(|row| {
+                let selected = self.model.row_selected(row);
+                self.delegate
+                    .render_cell(row, row_ix, col, selected, window, cx)
+            });
+            (col.width, cell)
+        });
+        div()
+            .id(("row", row_ix))
+            .cursor_pointer()
+            .when_some(pinned, |this, (width, cell)| {
+                this.pr(width).relative().when_some(cell, |this, cell| {
+                    this.child(
+                        h_flex()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(width)
+                            .items_center()
+                            .overflow_hidden()
+                            .table_cell_size(Size::Small)
+                            .child(cell),
+                    )
+                })
+            })
+            .when_some(key, |this, key| {
+                // Runs before the GPUI Kit row handler on the same element, which moves the
+                // cursor. A double click only counts once (groups would toggle back), and a
+                // modified click only moves the cursor.
+                this.on_click(move |e, window, cx| {
+                    let m = e.modifiers();
+                    if e.click_count() != 1 || m.secondary() || m.shift || m.alt {
+                        return;
+                    }
+                    window.dispatch_action(
+                        Box::new(OnRow {
+                            row: key.clone(),
+                            action: RowCommand::Open,
+                        }),
+                        cx,
+                    )
+                })
+            })
     }
 
     fn render_td(
@@ -341,11 +446,19 @@ impl<D: ListDelegate> ListTable<D> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut columns = delegate.columns();
+        let (mut columns, pinned) = split_pinned(delegate.columns());
         if let Some(key) = widths_key.as_ref()
             && cx.try_global::<AppState>().is_some()
         {
-            let saved = AppState::ui_state(cx).column_widths.get(key).cloned();
+            // Widths are saved for the table's columns (the pinned one isn't resizable).
+            let mut saved = AppState::ui_state(cx).column_widths.get(key).cloned();
+            // Widths saved before the column was pinned still include it as the last entry.
+            if let Some(w) = saved.as_mut()
+                && pinned.is_some()
+                && w.len() == columns.len() + 1
+            {
+                w.pop();
+            }
             if let Some(saved) = saved
                 && saved.len() == columns.len()
             {
@@ -358,8 +471,10 @@ impl<D: ListDelegate> ListTable<D> {
         }
         let adapter = Adapter {
             delegate,
-            model: ListModel::new(false),
+            // Groups start expanded: every container is visible (CON-011).
+            model: ListModel::new(true),
             columns,
+            pinned,
             loading: false,
             pending_visible: None,
             cursor_bounds: Default::default(),
@@ -446,8 +561,10 @@ impl<D: ListDelegate> ListTable<D> {
 
     /// Columns changed (e.g. CPU/Mem columns toggled).
     pub fn set_columns(&mut self, columns: Vec<ColumnSpec>, cx: &mut Context<Self>) {
+        let (columns, pinned) = split_pinned(columns);
         self.table.update(cx, |t, cx| {
             t.delegate_mut().columns = columns;
+            t.delegate_mut().pinned = pinned;
             t.refresh(cx);
             cx.notify();
         });
@@ -482,7 +599,7 @@ impl<D: ListDelegate> ListTable<D> {
         &mut self,
         _: &Entity<TableState<Adapter<D>>>,
         event: &TableEvent,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -497,9 +614,6 @@ impl<D: ListDelegate> ListTable<D> {
                 if changed {
                     cx.emit(ListEvent::SelectionChanged);
                 }
-            }
-            TableEvent::DoubleClickedRow(ix) => {
-                self.open_row(*ix, window, cx);
             }
             TableEvent::ColumnWidthsChanged(widths) => {
                 let widths: Vec<f32> = widths.iter().map(|w| w.as_f32()).collect();
@@ -975,5 +1089,24 @@ impl<D: ListDelegate> Render for ListTable<D> {
                 }
             })
             .when_some(self.key_menu.as_ref(), |this, m| this.child(m.render()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn con_002_actions_column_is_pinned_out_of_the_table_columns() {
+        let (cols, pinned) = split_pinned(vec![
+            ColumnSpec::new("name", "Name", 200.),
+            ColumnSpec::new("actions", "Actions", 80.).pin_right(),
+            ColumnSpec::new("created", "Created", 100.),
+        ]);
+        let pinned = pinned.expect("actions pinned");
+        assert_eq!(pinned.key, "actions");
+        assert!(!pinned.resizable);
+        let keys: Vec<_> = cols.iter().map(|c| c.key).collect();
+        assert_eq!(keys, ["name", "created"]);
     }
 }

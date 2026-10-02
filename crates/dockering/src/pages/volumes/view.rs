@@ -608,24 +608,27 @@ impl VolumesPage {
                         window,
                         cx,
                     ))
-                    .child(chrome::header_button(
-                        "create-volume-wrap",
-                        &self.create_focus,
-                        Button::new("create-volume")
-                            .small()
-                            .primary()
-                            .icon(IconName::Plus)
-                            .label(s::CREATE)
-                            .disabled(ro)
-                            .tooltip_with_action(
-                                s::CREATE_VOLUME,
-                                &volume::Create,
-                                Some(ctx::LIST_KEYS),
-                            ),
-                        Box::new(volume::Create),
-                        window,
-                        cx,
-                    ))
+                    .child(
+                        chrome::header_button(
+                            "create-volume-wrap",
+                            &self.create_focus,
+                            Button::new("create-volume")
+                                .small()
+                                .primary()
+                                .icon(IconName::Plus)
+                                .label(s::CREATE)
+                                .disabled(ro)
+                                .tooltip(crate::keymap::tooltip_for(
+                                    s::CREATE_VOLUME,
+                                    &volume::Create,
+                                    ctx::LIST_KEYS,
+                                )),
+                            Box::new(volume::Create),
+                            window,
+                            cx,
+                        )
+                        .debug_selector(|| "create-volume-trigger".into()),
+                    )
                     .child(
                         chrome::overflow_trigger(
                             "volumes-overflow",

@@ -5,8 +5,8 @@
 - **Plan:** no per-feature plan; built in milestone M9 of the [v1 plan](../../plan/README.md)
 
 Settings is a full page (route `Settings { section }`, so deep links and back/forward work). The
-left column is a section nav (GPUI Kit `Sidebar`/`SidebarMenu`: one Tab stop, arrow keys, the
-page's primary focus). The content column holds GPUI Kit primitives: `GroupBox` groups with
+section nav is the **app sidebar in Settings mode** (SET-080): the page draws no column of its own.
+The content column holds GPUI Kit primitives: `GroupBox` groups with
 `Switch`, `NumberInput`, `Input`, and `Select` controls, plus inline validation messages.
 
 The GPUI Kit `Settings` container is **not** used. Its virtualised page list drops off-screen
@@ -24,6 +24,7 @@ per row.
 | Terminal | SET-040 | Font family · Font size · Default shell · Scrollback lines · External terminal command (TRM-009; must contain `{cmd}`, validated inline) |
 | Stats | SET-050 | History window (default 15 min, 1–60) · CPU % relative to all cores |
 | Diagnostics | SET-060 | Log level (Info/Debug; **applies on restart**, because the tracing filter is installed once at startup; `RUST_LOG` overrides it) · Open logs folder · Copy diagnostics · per-engine transport, version, and note (ENG-110) · Version / licences (REL-002) |
+| Navigation | SET-080 | *(planned, [plan](../../plan/features/ui-tabs-settings-nav.md))* On a Settings route the app sidebar shows a *Back to <Page>* item (returns to the last non-Settings route; the start page if none) followed by one item per section, rendered with the same nav item component as the main menu (hover tint, accent active item, count-less). Opening Settings focuses the sidebar with the cursor on the active section. `↑/↓/Home/End` move the cursor and show that section in place (no history entry); `Enter`/`Space` on a section enter its first control, on *Back* they navigate. A click on a section pushes its route. |
 | Keyboard | SET-070 | Read-only keymap view (the same as the shortcut reference, KBD-022). Rebinding is reserved for post-v1 (KBD-081). |
 
 ## Verification (2026-10-02)

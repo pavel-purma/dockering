@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 
 use dk_core::format::format_size;
-use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
@@ -17,10 +16,11 @@ use crate::actions::{OnRow, RowCommand, list, volume};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
 use crate::pages::resources::chrome::{
-    dash, hinted, mono_cell, row_button, skeleton_cell, text_cell,
+    dash, hinted, mono_cell, name_cell, row_button, skeleton_cell, text_cell,
 };
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
+use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::relative_time;
 
 pub mod col {
@@ -45,7 +45,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 170.),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).fixed(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).pin_right(),
     ]
 }
 
@@ -93,37 +93,26 @@ impl ListDelegate for VolumesDelegate {
                     .checked(selected)
                     .tab_stop(false)
                     .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
                         window.dispatch_action(on_row(&key, RowCommand::ToggleSelected), cx)
                     })
                     .into_any_element()
             }
-            col::NAME => {
-                let key = row.key.clone();
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .overflow_hidden()
-                    .child(
-                        Icon::new(IconName::HardDrive)
-                            .small()
-                            .text_color(if r.in_use() > 0 {
-                                cx.theme().success
-                            } else {
-                                muted
-                            }),
-                    )
-                    .child(
-                        Button::new(("name", row_ix))
-                            .link()
-                            .xsmall()
-                            .tab_stop(false)
-                            .label(r.name.clone())
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(on_row(&key, RowCommand::Open), cx)
-                            }),
-                    )
-                    .into_any_element()
-            }
+            col::NAME => h_flex()
+                .gap_1()
+                .items_center()
+                .overflow_hidden()
+                .child(
+                    Icon::new(IconName::HardDrive)
+                        .small()
+                        .text_color(if r.in_use() > 0 {
+                            cx.theme().success
+                        } else {
+                            muted
+                        }),
+                )
+                .child(name_cell(r.name.clone()))
+                .into_any_element(),
             col::DRIVER => text_cell(r.driver.clone()),
             col::COMPOSE => match &r.compose {
                 Some(p) => Tag::secondary().small().child(p.clone()).into_any_element(),
@@ -148,10 +137,7 @@ impl ListDelegate for VolumesDelegate {
                 }
                 let n = r.in_use();
                 if n > 0 {
-                    Tag::success()
-                        .small()
-                        .child(s::in_use_by(n))
-                        .into_any_element()
+                    tone_tag(Tone::Success, s::in_use_by(n)).into_any_element()
                 } else {
                     div().into_any_element()
                 }

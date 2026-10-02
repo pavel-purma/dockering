@@ -59,6 +59,38 @@ fn key_of(page: &gpui_kit::Entity<ImagesPage>, label: &str, cx: &mut TestAppCont
 
 // ── IMG-001…003 ──────────────────────────────────────────────────────────────────────
 
+/// Render the delayed tooltip, not just its trigger. A binding predicate passed to
+/// Tooltip::action used to recurse forever in GPUI's KeyContext parser on hover.
+fn hover_toolbar_tooltip(h: &Harness, cx: &mut TestAppContext, selector: &'static str) {
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let bounds = visual
+        .debug_bounds(selector)
+        .expect("toolbar button rendered");
+    visual.simulate_mouse_move(bounds.center(), None, Default::default());
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    h.draw(cx);
+    assert!(!h.has_dialog(cx), "hover must not activate the button");
+}
+
+#[gpui_kit::test]
+fn images_pull_tooltip_renders_on_hover(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    images_page(&h, cx);
+    hover_toolbar_tooltip(&h, cx, "pull-image-trigger");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn volumes_create_tooltip_renders_on_hover(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    volumes_page(&h, cx);
+    hover_toolbar_tooltip(&h, cx, "create-volume-trigger");
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn img_001_one_row_per_tag_and_dangling(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());

@@ -7,7 +7,6 @@ use dk_core::{Capabilities, EngineId, ImageDetails, ImageLayer};
 use gpui_kit::component::table::{
     Table as KitTable, TableBody, TableCell, TableHead, TableHeader, TableRow,
 };
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -406,7 +405,10 @@ impl ImageDetailPage {
                         s::STATUS,
                         if in_use > 0 {
                             crate::pages::resources::detail::chip_value(
-                                Tag::success().small().child(s::in_use_by(in_use)),
+                                crate::ui::status_chip::tone_tag(
+                                    crate::ui::status_chip::Tone::Success,
+                                    s::in_use_by(in_use),
+                                ),
                             )
                         } else {
                             text_value(Some(s::NOT_USED), cx)
@@ -607,7 +609,13 @@ impl Render for ImageDetailPage {
                 &self.header_focus,
                 title,
                 if in_use > 0 {
-                    vec![Tag::success().small().child(s::IN_USE).into_any_element()]
+                    vec![
+                        crate::ui::status_chip::tone_tag(
+                            crate::ui::status_chip::Tone::Success,
+                            s::IN_USE,
+                        )
+                        .into_any_element(),
+                    ]
                 } else {
                     vec![]
                 },

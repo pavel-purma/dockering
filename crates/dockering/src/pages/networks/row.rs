@@ -3,7 +3,6 @@
 
 use std::collections::HashSet;
 
-use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
@@ -15,7 +14,7 @@ use super::model::{NetworkRow, sort_keys};
 use crate::actions::{OnRow, RowCommand, list};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
-use crate::pages::resources::chrome::{dash, hinted, mono_cell, text_cell};
+use crate::pages::resources::chrome::{dash, hinted, mono_cell, name_cell, text_cell};
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::widgets::relative_time;
@@ -44,7 +43,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .right(),
         ColumnSpec::new(col::COMPOSE, s::COL_COMPOSE, 130.),
         ColumnSpec::new(col::CREATED, s::COL_CREATED, 110.).sortable(),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).fixed(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).pin_right(),
     ]
 }
 
@@ -92,36 +91,24 @@ impl ListDelegate for NetworksDelegate {
         };
         let muted = cx.theme().muted_foreground;
         match column.key {
-            col::NAME => {
-                let key = row.key.clone();
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .overflow_hidden()
-                    .child(
-                        Icon::new(IconName::Network)
-                            .small()
-                            .text_color(if r.containers > 0 {
-                                cx.theme().success
-                            } else {
-                                muted
-                            }),
-                    )
-                    .child(
-                        Button::new(("name", row_ix))
-                            .link()
-                            .xsmall()
-                            .tab_stop(false)
-                            .label(r.name.clone())
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(on_row(&key, RowCommand::Open), cx)
-                            }),
-                    )
-                    .when(r.builtin, |this| {
-                        this.child(Tag::secondary().outline().small().child("built-in"))
-                    })
-                    .into_any_element()
-            }
+            col::NAME => h_flex()
+                .gap_1()
+                .items_center()
+                .overflow_hidden()
+                .child(
+                    Icon::new(IconName::Network)
+                        .small()
+                        .text_color(if r.containers > 0 {
+                            cx.theme().success
+                        } else {
+                            muted
+                        }),
+                )
+                .child(name_cell(r.name.clone()))
+                .when(r.builtin, |this| {
+                    this.child(Tag::secondary().outline().small().child("built-in"))
+                })
+                .into_any_element(),
             col::DRIVER => text_cell(r.driver.clone()),
             col::SCOPE => text_cell(r.scope.clone()),
             col::SUBNETS => {

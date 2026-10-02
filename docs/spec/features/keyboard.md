@@ -18,7 +18,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 | KBD-002 | **Everything is an action.** Every user command is a GPUI `Action` (registered with `actions!` / `#[derive(Action)]`) dispatched in a `key_context`. Buttons, menus, the command palette, and shortcuts all invoke the same action. No logic lives only in click handlers. |
 | KBD-003 | **Visible focus.** The focused element always shows a focus ring drawn with the theme's `ring` colour, at ≥ 3:1 contrast in light and dark themes. Focus is never invisible. |
 | KBD-004 | **Logical Tab order.** `Tab` / `Shift+Tab` cycle focus *within the current region* in visual order (left→right, top→bottom), using `tab_index` / `tab_stop`. Rows inside a table are **not** separate Tab stops: the table is one stop with arrow-key navigation inside it (roving focus). |
-| KBD-005 | **Regions (landmarks).** The window has four focus regions: *Title bar*, *Sidebar*, *Content*, and *Status bar*. The page header/toolbar and the detail tab bar belong to *Content* and are reached with `Tab` inside it. `F6` / `Shift+F6` cycle between regions. Each region remembers its last-focused child. |
+| KBD-005 | **Regions (landmarks).** The window has four focus regions: *Title bar*, *Sidebar*, *Content*, and *Status bar*. The page header/toolbar and the detail tab bar belong to *Content* and are reached with `Tab` inside it. On Settings routes the *Sidebar* region holds the settings section nav (SET-080). `F6` / `Shift+F6` cycle between regions. Each region remembers its last-focused child. |
 | KBD-006 | **Escape semantics**, in priority order: close the open popup or menu → close the dialog → clear the search field when it's focused and non-empty → clear the multi-selection → return focus from the content to the page's primary list. `Esc` never navigates back (that's `Alt+←`). |
 | KBD-007 | **No focus loss.** After an action, focus lands somewhere predictable. After deleting rows, focus goes to the next row (or the previous one at the end). After a dialog closes, focus returns to its invoker. After a navigation, focus goes to the new page's primary control (the list, or the first tab). A data refresh never moves focus or selection (extends SHL-004). |
 | KBD-008 | **Text-input safety.** Single-letter shortcuts (KBD-030) MUST NOT fire while focus is in a text input, the code editor, or the terminal. `Mod`-chords that the focused input handles itself (copy, paste, select all, undo) go to the input first. |
@@ -35,7 +35,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 | KBD-021 | `Mod+K` | Engine switcher (ENG-101). Arrows select, `Enter` switches, and typing filters. |
 | KBD-022 | `Mod+/` and `F1` | **Keyboard shortcut reference**: a dialog listing all bindings grouped by context (Global, Lists, Detail, Logs, Terminal, Dialogs). Searchable. Shows only bindings valid on the current OS. |
 | KBD-023 | `Mod+1` … `Mod+4` | Go to Containers / Images / Volumes / Networks (from SHL-010) |
-| KBD-024 | `Mod+,` | Settings |
+| KBD-024 | `Mod+,` | Settings (focus lands on the sidebar's section nav, SET-080) |
 | KBD-025 | `Mod+F` | Focus the page search field (in Logs and Inspect: the in-view search) |
 | KBD-026 | `Mod+R`, `F5` | Refresh the current page |
 | KBD-027 | `Alt+←` / `Alt+→` (macOS `Cmd+[` / `Cmd+]`) | Back / forward |
@@ -146,7 +146,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-029 | `kbd_005_f6_cycles_regions` (`F6`); the macOS `Ctrl+Option+Tab` alternative is bound but not tested |
 | KBD-030 | `kbd_030_s_starts_stopped_container`, `cdt_041_header_letters_start_and_stop`, `img_004_pull_progress_notification` (`G`), `img_005_run_dialog_runs_and_navigates` (`U`), `vol_004_create_volume_with_n` (`N`) |
 | KBD-031 | `ListTable > DataTable` bindings; exercised by most list view tests |
-| KBD-032 | `con_010_compose_group_collapsed_then_expands`, `con_033_enter_opens_detail_with_primary_focus` |
+| KBD-032 | `con_010_compose_group_expanded_then_collapses`, `con_033_enter_opens_detail_with_primary_focus` |
 | KBD-033 | `kbd_033_left_right_collapse_group`, `kbd_033_left_on_member_goes_to_group` |
 | KBD-034 | `kbd_034_space_toggles_selection`, `kbd_034_space_on_group_toggles_members` |
 | KBD-035 | `extend_selection_moves_cursor` (model), `kbd_038_select_all_includes_collapsed_members_and_targets` |

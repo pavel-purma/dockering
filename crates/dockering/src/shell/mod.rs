@@ -9,6 +9,7 @@ pub mod menus;
 pub mod palette;
 pub mod regions;
 pub mod shortcuts;
+mod sidebar_nav;
 pub mod switcher;
 
 pub use app_shell::{AppShell, ShellPage};

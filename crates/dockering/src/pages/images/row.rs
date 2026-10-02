@@ -3,11 +3,9 @@
 use std::collections::HashSet;
 
 use dk_core::format::format_size;
-use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div};
@@ -17,9 +15,10 @@ use crate::actions::res::RunRow;
 use crate::actions::{OnRow, RowCommand, image, list};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
-use crate::pages::resources::chrome::{hinted, mono_cell, row_button, text_cell};
+use crate::pages::resources::chrome::{hinted, mono_cell, name_cell, row_button, text_cell};
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
+use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::{copy_id, relative_time};
 
 pub mod col {
@@ -44,7 +43,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 90.),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 110.).fixed(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 110.).pin_right(),
     ]
 }
 
@@ -92,37 +91,26 @@ impl ListDelegate for ImagesDelegate {
                     .checked(selected)
                     .tab_stop(false)
                     .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
                         window.dispatch_action(on_row(&key, RowCommand::ToggleSelected), cx)
                     })
                     .into_any_element()
             }
-            col::NAME => {
-                let key = row.key.clone();
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .overflow_hidden()
-                    .child(
-                        Icon::new(Lucide::Layers)
-                            .small()
-                            .text_color(if r.in_use > 0 {
-                                cx.theme().success
-                            } else {
-                                muted
-                            }),
-                    )
-                    .child(
-                        Button::new(("name", row_ix))
-                            .link()
-                            .xsmall()
-                            .tab_stop(false)
-                            .label(r.repo.clone())
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(on_row(&key, RowCommand::Open), cx)
-                            }),
-                    )
-                    .into_any_element()
-            }
+            col::NAME => h_flex()
+                .gap_1()
+                .items_center()
+                .overflow_hidden()
+                .child(
+                    Icon::new(Lucide::Layers)
+                        .small()
+                        .text_color(if r.in_use > 0 {
+                            cx.theme().success
+                        } else {
+                            muted
+                        }),
+                )
+                .child(name_cell(r.repo.clone()))
+                .into_any_element(),
             col::TAG => {
                 if r.tag == s::NONE_TAG {
                     div()
@@ -143,7 +131,7 @@ impl ListDelegate for ImagesDelegate {
             col::SIZE => mono_cell(format_size(r.size), cx),
             col::STATUS => {
                 if r.in_use > 0 {
-                    Tag::success().small().child(s::IN_USE).into_any_element()
+                    tone_tag(Tone::Success, s::IN_USE).into_any_element()
                 } else {
                     div().into_any_element()
                 }

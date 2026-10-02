@@ -307,7 +307,22 @@ pub fn row_button(
         .tooltip(tooltip)
         .disabled(disabled)
         .tab_stop(false)
-        .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+        .on_click(move |_, window, cx| {
+            // Don't let the click open the row too.
+            cx.stop_propagation();
+            window.dispatch_action(action.boxed_clone(), cx)
+        })
+}
+
+/// The primary text of a row (its name). The whole row opens the detail (CON-033), so
+/// the name is plain text rather than a link.
+pub fn name_cell(text: impl Into<SharedString>) -> AnyElement {
+    div()
+        .text_sm()
+        .font_weight(gpui_kit::FontWeight::MEDIUM)
+        .truncate()
+        .child(text.into())
+        .into_any_element()
 }
 
 /// A muted "—" cell.

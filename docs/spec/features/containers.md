@@ -15,12 +15,12 @@
 | ID | Requirement |
 |---|---|
 | CON-001 | The list MUST show all containers (`all=true`) of the active engine. |
-| CON-002 | Columns: ☐ select · Name (with status icon; a link that opens the detail) · Image (text; the image link is in the detail header, CDT-001) · Status (chip + health chip + "Up 2 hours" / "Exited (1) 3 min ago") · CPU % (optional) · Memory (optional) · Port(s) (links, first 3) · Created (relative) · Actions. Columns are resizable and their widths persist (`UiState.column_widths`). CPU and memory columns are toggled in Settings because they need stats for every visible running container. *v1: the list shows* Created *rather than* Last started, *because `ContainerSummary` has no start time and getting one would need an inspect call per row.* |
+| CON-002 | Columns: ☐ select · Name (with status icon; a link that opens the detail) · Image (text; the image link is in the detail header, CDT-001) · Status (chip + health chip + "Up 2 hours" / "Exited (1) 3 min ago") · CPU % (optional) · Memory (optional) · Port(s) (links, first 3) · Created (relative) · Actions. Columns are resizable and their widths persist (`UiState.column_widths`). *Actions* is fixed-width and pinned to the right edge (always visible). CPU and memory columns are toggled in Settings because they need stats for every visible running container. *v1: the list shows* Created *rather than* Last started, *because `ContainerSummary` has no start time and getting one would need an inspect call per row.* |
 | CON-003 | Sort by Name, Image, Status, Created, and CPU (header click or `Mod+Shift+O`). Inside groups, members sort by the same key. Groups sort by name, or by their first member under the active key. |
 | CON-004 | Filter: a segmented control *All* / *Running* / *Stopped* (the selection persists per engine). |
 | CON-005 | Search per SHL-006. A match in a group member auto-expands that group. |
 | CON-010 | **Group by** (`Select`): *Compose project* (default) / *None* / *Label…* (custom key). Rules in [21 §4](../21-engine-api-contract.md#4-grouping-rules-con-010). |
-| CON-011 | A group row shows a disclosure chevron, the project name with a "compose" tag, an aggregated status (`3/3 running`), summed CPU and memory, and group actions (Start all / Stop all / Restart all / Delete all). The expanded state persists per engine and project. |
+| CON-011 | A group row shows a disclosure chevron, the project name with a "compose" tag, an aggregated status (`3/3 running`), summed CPU and memory, and group actions (Start all / Stop all / Restart all / Delete all). Groups are **expanded by default**, so every container is visible; the expanded state persists per engine and project. A click anywhere on the group row expands/collapses it. |
 | CON-012 | Group rows display the working directory as a tooltip, from `com.docker.compose.project.working_dir`. |
 | CON-013 | **Group action semantics.** *Start all*: members start in Compose dependency order when `com.docker.compose.depends_on` labels exist, otherwise in parallel (limit 4). *Stop all*: reverse order, then parallel. *Restart all* = stop all + start all. *Delete all*: the confirm dialog lists the members. Running members need *Force* (checkbox, off by default). Project **networks and volumes are kept** and the dialog says so ("use `docker compose down` to remove networks/volumes"). One-off containers (`com.docker.compose.oneoff=True`) are included and marked. Partial failures are reported per member in one notification. |
 | CON-020 | Row actions: Start (if not running), Stop (if running), Restart, Pause/Unpause (overflow menu, capability-gated), Kill (overflow), Delete. Also: open in Terminal, View logs, Copy id, and Inspect, through the overflow menu and the right-click `context_menu`. |
@@ -30,7 +30,7 @@
 | CON-030 | The list updates live from engine events within 300 ms of the event (debounce 150 ms + fetch). |
 | CON-031 | Optimistic UI: an action immediately shows a spinner on the row. The final state comes from the refetch, and the row is never guessed. |
 | CON-032 | Empty state: "No containers yet". When the engine has images, a *Run an image* CTA links to Images. |
-| CON-033 | Double-click, `Enter`, or a click on the name opens [container detail](container-detail.md). |
+| CON-033 | A click anywhere on an item row, or `Enter`, opens [container detail](container-detail.md). |
 | CON-034 | Keyboard: all list, group, selection, and row actions are operable from the keyboard per [keyboard.md](keyboard.md) KBD-030…039 (single-letter row actions, `←/→` collapse/expand groups, `Space` select, `Shift+F10` context menu). |
 
 ## UI flow
@@ -55,7 +55,7 @@ Containers page ──(double-click row)──▶ Container detail (Overview)
 
 Manual, on real engines: tracked in the [release checklist](../../plan/release-checklist.md).
 
-- [ ] `docker compose up` of a 3-service project shows one collapsed group that expands to 3 rows. (Automated with `FakeEngine`: `con_010_compose_group_collapsed_then_expands`.)
+- [ ] `docker compose up` of a 3-service project shows one expanded group with 3 rows; clicking the group row collapses it. (Automated with `FakeEngine`: `con_010_compose_group_expanded_then_collapses`, `con_033_row_click_toggles_group_and_opens_item`.)
 - [ ] Stopping a group stops all members, and the aggregate turns to `0/3 running`. (Automated: `con_013_stop_all_stops_running_members`.)
 - [ ] 1,000 containers scroll at 60 fps (virtualised). (NFR-011, manual.)
 - [ ] Starting a container from the CLI appears in the list in under 1 s. (Automated: `con_030_engine_event_triggers_refetch`.)
@@ -70,7 +70,7 @@ Manual, on real engines: tracked in the [release checklist](../../plan/release-c
 | CON-004 | `con_004_filter_running_and_stopped` |
 | CON-005 | `con_005_search_matches_member_and_expands_group` |
 | CON-010 | `con_010_*` (dk-core grouping, list model, view), `kbd_039_group_by_none_flattens` |
-| CON-011 | `con_011_aggregate_*`, `con_010_groups_start_collapsed_and_flatten_on_expand` |
+| CON-011 | `con_011_aggregate_*`, `con_011_list_default_expands_groups`, `con_010_groups_start_collapsed_and_flatten_on_expand` (model) |
 | CON-012 | `con_012_working_dir` |
 | CON-013 | `con_013_*` (start order, cycles, stop all, delete all) |
 | CON-020 | `kbd_030_s_starts_stopped_container`, `kbd_036_shift_f10_opens_row_menu` |
@@ -80,7 +80,7 @@ Manual, on real engines: tracked in the [release checklist](../../plan/release-c
 | CON-030 | `con_030_engine_event_triggers_refetch` |
 | CON-031 | `kbd_030_s_starts_stopped_container` (pending, then refetched state) |
 | CON-032 | `containers_empty_state` (empty list; the CTA render isn't asserted) |
-| CON-033 | `con_033_enter_opens_detail_with_primary_focus` |
+| CON-033 | `con_033_enter_opens_detail_with_primary_focus`, `con_033_row_click_toggles_group_and_opens_item` |
 | CON-034 | KBD-030…039 tests (see [keyboard.md](keyboard.md)) |
 
 ## Known gaps (v1)

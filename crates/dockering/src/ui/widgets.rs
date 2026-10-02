@@ -41,6 +41,7 @@ pub fn copy_id(id_prefix: impl Into<ElementId>, full_id: &str, cx: &App) -> impl
                 .icon(IconName::Copy)
                 .tooltip(s::COPY_ID)
                 .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
                     window.dispatch_action(Box::new(CopyText { text: text.clone() }), cx)
                 }),
         )
@@ -75,6 +76,7 @@ pub fn port_link(id: impl Into<ElementId>, p: &PortMapping, cx: &App) -> gpui_ki
                 .label(format!("{label} ↗"))
                 .tooltip(url.clone())
                 .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
                     window.dispatch_action(Box::new(OpenUrl { url: url.clone() }), cx)
                 })
                 .into_any_element()

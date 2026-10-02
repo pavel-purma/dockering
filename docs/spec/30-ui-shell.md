@@ -30,10 +30,10 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 |---|---|---|
 | Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings |
 | Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…", "Rescan" |
-| Sidebar | `Sidebar`, `SidebarGroup`, `SidebarMenu`, `SidebarMenuItem` with `.suffix(Badge)` counts | Collapsible to icons (`SidebarToggleButton`) |
+| Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
 | Page header | `h_flex` + `Input` (search) + `DropdownButton`/`Select` (filters, group-by) + `Button`s | |
 | Lists | `DataTable` (`TableState` + `TableDelegate`) | Grouped containers: the delegate flattens a tree into rows with `depth` and `expanded`, and renders a disclosure chevron in column 0 (CON-011) |
-| Detail pages | `TabBar` + `Tab` | |
+| Detail pages | `TabBar::segmented()` + `Tab` (icon + label) | SHL-025 |
 | Key/value panels | `DescriptionList`, `GroupBox` | |
 | Charts | `AreaChart`, `LineChart` | |
 | Raw JSON | `Input` in multi-line code-editor mode, read-only, with JSON syntax highlighting (`highlighter`) | |
@@ -49,6 +49,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 - **SHL-021** Windows/Linux: no menu bar. The same commands are in the title-bar overflow menu (`Alt` focuses it) and in the command palette.
 - **SHL-022** Single instance per user. A second launch focuses the existing window and exits (10 §7).
 - **SHL-023** Linux: a `.desktop` file and Wayland `app_id` = `dev.dockering.Dockering`, so the dock/taskbar icon matches.
+- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Its focus ring follows the control's rounded outline (KBD-003). *(planned, [plan](../plan/features/ui-tabs-settings-nav.md))*
 - **SHL-024** UI language is **English only** in v1. All strings go through one module (`strings.rs`) so they can be localised later. OS high-contrast settings: the System theme follows the OS light/dark setting. A dedicated high-contrast theme is post-v1. UI zoom is `Mod+=` / `Mod+-` / `Mod+0` (scales the rem size).
 
 ## 2. Navigation model
@@ -68,7 +69,7 @@ pub enum Route {
 ```
 
 - `Navigator` keeps back and forward stacks, bound to `Alt+←/→` (`Cmd+[`/`]` on macOS) and the mouse back/forward buttons.
-- Opening a row (double-click, `Enter`, or clicking the name link) pushes the detail route. On navigation, focus moves to the new page's primary control (KBD-007). A breadcrumb in the detail header shows `Containers › myshop › web-1`.
+- Opening a row (a click anywhere on the row, or `Enter`) pushes the detail route; on a group row the same click or `Enter` expands/collapses it. Controls inside a row (checkbox, row buttons, port links, copy id) act on their own and don't open the row. A modified click (`Mod`/`Shift`/`Alt`) only moves the cursor. Rows show a hover tint and a pointer cursor; names are plain text, not links. The *Actions* column is pinned to the right edge of every list and stays visible while the other columns scroll horizontally. On navigation, focus moves to the new page's primary control (KBD-007). A breadcrumb in the detail header shows `Containers › myshop › web-1`.
 - Detail pages for a resource that disappears show a banner, "This container no longer exists", with a *Back to list* button. Logs and terminal content stays visible.
 - Cross-links: container detail → image detail, volume detail, and network detail. Image detail → "Used by" containers. Volume detail → containers.
 
@@ -82,7 +83,7 @@ pub enum Route {
 - **SHL-006** Search is a case-insensitive substring match over name, image, id prefix, and compose project. It is debounced by 120 ms and runs on `background_spawn` above 2,000 rows.
 - **SHL-007** Relative times ("2 hours ago") refresh every 30 s through a single app-wide ticker, not per row.
 - **SHL-008** Ids are shortened to 12 characters with a copy-to-clipboard button. Sizes use SI units (`1.2 GB`), as Docker Desktop does.
-- **SHL-009** Theme: Light, Dark, or System. The default is System. GPUI Kit `Theme` is used with a Docker-like accent (`#1D63ED`). Theme switching takes effect live.
+- **SHL-009** Theme: Light, Dark, or System. The default is System. GPUI Kit `Theme` is used with a violet accent (`#6E56CF`), also used for the row cursor, text selection, and the active sidebar page. Links and accent text are lifted in dark mode for contrast. Theme switching takes effect live.
 - **SHL-010** Keyboard: the **whole UI is keyboard-operable**. Requirements, the full default keymap, focus regions, the command palette (`Mod+Shift+P`), and the shortcut reference (`Mod+/`, `F1`) are in [features/keyboard.md](features/keyboard.md) (KBD-*). Summary: `Mod+1..4` pages, `Mod+F` search, `Mod+R`/`F5` refresh, `Del` delete (confirm), `Mod+,` settings, `Mod+K` engine switcher, `F6` region cycling, single-letter row actions in lists.
 - **SHL-011** Window state (size, position, sidebar collapsed, column widths, group expand state per engine) persists in `state.json`.
 - **SHL-012** No modal blocks the app while an operation runs. Dialogs close immediately, and progress continues in the row or a notification.
@@ -91,7 +92,8 @@ pub enum Route {
 ## 4. Visual language
 
 - Docker-Desktop-like density: 36 px rows, 13 px UI font, 12 px monospaced font for ids and ports.
-- Status chips (`Tag`): Running = green, Paused = amber, Exited(0) = grey, Exited(≠0)/Dead = red, Restarting = blue with a spinner, Created = grey outline. Health shows as a second chip.
+- Status chips (`Tag::color`, soft: tinted background, coloured label, leading dot): Running = green, Paused = amber, Exited(0) = grey, Exited(≠0)/Dead = red, Restarting = sky with a spinner, Created = grey outline. Health shows as a second, outlined chip. *In use* chips use the same soft green.
+- Sidebar: hover is a neutral tint, the active page an accent tint with an accent icon. While the sidebar region has keyboard focus, the cursor item shows the focus ring; the region itself draws no border, so focus never changes the layout.
 - Ports render as links (`8080:80 ↗`). Clicking one opens `http://localhost:8080` in the default browser via `cx.open_url`.
 - Icons come from the bundled GPUI Kit icon set (Lucide). App-specific icons go in `assets/icons/`.
 

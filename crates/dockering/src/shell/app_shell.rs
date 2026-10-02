@@ -10,7 +10,7 @@ use dk_hub::ThemeMode;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
-use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
+use gpui_kit::component::sidebar::Sidebar;
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
@@ -26,6 +26,7 @@ use super::engine_views;
 use super::menus;
 use super::regions::{Region, RegionSlot, Regions};
 use super::shortcuts::ShortcutList;
+use super::sidebar_nav::{NavItem, NavMenu};
 use super::switcher::{Choice, EngineSwitcher as SwitcherView, SwitcherEvent, kind_icon};
 use super::{ShellState, palette};
 use crate::actions::*;
@@ -1088,6 +1089,11 @@ impl AppShell {
             .as_ref()
             .is_some_and(|s| s.config.endpoint.is_insecure_tcp());
         let focused = self.switcher_btn_focus.is_focused(window);
+        // The GPUI Kit `TitleBar` marks the whole bar as a window drag area. On Windows a
+        // drag area under the pointer answers `WM_NCHITTEST` with `HTCAPTION`, which turns
+        // the click into a window drag and never reaches our controls. Every interactive
+        // element in the bar therefore `occlude()`s the drag area beneath it; the empty
+        // space between them still moves the window.
         TitleBar::new()
             .child(
                 h_flex()
@@ -1108,6 +1114,7 @@ impl AppShell {
                     .child(
                         h_flex()
                             .id("engine-switcher-button")
+                            .occlude()
                             .track_focus(&self.switcher_btn_focus)
                             .gap_2()
                             .px_2()
@@ -1152,6 +1159,7 @@ impl AppShell {
                         this.child(
                             div()
                                 .id("insecure-tcp")
+                                .occlude()
                                 .tooltip(|window, cx| {
                                     gpui_kit::component::tooltip::Tooltip::new(
                                         s::INSECURE_TCP_TOOLTIP,
@@ -1163,56 +1171,68 @@ impl AppShell {
                     })
                     .child(div().flex_1())
                     .child(
-                        Button::new("title-refresh")
-                            .ghost()
-                            .small()
-                            .icon(IconName::RefreshCw)
-                            .tooltip_with_action(s::REFRESH, &Refresh, None)
-                            .on_click(|_, w, cx| w.dispatch_action(Box::new(Refresh), cx)),
-                    )
-                    .child(
-                        Button::new("title-theme")
-                            .ghost()
-                            .small()
-                            .icon(if cx.theme().is_dark() {
-                                IconName::Sun
-                            } else {
-                                IconName::Moon
-                            })
-                            .tooltip_with_action(s::TOGGLE_THEME, &ToggleTheme, None)
-                            .on_click(|_, w, cx| w.dispatch_action(Box::new(ToggleTheme), cx)),
-                    )
-                    .child(
-                        Button::new("title-settings")
-                            .ghost()
-                            .small()
-                            .icon(IconName::Settings)
-                            .tooltip_with_action(s::OPEN_SETTINGS, &OpenSettings, None)
-                            .on_click(|_, w, cx| w.dispatch_action(Box::new(OpenSettings), cx)),
-                    )
-                    .when(!cfg!(target_os = "macos"), |this| {
-                        // SHL-021: Alt focuses the overflow menu button on Windows/Linux.
-                        this.child(crate::ui::widgets::focus_wrap(
-                            "title-overflow-wrap",
-                            &self.overflow_focus,
-                            Button::new("title-overflow")
-                                .ghost()
-                                .small()
-                                .icon(IconName::Menu)
-                                .tooltip(s::MORE_COMMANDS)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_overflow(window, cx)
-                                })),
-                            {
-                                let this = cx.entity().downgrade();
-                                move |_, window, cx| {
-                                    this.update(cx, |s, cx| s.open_overflow(window, cx)).ok();
-                                }
-                            },
-                            window,
-                            cx,
-                        ))
-                    }),
+                        h_flex()
+                            .id("title-actions")
+                            .occlude()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Button::new("title-refresh")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::RefreshCw)
+                                    .tooltip_with_action(s::REFRESH, &Refresh, None)
+                                    .on_click(|_, w, cx| w.dispatch_action(Box::new(Refresh), cx)),
+                            )
+                            .child(
+                                Button::new("title-theme")
+                                    .ghost()
+                                    .small()
+                                    .icon(if cx.theme().is_dark() {
+                                        IconName::Sun
+                                    } else {
+                                        IconName::Moon
+                                    })
+                                    .tooltip_with_action(s::TOGGLE_THEME, &ToggleTheme, None)
+                                    .on_click(|_, w, cx| {
+                                        w.dispatch_action(Box::new(ToggleTheme), cx)
+                                    }),
+                            )
+                            .child(
+                                Button::new("title-settings")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::Settings)
+                                    .tooltip_with_action(s::OPEN_SETTINGS, &OpenSettings, None)
+                                    .on_click(|_, w, cx| {
+                                        w.dispatch_action(Box::new(OpenSettings), cx)
+                                    }),
+                            )
+                            .when(!cfg!(target_os = "macos"), |this| {
+                                // SHL-021: Alt focuses the overflow menu button on Windows/Linux.
+                                this.child(crate::ui::widgets::focus_wrap(
+                                    "title-overflow-wrap",
+                                    &self.overflow_focus,
+                                    Button::new("title-overflow")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::Menu)
+                                        .tooltip(s::MORE_COMMANDS)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.open_overflow(window, cx)
+                                        })),
+                                    {
+                                        let this = cx.entity().downgrade();
+                                        move |_, window, cx| {
+                                            this.update(cx, |s, cx| s.open_overflow(window, cx))
+                                                .ok();
+                                        }
+                                    },
+                                    window,
+                                    cx,
+                                ))
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -1235,7 +1255,7 @@ impl AppShell {
                 s.count(Collection::Networks),
             ]
         });
-        let items: Vec<SidebarMenuItem> = pages
+        let items: Vec<NavItem> = pages
             .iter()
             .enumerate()
             .map(|(ix, p)| {
@@ -1254,26 +1274,15 @@ impl AppShell {
                     Page::Volumes => IconName::HardDrive,
                     Page::Networks => IconName::Network,
                 };
-                let cursor = focused && ix == self.sidebar_cursor;
-                SidebarMenuItem::new(p.label())
-                    .icon(icon)
-                    .active(Some(p) == current)
-                    .when(cursor, |this| {
-                        this.label_style(gpui_kit::StyleRefinement::default().underline())
-                    })
-                    .when_some(count, |this, n| {
-                        this.suffix(move |_, cx| {
-                            div()
-                                .text_xs()
-                                .px_1()
-                                .rounded(cx.theme().radius)
-                                .bg(cx.theme().muted)
-                                .child(n.to_string())
-                        })
-                    })
-                    .on_click(move |_, window, cx| {
-                        window.dispatch_action(Box::new(Navigate { route: p.route() }), cx)
-                    })
+                NavItem {
+                    page: p,
+                    icon: Icon::new(icon),
+                    count,
+                    active: Some(p) == current,
+                    // The cursor ring is drawn on the item; the region itself has no ring
+                    // (a border around the whole sidebar shifted the layout on focus).
+                    cursor: focused && ix == self.sidebar_cursor,
+                }
             })
             .collect();
         div()
@@ -1286,14 +1295,11 @@ impl AppShell {
             .on_action(cx.listener(Self::on_sidebar_first))
             .on_action(cx.listener(Self::on_sidebar_last))
             .on_action(cx.listener(Self::on_sidebar_activate))
-            .when(focused, |this| {
-                this.border_1().border_color(cx.theme().ring)
-            })
             .child(
                 Sidebar::new("sidebar")
                     .collapsed(self.sidebar_collapsed)
                     .w(px(220.))
-                    .child(SidebarMenu::new().children(items)),
+                    .child(NavMenu::new(items)),
             )
             .into_any_element()
     }
