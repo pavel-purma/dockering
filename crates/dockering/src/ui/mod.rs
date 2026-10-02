@@ -14,6 +14,7 @@
 pub mod breadcrumb;
 pub mod confirm;
 pub mod list_table;
+pub mod menu;
 pub mod notify;
 pub mod page;
 pub mod states;

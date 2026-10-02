@@ -76,8 +76,7 @@ pub fn containers() -> Vec<dk_core::ContainerSummary> {
     labelled.labels = BTreeMap::from([("app".into(), "billing".into())]);
 
     vec![
-        web, api, db, migrate, grafana, prom, redis, scratch, paused, restarting, created,
-        labelled,
+        web, api, db, migrate, grafana, prom, redis, scratch, paused, restarting, created, labelled,
     ]
 }
 

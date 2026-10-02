@@ -127,7 +127,12 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 4] = [Page::Containers, Page::Images, Page::Volumes, Page::Networks];
+    pub const ALL: [Page; 4] = [
+        Page::Containers,
+        Page::Images,
+        Page::Volumes,
+        Page::Networks,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Page::Containers => s::PAGE_CONTAINERS,
@@ -194,7 +199,9 @@ impl Route {
     }
 
     pub fn from_state(s: &str) -> Option<Route> {
-        serde_json::from_str::<Route>(s).ok().filter(|r| !r.is_detail())
+        serde_json::from_str::<Route>(s)
+            .ok()
+            .filter(|r| !r.is_detail())
     }
 }
 
@@ -350,7 +357,11 @@ mod tests {
 
     #[test]
     fn group_by_modes_roundtrip() {
-        for g in [GroupBy::Compose, GroupBy::None, GroupBy::Label("app".into())] {
+        for g in [
+            GroupBy::Compose,
+            GroupBy::None,
+            GroupBy::Label("app".into()),
+        ] {
             assert_eq!(group_by_from_mode(&group_by_to_mode(&g)), g);
         }
         assert_eq!(group_by_from_mode("label: "), GroupBy::Compose);

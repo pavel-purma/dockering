@@ -30,7 +30,12 @@ pub fn empty_state(
                 .text_color(cx.theme().muted_foreground)
                 .child(icon.into().size(px(40.))),
         )
-        .child(div().text_lg().font_semibold().child(title.into()))
+        .child(
+            div()
+                .text_lg()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(title.into()),
+        )
         .child(
             div()
                 .text_sm()
@@ -71,7 +76,12 @@ pub fn error_panel(
                 .text_color(cx.theme().danger)
                 .child(Icon::new(IconName::CircleAlert).size(px(36.))),
         )
-        .child(div().text_lg().font_semibold().child(title.into()))
+        .child(
+            div()
+                .text_lg()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(title.into()),
+        )
         .child(
             div()
                 .text_sm()

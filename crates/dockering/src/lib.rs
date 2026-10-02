@@ -15,6 +15,7 @@
 
 pub mod actions;
 pub mod app;
+pub mod assets;
 pub mod commands;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;

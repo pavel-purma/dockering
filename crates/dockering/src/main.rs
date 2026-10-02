@@ -58,7 +58,11 @@ fn main() -> ExitCode {
     // nfr-001-allow: startup before first window (sync config load, spec 10 §6)
     let (config, ui_state) = dk_hub::load_config(&paths);
     let _logging = dk_hub::logging::init(&paths, config.diagnostics.log_level);
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), demo = args.demo, "starting");
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        demo = args.demo,
+        "starting"
+    );
 
     // SHL-022: a second launch focuses the running window and exits. Demo runs are isolated.
     let instance = if args.demo {
@@ -77,11 +81,7 @@ fn main() -> ExitCode {
     let com_security = dk_hub::init_platform();
     tracing::debug!(com_security, "platform initialised");
 
-    let factories = if args.demo {
-        demo_factories()
-    } else {
-        None
-    };
+    let factories = if args.demo { demo_factories() } else { None };
     let hub = match EngineHub::start(HubOptions {
         paths,
         config: config.clone(),

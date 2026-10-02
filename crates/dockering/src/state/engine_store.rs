@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use dk_core::{
-    Capabilities, ContainerQuery, ContainerSummary, EngineError, EngineEvent, EngineId,
-    EngineInfo, ImageSummary, NetworkSummary, ResourceKind, VolumeSummary,
+    Capabilities, ContainerQuery, ContainerSummary, EngineError, EngineEvent, EngineId, EngineInfo,
+    ImageSummary, NetworkSummary, ResourceKind, VolumeSummary,
 };
 use dk_hub::{Feed, HubHandle};
 use futures::StreamExt;
@@ -128,10 +128,7 @@ impl EngineStore {
 
     /// Capabilities of the engine (empty until `info` arrived).
     pub fn capabilities(&self) -> Capabilities {
-        self.info
-            .data()
-            .map(|i| i.capabilities)
-            .unwrap_or_default()
+        self.info.data().map(|i| i.capabilities).unwrap_or_default()
     }
 
     pub fn info(&self) -> Option<&EngineInfo> {
@@ -220,9 +217,7 @@ impl EngineStore {
         let engine = self.engine.clone();
         self.info.start_loading();
         self.fetches[4] = Some(cx.spawn(async move |this, cx| {
-            let result = hub
-                .call(&engine, |e| async move { e.info().await })
-                .await;
+            let result = hub.call(&engine, |e| async move { e.info().await }).await;
             this.update(cx, |this, cx| {
                 if this.revisions[4] != rev {
                     return;
@@ -325,8 +320,8 @@ impl EngineStore {
     /// resubscribe. On disconnect: stop live updates (calls would fail fast anyway).
     pub fn set_connected(&mut self, connected: bool, cx: &mut Context<Self>) {
         if connected {
-            let failed = self.containers.error().is_some_and(|e| e.is_unreachable())
-                || !self.connected_once;
+            let failed =
+                self.containers.error().is_some_and(|e| e.is_unreachable()) || !self.connected_once;
             if failed || self.live_mode == LiveMode::Idle {
                 self.activate(cx);
             }

@@ -78,215 +78,240 @@ pub struct OpenUrl {
     pub url: SharedString,
 }
 
-gpui_kit::actions!(
-    sidebar,
-    [
-        /// Roving cursor in the sidebar (KBD-004).
-        Prev,
-        Next,
-        First,
-        Last,
-        Activate,
-    ]
-);
+pub mod sidebar {
+    gpui_kit::actions!(
+        sidebar,
+        [
+            /// Roving cursor in the sidebar (KBD-004).
+            Prev,
+            Next,
+            First,
+            Last,
+            Activate,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    list,
-    [
-        /// `Enter` (KBD-032)
-        OpenDetail,
+pub mod list {
+    use gpui_kit::{Action, SharedString};
+
+    gpui_kit::actions!(
+        list,
+        [
+            /// `Enter` (KBD-032)
+            OpenDetail,
+            ToggleGroup,
+            /// `←` (KBD-033)
+            CollapseOrParent,
+            /// `→`
+            Expand,
+            CollapseAll,
+            ExpandAll,
+            /// `Space` (KBD-034)
+            ToggleRowSelected,
+            /// `Shift+↑/↓` (KBD-035)
+            ExtendUp,
+            ExtendDown,
+            SelectAll,
+            ClearSelection,
+            /// `Esc` inside a list (KBD-006 chain).
+            Escape,
+            First,
+            Last,
+            /// `Tab` / `Shift+Tab` leave the table (KBD-004, S-8).
+            FocusNext,
+            FocusPrev,
+            /// `Shift+F10`, `Menu` (KBD-036)
+            ContextMenu,
+            /// `C`
+            CopyId,
+            /// `Del` (KBD-030)
+            Delete,
+            BulkStart,
+            BulkStop,
+            BulkDelete,
+            /// `/` (KBD-037)
+            QuickFind,
+            QuickFindNext,
+            QuickFindClose,
+            /// `Mod+Shift+G` (KBD-039)
+            GroupBy,
+            /// `Mod+Shift+O`
+            SortMenu,
+            /// `Mod+Shift+F`
+            FocusFilter,
+            /// CON-023
+            Prune,
+        ]
+    );
+
+    /// Sort by a column key (sort menu, palette).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = list, no_json)]
+    pub struct SortByColumn {
+        pub key: SharedString,
+    }
+
+    /// Status filter segment (CON-004).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = list, no_json)]
+    pub struct SetFilter {
+        pub filter: SharedString,
+    }
+
+    /// Group-by mode (CON-010): `compose`, `none`, or `label:<key>`.
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = list, no_json)]
+    pub struct SetGroupBy {
+        pub mode: SharedString,
+    }
+
+    /// A row-scoped command from a cell button or a menu: makes `row` the cursor, then runs
+    /// `action` on it (so clicks and keys share one code path).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = list, no_json)]
+    pub struct OnRow {
+        pub row: SharedString,
+        pub action: RowCommand,
+    }
+
+    /// Row-scoped commands (see [`OnRow`]).
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum RowCommand {
+        Open,
         ToggleGroup,
-        /// `←` (KBD-033)
-        CollapseOrParent,
-        /// `→`
-        Expand,
-        CollapseAll,
-        ExpandAll,
-        /// `Space` (KBD-034)
-        ToggleRowSelected,
-        /// `Shift+↑/↓` (KBD-035)
-        ExtendUp,
-        ExtendDown,
-        SelectAll,
-        ClearSelection,
-        /// `Esc` inside a list (KBD-006 chain).
-        Escape,
-        First,
-        Last,
-        /// `Tab` / `Shift+Tab` leave the table (KBD-004, S-8).
-        FocusNext,
-        FocusPrev,
-        /// `Shift+F10`, `Menu` (KBD-036)
-        ContextMenu,
-        /// `C`
-        CopyId,
-        /// `Del` (KBD-030)
-        Delete,
-        BulkStart,
-        BulkStop,
-        BulkDelete,
-        /// `/` (KBD-037)
-        QuickFind,
-        QuickFindNext,
-        QuickFindClose,
-        /// `Mod+Shift+G` (KBD-039)
-        GroupBy,
-        /// `Mod+Shift+O`
-        SortMenu,
-        /// `Mod+Shift+F`
-        FocusFilter,
-        /// CON-023
-        Prune,
-    ]
-);
-
-/// Sort by a column key (sort menu, palette).
-#[derive(Clone, PartialEq, Debug, Action)]
-#[action(namespace = list, no_json)]
-pub struct SortByColumn {
-    pub key: SharedString,
-}
-
-/// Status filter segment (CON-004).
-#[derive(Clone, PartialEq, Debug, Action)]
-#[action(namespace = list, no_json)]
-pub struct SetFilter {
-    pub filter: SharedString,
-}
-
-/// Group-by mode (CON-010): `compose`, `none`, or `label:<key>`.
-#[derive(Clone, PartialEq, Debug, Action)]
-#[action(namespace = list, no_json)]
-pub struct SetGroupBy {
-    pub mode: SharedString,
-}
-
-/// A row-scoped command from a cell button or a menu: makes `row` the cursor, then runs
-/// `action` on it (so clicks and keys share one code path).
-#[derive(Clone, PartialEq, Debug, Action)]
-#[action(namespace = list, no_json)]
-pub struct OnRow {
-    pub row: SharedString,
-    pub action: RowCommand,
-}
-
-/// Row-scoped commands (see [`OnRow`]).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RowCommand {
-    Open,
-    ToggleGroup,
-    ToggleSelected,
-    Start,
-    Stop,
-    Restart,
-    Pause,
-    Unpause,
-    Kill,
-    Delete,
-    Logs,
-    Terminal,
-    Inspect,
-    CopyId,
-    OpenPort,
-    ContextMenu,
-}
-
-gpui_kit::actions!(
-    container,
-    [
-        /// `S` start/stop toggle (KBD-030)
-        StartStop,
-        /// `R`
+        ToggleSelected,
+        Start,
+        Stop,
         Restart,
-        /// `P` (capability `PAUSE`)
-        PauseToggle,
+        Pause,
+        Unpause,
         Kill,
-        /// `L`
+        Delete,
         Logs,
-        /// `T` (capability `EXEC_TTY`)
         Terminal,
-        /// `I`
         Inspect,
-        /// `O`
+        CopyId,
         OpenPort,
-    ]
-);
+        ContextMenu,
+    }
+}
 
-gpui_kit::actions!(
-    image,
-    [
-        /// `U` (phase 2)
-        Run,
-        /// `G` (phase 2)
-        Pull,
-    ]
-);
+pub mod container {
+    gpui_kit::actions!(
+        container,
+        [
+            /// `S` start/stop toggle (KBD-030)
+            StartStop,
+            /// `R`
+            Restart,
+            /// `P` (capability `PAUSE`)
+            PauseToggle,
+            Kill,
+            /// `L`
+            Logs,
+            /// `T` (capability `EXEC_TTY`)
+            Terminal,
+            /// `I`
+            Inspect,
+            /// `O`
+            OpenPort,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    volume,
-    [
-        /// `N` (phase 2)
-        Create,
-    ]
-);
+pub mod image {
+    gpui_kit::actions!(
+        image,
+        [
+            /// `U` (phase 2)
+            Run,
+            /// `G` (phase 2)
+            Pull,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    detail,
-    [
-        /// `Ctrl+Tab` (KBD-040)
-        NextTab,
-        PrevTab,
-        /// `Alt+↑` (KBD-042)
-        ParentList,
-    ]
-);
+pub mod volume {
+    gpui_kit::actions!(
+        volume,
+        [
+            /// `N` (phase 2)
+            Create,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    logs,
-    [
-        Find,
-        FindNext,
-        FindPrev,
-        Bottom,
-        Top,
-        ToggleTimestamps,
-        ToggleWrap,
-        ClearView,
-        Save,
-        CopyAll,
-    ]
-);
+pub mod detail {
+    gpui_kit::actions!(
+        detail,
+        [
+            /// `Ctrl+Tab` (KBD-040)
+            NextTab,
+            PrevTab,
+            /// `Alt+↑` (KBD-042)
+            ParentList,
+        ]
+    );
+}
 
-gpui_kit::actions!(term, [NewSession, CloseSession, NextSession, PrevSession]);
+pub mod logs {
+    gpui_kit::actions!(
+        logs,
+        [
+            FindNext,
+            FindPrev,
+            Bottom,
+            Top,
+            ToggleTimestamps,
+            ToggleWrap,
+            ClearView,
+            Save,
+            CopyAll,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    dialog,
-    [
-        /// `Mod+Enter` in a destructive confirmation (KBD-071).
-        ConfirmDestructive,
-    ]
-);
+pub mod term {
+    gpui_kit::actions!(term, [NewSession, CloseSession, NextSession, PrevSession]);
+}
 
-gpui_kit::actions!(form, [AddRow, RemoveRow]);
+pub mod dialog {
+    gpui_kit::actions!(
+        dialog,
+        [
+            /// `Mod+Enter` in a destructive confirmation (KBD-071).
+            ConfirmDestructive,
+        ]
+    );
+}
 
-gpui_kit::actions!(
-    switcher,
-    [
-        /// Arrow keys / Enter inside the engine switcher (KBD-021).
-        Up,
-        Down,
-        Choose,
-        Close,
-    ]
-);
+pub mod form {
+    gpui_kit::actions!(form, [AddRow, RemoveRow]);
+}
 
-gpui_kit::actions!(
-    palette,
-    [
-        /// Escape the shortcut reference / notification center.
-        Dismiss,
-    ]
-);
+pub mod switcher {
+    gpui_kit::actions!(
+        switcher,
+        [
+            /// Arrow keys / Enter inside the engine switcher (KBD-021).
+            Up,
+            Down,
+            Choose,
+            Close,
+        ]
+    );
+}
+
+pub mod palette {
+    gpui_kit::actions!(
+        palette,
+        [
+            /// Escape the shortcut reference / notification center.
+            Dismiss,
+        ]
+    );
+}
 
 /// Every action namespace this crate defines (KBD-093 coverage test).
 pub const NAMESPACES: &[&str] = &[
@@ -304,3 +329,5 @@ pub const NAMESPACES: &[&str] = &[
     "switcher::",
     "palette::",
 ];
+
+pub use list::{OnRow, RowCommand, SetFilter, SetGroupBy, SortByColumn};

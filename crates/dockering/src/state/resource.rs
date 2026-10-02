@@ -7,14 +7,24 @@ use dk_core::EngineError;
 #[derive(Debug, Clone)]
 pub enum Resource<T> {
     Idle,
-    Loading { previous: Option<T> },
-    Ready { data: T, fetched_at: Instant },
-    Failed { error: EngineError, previous: Option<T> },
+    Loading {
+        previous: Option<T>,
+    },
+    Ready {
+        data: T,
+        fetched_at: Instant,
+    },
+    Failed {
+        error: EngineError,
+        previous: Option<T>,
+    },
 }
 
+// Manual impl: `#[derive(Default)]` would require `T: Default`.
+#[allow(clippy::derivable_impls)]
 impl<T> Default for Resource<T> {
     fn default() -> Self {
-        Resource::Idle
+        Self::Idle
     }
 }
 
@@ -23,9 +33,7 @@ impl<T> Resource<T> {
     pub fn data(&self) -> Option<&T> {
         match self {
             Resource::Ready { data, .. } => Some(data),
-            Resource::Loading { previous } | Resource::Failed { previous, .. } => {
-                previous.as_ref()
-            }
+            Resource::Loading { previous } | Resource::Failed { previous, .. } => previous.as_ref(),
             Resource::Idle => None,
         }
     }
@@ -66,9 +74,7 @@ impl<T> Resource<T> {
             Err(error) => {
                 let previous = match std::mem::take(self) {
                     Resource::Ready { data, .. } => Some(data),
-                    Resource::Loading { previous } | Resource::Failed { previous, .. } => {
-                        previous
-                    }
+                    Resource::Loading { previous } | Resource::Failed { previous, .. } => previous,
                     Resource::Idle => None,
                 };
                 Resource::Failed { error, previous }

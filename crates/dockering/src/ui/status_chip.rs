@@ -86,7 +86,10 @@ mod tests {
 
     #[test]
     fn engine_labels_cover_all_states() {
-        assert_eq!(engine_state_label(&EngineState::Connected), s::STATE_CONNECTED);
+        assert_eq!(
+            engine_state_label(&EngineState::Connected),
+            s::STATE_CONNECTED
+        );
         assert_eq!(
             engine_state_label(&EngineState::Unsupported {
                 reason: "ssh".into()

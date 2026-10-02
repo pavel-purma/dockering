@@ -18,8 +18,7 @@ pub const TOGGLE_THEME: &str = "Toggle light/dark theme";
 pub const OPEN_SETTINGS: &str = "Settings";
 pub const MORE_COMMANDS: &str = "More commands";
 pub const INSECURE_TCP: &str = "Unencrypted TCP";
-pub const INSECURE_TCP_TOOLTIP: &str =
-    "This engine is reached over plain TCP without TLS. Traffic, including credentials, is not encrypted.";
+pub const INSECURE_TCP_TOOLTIP: &str = "This engine is reached over plain TCP without TLS. Traffic, including credentials, is not encrypted.";
 pub const BACK: &str = "Back";
 pub const FORWARD: &str = "Forward";
 pub const TOGGLE_SIDEBAR: &str = "Toggle sidebar";
