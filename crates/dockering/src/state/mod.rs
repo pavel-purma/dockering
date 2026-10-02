@@ -42,12 +42,16 @@ impl AppState {
         &cx.global::<AppState>().config
     }
 
-    /// Mutates the config, persists it through the hub (debounced), and keeps the snapshot.
+    /// Mutates the config, persists it through the hub (debounced), and refreshes the snapshot.
+    ///
+    /// The hub's config is the source of truth: it also changes behind the UI's back
+    /// (`add_engine`, `update_engine`, `remove_engine` store engine entries), so `f` is applied
+    /// to the hub's copy and the snapshot is re-read, never written over the hub's copy.
     pub fn update_config(cx: &mut App, f: impl FnOnce(&mut Config)) {
-        let state = cx.global_mut::<AppState>();
-        f(&mut state.config);
-        let snapshot = state.config.clone();
-        state.hub.config().update(move |c| *c = snapshot);
+        let handle = cx.global::<AppState>().hub.config();
+        handle.update(f);
+        let fresh = handle.get();
+        cx.global_mut::<AppState>().config = fresh;
     }
 
     pub fn ui_state(cx: &App) -> UiState {

@@ -350,6 +350,43 @@ pub mod res {
     }
 }
 
+// ── M9: Settings (SET-*, ENG-104/105) ───────────────────────────────────────────────────────
+pub mod settings {
+    use gpui_kit::{Action, SharedString};
+
+    gpui_kit::actions!(
+        settings,
+        [
+            /// Settings › Engines › *Add engine…* (ENG-105, ENG-111 first-run button).
+            AddEngine,
+            /// SET-060: diagnostics text to the clipboard.
+            CopyDiagnostics,
+            /// REL-002: third-party notices.
+            ViewLicenses,
+        ]
+    );
+
+    /// An engine row command in Settings › Engines (KBD-075). Row buttons run the same
+    /// handler; the action makes it dispatchable (tests, future bindings).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = settings, no_json)]
+    pub struct EngineOp {
+        pub id: SharedString,
+        pub op: EngineOpKind,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum EngineOpKind {
+        Test,
+        ToggleEnabled,
+        ToggleHidden,
+        Remove,
+        StartAndConnect,
+        /// `id` is the merged engine to bring back (ENG-009).
+        Unmerge,
+    }
+}
+
 /// Every action namespace this crate defines (KBD-093 coverage test).
 pub const NAMESPACES: &[&str] = &[
     "dk::",
@@ -366,6 +403,7 @@ pub const NAMESPACES: &[&str] = &[
     "switcher::",
     "palette::",
     "res::",
+    "settings::",
     // wip/detail
     "rows::",
     "stats::",

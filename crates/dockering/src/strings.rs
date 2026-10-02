@@ -606,6 +606,186 @@ pub const CMD_PRUNE_VOLUMES: &str = "Prune unused volumes";
 pub const CMD_PRUNE_NETWORKS: &str = "Prune unused networks";
 pub const CMD_DELETE_RESOURCE: &str = "Delete";
 pub const CMD_COPY_RESOURCE_ID: &str = "Copy id";
+
+// ── settings (SET-*, ENG-104/105/110) ───────────────────────────────────────────────────
+pub const SETTINGS_SECTIONS: &str = "Settings sections";
+pub const SET_DESC_GENERAL: &str = "Appearance and app behaviour.";
+pub const SET_DESC_ENGINES: &str =
+    "Discovered and manually added container engines. Changes apply immediately.";
+pub const SET_DESC_CONTAINERS: &str = "Defaults for the Containers page.";
+pub const SET_DESC_LOGS: &str = "Defaults for container logs.";
+pub const SET_DESC_TERMINAL: &str = "Container terminal appearance and behaviour.";
+pub const SET_DESC_STATS: &str = "Container resource statistics.";
+pub const SET_DESC_DIAGNOSTICS: &str = "Logs, diagnostics, version, and licences.";
+pub const SET_DESC_KEYBOARD: &str = "Every keyboard shortcut on this system.";
+pub const SET_THEME: &str = "Theme";
+pub const SET_THEME_DESC: &str = "System follows the operating system's light or dark setting.";
+pub const THEME_SYSTEM: &str = "System";
+pub const THEME_LIGHT: &str = "Light";
+pub const THEME_DARK: &str = "Dark";
+pub const SET_START_PAGE: &str = "Start page";
+pub const SET_START_PAGE_DESC: &str = "The page Dockering opens on.";
+pub const SET_CONFIRM_STOPPED: &str = "Confirm before deleting stopped containers";
+pub const SET_CONFIRM_STOPPED_DESC: &str = "Deleting a running container always asks first.";
+pub const SET_SHOW_NETWORKS: &str = "Show Networks page";
+pub const SET_SHOW_NETWORKS_DESC: &str = "Adds Networks to the sidebar.";
+pub const SET_GROUP_BY: &str = "Group containers by";
+pub const SET_GROUP_BY_DESC: &str = "The default grouping. Mod+Shift+G changes it on the page.";
+pub const SET_GROUP_LABEL_KEY: &str = "Group label key";
+pub const SET_GROUP_LABEL_KEY_DESC: &str = "Used when grouping by label, for example app.";
+pub const SET_LABEL_KEY_REQUIRED: &str = "Enter a label key to group by label.";
+pub const SET_SHOW_STATS: &str = "Show CPU and memory columns";
+pub const SET_SHOW_STATS_DESC: &str = "Streams statistics for visible running containers. Engines that can't stream them cheaply hide the columns.";
+pub const SET_POLLING: &str = "Polling interval";
+pub const SET_POLLING_DESC: &str = "How often lists refresh when the engine doesn't send events.";
+pub const SET_LOGS_TAIL: &str = "Initial lines";
+pub const SET_LOGS_TAIL_DESC: &str = "Recent lines loaded when the log view opens.";
+pub const SET_LOGS_MAX: &str = "Maximum lines kept";
+pub const SET_LOGS_MAX_DESC: &str = "Older lines are dropped from the view.";
+pub const SET_LOGS_TIMESTAMPS: &str = "Show timestamps";
+pub const SET_LOGS_TIMESTAMPS_DESC: &str = "Default for new log views.";
+pub const SET_LOGS_WRAP: &str = "Wrap long lines";
+pub const SET_LOGS_WRAP_DESC: &str = "Default for new log views.";
+pub const SET_TERM_FONT: &str = "Font family";
+pub const SET_TERM_FONT_DESC: &str = "Leave empty for the platform monospace font.";
+pub const SET_TERM_FONT_PLACEHOLDER: &str = "Platform monospace";
+pub const SET_TERM_FONT_SIZE: &str = "Font size";
+pub const SET_TERM_SHELL: &str = "Default shell";
+pub const SET_TERM_SHELL_DESC: &str = "Leave empty to detect bash, then sh.";
+pub const SET_TERM_SHELL_PLACEHOLDER: &str = "Auto-detect";
+pub const SET_TERM_SCROLLBACK: &str = "Scrollback lines";
+pub const SET_TERM_EXTERNAL: &str = "External terminal command";
+pub const SET_TERM_EXTERNAL_DESC: &str =
+    "Used by Open in external terminal. {cmd} is replaced with the exec command.";
+pub const SET_TERM_EXTERNAL_PLACEHOLDER: &str = "e.g. wt.exe {cmd}";
+pub const SET_EXTERNAL_NEEDS_CMD: &str = "The command must contain {cmd}.";
+pub const SET_STATS_HISTORY: &str = "History window";
+pub const SET_STATS_HISTORY_DESC: &str = "How much history the stats charts keep.";
+pub const SET_STATS_ALL_CORES: &str = "CPU % relative to all cores";
+pub const SET_STATS_ALL_CORES_DESC: &str = "Off: 100 % is one core. On: 100 % is every core.";
+pub const NOT_A_NUMBER: &str = "Enter a number.";
+pub const NOT_A_WHOLE_NUMBER: &str = "Enter a whole number.";
+pub const SET_GROUP_APPEARANCE: &str = "Appearance";
+pub const SET_GROUP_BEHAVIOUR: &str = "Behaviour";
+pub const SET_GROUP_LIST: &str = "List";
+pub const SET_GROUP_UPDATES: &str = "Updates";
+pub const SET_GROUP_VIEW: &str = "Log view";
+pub const SET_GROUP_FONT: &str = "Font";
+pub const SET_GROUP_SESSION: &str = "Sessions";
+pub const SET_GROUP_HISTORY: &str = "History";
+pub const UNIT_SECONDS: &str = "s";
+pub const UNIT_MINUTES: &str = "min";
+pub const UNIT_PX: &str = "px";
+pub fn out_of_range(min: f64, max: f64, unit: &str) -> String {
+    let unit = if unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {unit}")
+    };
+    format!("Must be between {min} and {max}{unit}.")
+}
+
+// Engines section (ENG-104, ENG-109, ENG-110, SET-010)
+pub const ENGINES_DISCOVERY: &str = "Discovery";
+pub const SET_SHOW_ALL_DISTROS: &str = "Show all WSL distros";
+pub const SET_SHOW_ALL_DISTROS_DESC: &str = "Also list distros without Docker.";
+pub const SET_SHOW_ALL_SESSIONS: &str = "Show all WSLC sessions";
+pub const SET_SHOW_ALL_SESSIONS_DESC: &str =
+    "Also list WSL container sessions other than the default one.";
+pub const ENGINES_LIST: &str = "Engines";
+pub const NO_ENGINES: &str = "No engines yet. Rescan, or add one manually.";
+pub const ENGINE_NAME: &str = "Engine name";
+pub const ENABLED: &str = "Enabled";
+pub const TEST_CONNECTION: &str = "Test connection";
+pub const TESTING: &str = "Testing…";
+pub const REMOVE: &str = "Remove";
+pub const HIDE: &str = "Hide";
+pub const UNHIDE: &str = "Unhide";
+pub const UNMERGE: &str = "Un-merge";
+pub const TAG_HIDDEN: &str = "Hidden";
+pub const TAG_ACTIVE: &str = "Active";
+pub const ORIGIN_MANUAL: &str = "Manual";
+pub const ORIGIN_DISCOVERED: &str = "Discovered";
+pub const RENAME_ENGINE: &str = "Couldn't rename the engine";
+pub const UPDATE_ENGINE: &str = "Couldn't update the engine";
+pub const REMOVE_ENGINE: &str = "Couldn't remove the engine";
+pub const TEST_FAILED: &str = "Connection test failed";
+pub const REMOVE_ENGINE_BODY: &str =
+    "The engine is removed from Dockering. Nothing changes on the engine itself.";
+pub fn remove_engine_title(name: &str) -> String {
+    format!("Remove {name}?")
+}
+pub fn engine_removed(name: &str) -> String {
+    format!("Removed {name}")
+}
+pub fn test_ok(name: &str, version: &str, api: Option<&str>, os: &str, arch: &str) -> String {
+    match api {
+        Some(api) => format!("Connected to {name}: {version} · API {api} · {os}/{arch}"),
+        None => format!("Connected to {name}: {version} · {os}/{arch}"),
+    }
+}
+pub fn engine_version(version: &str, api: Option<&str>, os: &str, arch: &str) -> String {
+    match api {
+        Some(api) => format!("Version {version} · API {api} · {os}/{arch}"),
+        None => format!("Version {version} · {os}/{arch}"),
+    }
+}
+pub fn wsl_version(v: &str) -> String {
+    format!("WSL {v}")
+}
+
+// Add engine dialog (ENG-105)
+pub const ADD_ENGINE_TITLE: &str = "Add engine";
+pub const ENGINE_KIND: &str = "Connection type";
+pub const ENGINE_NAME_PLACEHOLDER: &str = "Optional; defaults to the endpoint";
+pub const BROWSE: &str = "Browse…";
+pub const KNOWN_VALUES: &str = "Detected:";
+pub const TEST: &str = "Test";
+pub const SAVE: &str = "Save";
+pub const SAVE_ANYWAY: &str = "Save anyway";
+pub const SAVE_NEEDS_TEST: &str = "Test the connection before saving, or choose Save anyway.";
+pub const FIELD_REQUIRED: &str = "Required.";
+pub const INVALID_PORT: &str = "Enter a port between 1 and 65535.";
+pub const INVALID_HOST: &str = "Enter a host name or IP address without a scheme or path.";
+pub const KIND_NOT_ADDABLE: &str = "This connection type can't be added manually.";
+pub const NO_ENGINE_TYPES: &str = "No engine backends can be added on this system.";
+pub const ADD_ENGINE_FAILED: &str = "Couldn't add the engine";
+pub fn engine_added(name: &str) -> String {
+    format!("Added {name}")
+}
+
+// Diagnostics (SET-060, REL-002)
+pub const DIAG_LOGGING: &str = "Logging";
+pub const DIAG_LOG_LEVEL: &str = "Log level";
+pub const DIAG_LOG_LEVEL_DESC: &str =
+    "Applies on restart. The RUST_LOG environment variable overrides it.";
+pub const LOG_INFO: &str = "Info";
+pub const LOG_DEBUG: &str = "Debug";
+pub const DIAG_LOGS_FOLDER: &str = "Logs folder";
+pub const DIAG_SUPPORT: &str = "Support";
+pub const COPY_DIAGNOSTICS: &str = "Copy diagnostics";
+pub const COPY_DIAGNOSTICS_DESC: &str =
+    "Version, OS, engines, and capabilities. Never includes secrets or environment values.";
+pub const DIAGNOSTICS_COPIED: &str = "Diagnostics copied to the clipboard";
+pub const DIAGNOSTICS_FAILED: &str = "Couldn't collect diagnostics";
+pub const DIAG_ENGINES: &str = "Engine transports";
+pub const DIAG_NOT_CONNECTED: &str = "Not connected yet";
+pub const DIAG_ABOUT: &str = "About";
+pub const DIAG_VERSION: &str = "Version";
+pub const VIEW_LICENSES: &str = "View licences";
+pub const VIEW_LICENSES_DESC: &str =
+    "Third-party notices for the libraries and icons Dockering uses.";
+pub const LICENSES_FAILED: &str = "Couldn't open the licences";
+
+// Keyboard (SET-070)
+pub const KEYBOARD_NOTE: &str =
+    "Shortcuts are read-only in this version. Custom key bindings are planned for a later release.";
+
+// Commands
+pub const CMD_ADD_ENGINE: &str = "Add engine…";
+pub const CMD_COPY_DIAGNOSTICS: &str = "Copy diagnostics";
+pub const CMD_VIEW_LICENSES: &str = "View third-party licences";
+
 // ── container detail (CDT-*, LOG-*, TRM-*, STA-*; wip/detail) ─────────────────────────────
 pub const CONTAINER_DETAIL_LOAD_FAILED: &str = "Couldn't load the container details";
 pub const DETAIL_READ_ONLY: &str = "Read-only: the container was removed.";

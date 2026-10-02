@@ -8,7 +8,7 @@ use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, IntoElement, div, px};
 
-use crate::actions::{EngineSwitcher, ManageEngines, Rescan, RetryEngine, StartEngine};
+use crate::actions::{EngineSwitcher, Rescan, RetryEngine, StartEngine};
 use crate::strings as s;
 
 /// Full-page alert for Disconnected/Failed/Stopped (SHL-013, ENG-107). Last-known data is
@@ -142,7 +142,9 @@ pub fn first_run(cx: &App) -> AnyElement {
                 .child(
                     Button::new("first-run-add")
                         .label(s::ADD_ENGINE)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(ManageEngines), cx)),
+                        .on_click(|_, w, cx| {
+                            w.dispatch_action(Box::new(crate::actions::settings::AddEngine), cx)
+                        }),
                 ),
         )
         .into_any_element()

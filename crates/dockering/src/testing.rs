@@ -51,6 +51,16 @@ impl Default for Setup {
 }
 
 pub fn start(cx: &mut TestAppContext, setup: Setup) -> Harness {
+    start_with_factories(cx, setup, Vec::new())
+}
+
+/// [`start`] with extra factories registered *before* the fake one (M9: Add-engine tests use
+/// one that publishes real config schemas).
+pub fn start_with_factories(
+    cx: &mut TestAppContext,
+    setup: Setup,
+    extra: Vec<Arc<dyn EngineFactory>>,
+) -> Harness {
     cx.executor().allow_parking();
     let dir = tempfile::tempdir().expect("tempdir");
     let engine = crate::demo::engine();
@@ -67,7 +77,12 @@ pub fn start(cx: &mut TestAppContext, setup: Setup) -> Harness {
         paths: Paths::in_dir(dir.path()),
         config: setup.config.clone(),
         ui_state: setup.ui_state,
-        factories: Some(vec![factory.clone() as Arc<dyn EngineFactory>]),
+        factories: Some(
+            extra
+                .into_iter()
+                .chain([factory.clone() as Arc<dyn EngineFactory>])
+                .collect(),
+        ),
         discover_on_start: true,
         worker_threads: 2,
     })

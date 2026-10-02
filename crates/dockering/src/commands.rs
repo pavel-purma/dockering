@@ -498,6 +498,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         ContainerDetail,
         &["size"]
     ),
+    // ── M9: Settings (SET-*, ENG-105) ──
+    c!(
+        s::CMD_ADD_ENGINE,
+        settings::AddEngine,
+        Engines,
+        Always,
+        &["remote", "tcp", "tls", "connect"]
+    ),
+    c!(
+        s::CMD_COPY_DIAGNOSTICS,
+        settings::CopyDiagnostics,
+        General,
+        Always,
+        &["support", "bug"]
+    ),
+    c!(
+        s::CMD_VIEW_LICENSES,
+        settings::ViewLicenses,
+        General,
+        Always,
+        &["licenses", "notices", "about"]
+    ),
 ];
 
 /// `detail::SelectTab` for a palette entry.
@@ -560,6 +582,8 @@ pub fn plumbing_action(name: &str) -> bool {
         // M6: tab-switch plumbing and row-cell buttons (the keyed equivalents are bound).
         "res::ReplaceRoute",
         "res::RunRow",
+        // M9: Settings › Engines row buttons (Tab-reachable, KBD-075).
+        "settings::EngineOp",
         // wip/detail: click plumbing (the keyed equivalents are bound or in the palette).
         "detail::SelectTab",
         "rows::RevealRow",

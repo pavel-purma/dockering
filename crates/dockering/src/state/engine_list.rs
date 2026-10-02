@@ -12,6 +12,9 @@ pub struct EngineListStore {
     /// True once the first snapshot arrived (before that the shell shows skeletons).
     loaded: bool,
     revision: u64,
+    /// Name → id of every engine seen this session. `EngineStatus.also_reachable_via` lists
+    /// merged engines by name only; Settings resolves them for *Un-merge* (ENG-009).
+    seen_names: std::collections::HashMap<String, EngineId>,
     _events: Option<Task<()>>,
     refetch: Option<Task<()>>,
 }
@@ -37,6 +40,7 @@ impl EngineListStore {
             engines: Vec::new(),
             loaded: false,
             revision: 0,
+            seen_names: std::collections::HashMap::new(),
             _events: None,
             refetch: None,
         };
@@ -78,6 +82,7 @@ impl EngineListStore {
                     return;
                 }
                 if let Ok(list) = result {
+                    this.remember(&list);
                     this.engines = list;
                     this.loaded = true;
                     this.set_active(active, cx);
@@ -88,7 +93,21 @@ impl EngineListStore {
         }));
     }
 
+    fn remember(&mut self, list: &[EngineStatus]) {
+        for e in list {
+            self.seen_names
+                .insert(e.config.name.clone(), e.id().clone());
+        }
+    }
+
     fn apply(&mut self, ev: HubEvent, cx: &mut Context<Self>) {
+        match &ev {
+            HubEvent::Snapshot(list) => self.remember(list),
+            HubEvent::Added(st) | HubEvent::StatusChanged(st) => {
+                self.remember(std::slice::from_ref(st))
+            }
+            _ => {}
+        }
         match ev {
             HubEvent::Snapshot(list) => {
                 let active = list.iter().find(|s| s.active).map(|s| s.id().clone());
@@ -159,6 +178,20 @@ impl EngineListStore {
 
     pub fn get(&self, id: &EngineId) -> Option<&EngineStatus> {
         self.engines.iter().find(|e| e.id() == id)
+    }
+
+    /// Engines merged into `e` (ENG-009) as `(id, name)`, resolved from the names in
+    /// `also_reachable_via`. Names never seen this session are skipped.
+    pub fn merged_into(&self, e: &EngineStatus) -> Vec<(EngineId, String)> {
+        e.also_reachable_via
+            .iter()
+            .filter_map(|name| {
+                self.seen_names
+                    .get(name)
+                    .filter(|id| *id != e.id())
+                    .map(|id| (id.clone(), name.clone()))
+            })
+            .collect()
     }
 
     /// No engine exists at all (ENG-111 first-run screen).
