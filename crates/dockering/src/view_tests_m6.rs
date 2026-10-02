@@ -731,3 +731,167 @@ fn vol_010_detail_tabs_and_used_by(cx: &mut TestAppContext) {
     assert_eq!(cx.read(|cx| detail.read(cx).tab()), VolumeTab::Inspect);
     h.shutdown();
 }
+
+// ── NET-* ────────────────────────────────────────────────────────────────────────────
+
+use crate::pages::networks::NetworksPage;
+
+fn networks_page(h: &Harness, cx: &mut TestAppContext) -> gpui_kit::Entity<NetworksPage> {
+    h.wait_containers(cx);
+    let page = h.goto::<NetworksPage>(cx, Route::Networks);
+    h.wait_until(cx, "network rows", |_, cx| {
+        !page.read(cx).table().read(cx).model(cx).rows().is_empty()
+    });
+    page
+}
+
+fn network_key(
+    page: &gpui_kit::Entity<NetworksPage>,
+    name: &str,
+    cx: &mut TestAppContext,
+) -> String {
+    let name = name.to_owned();
+    cx.read(|cx| {
+        page.read(cx)
+            .rows()
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| r.key.to_string())
+            .expect("network row")
+    })
+}
+
+#[gpui_kit::test]
+fn net_002_builtin_not_deletable(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = networks_page(&h, cx);
+    let key = network_key(&page, "bridge", cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row(&key, cx));
+    });
+    h.press(cx, "delete");
+    assert!(!h.has_dialog(cx), "no confirm for a built-in network");
+    assert!(h.engine.calls_to("remove_network").is_empty());
+    // Counts and subnets: myshop_default has the 4 myshop containers.
+    let row = cx.read(|cx| {
+        page.read(cx)
+            .rows()
+            .iter()
+            .find(|r| r.name == "myshop_default")
+            .cloned()
+    });
+    let row = row.expect("myshop_default");
+    assert_eq!(row.containers, 4);
+    assert_eq!(row.subnets, ["172.20.0.0/16"]);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn net_002_delete_custom_network_needs_network_mgmt(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = networks_page(&h, cx);
+    let key = network_key(&page, "legacy-net", cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row(&key, cx));
+    });
+    h.press(cx, "delete");
+    assert!(h.has_dialog(cx));
+    h.draw(cx);
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "legacy-net removed", |_, cx| {
+        page.read(cx).rows().iter().all(|r| r.name != "legacy-net")
+    });
+    // Without NETWORK_MGMT nothing is deletable.
+    h.engine
+        .set_capabilities(Capabilities::all() - Capabilities::NETWORK_MGMT);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::Refresh), cx)
+    });
+    h.wait_until(cx, "caps without network mgmt", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .info()
+                .is_some_and(|i| !i.capabilities.contains(Capabilities::NETWORK_MGMT))
+        })
+    });
+    let key = network_key(&page, "monitoring_default", cx);
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row(&key, cx));
+    });
+    h.press(cx, "delete");
+    assert!(!h.has_dialog(cx));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn net_004_prune_unused_networks(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let _page = networks_page(&h, cx);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::list::Prune), cx)
+    });
+    assert!(h.has_dialog(cx));
+    h.draw(cx);
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "prune_networks", |_, _| {
+        !h.engine.calls_to("prune_networks").is_empty()
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn net_003_detail_tabs_and_container_links(cx: &mut TestAppContext) {
+    use crate::nav::NetworkTab;
+    use crate::pages::network_detail::NetworkDetailPage;
+    let h = start(cx, Setup::default());
+    let page = networks_page(&h, cx);
+    let key = network_key(&page, "myshop_default", cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row(&key, cx));
+    });
+    h.press(cx, "enter");
+    let detail = h.goto::<NetworkDetailPage>(
+        cx,
+        Route::NetworkDetail {
+            id: key,
+            tab: NetworkTab::Overview,
+        },
+    );
+    h.wait_until(cx, "details", |_, cx| {
+        detail.read(cx).details().data().is_some()
+    });
+    h.press(cx, "ctrl-tab");
+    assert_eq!(cx.read(|cx| detail.read(cx).tab()), NetworkTab::Containers);
+    let n = cx.read(|cx| detail.read(cx).details().data().map(|d| d.containers.len()));
+    assert_eq!(n, Some(4));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn net_001_hidden_networks_page(cx: &mut TestAppContext) {
+    let mut config = dk_hub::Config::default();
+    config.general.show_networks_page = false;
+    let h = start(
+        cx,
+        Setup {
+            config,
+            ..Default::default()
+        },
+    );
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "ctrl-4");
+    assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Containers);
+    h.shutdown();
+}
