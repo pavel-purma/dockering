@@ -9,6 +9,10 @@
 pub mod abi;
 pub mod ffi;
 #[cfg(windows)]
+pub mod pool;
+#[cfg(windows)]
+pub mod stream;
+#[cfg(windows)]
 pub mod win32;
 
 /// See [`crate::init_process_com_security`].
