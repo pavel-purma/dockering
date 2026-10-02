@@ -1,0 +1,77 @@
+{
+  "Config": {
+    "Cmd": [
+      "nginx",
+      "-g",
+      "daemon off;"
+    ],
+    "Entrypoint": [
+      "/docker-entrypoint.sh"
+    ],
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NGINX_VERSION=1.31.6",
+      "PKG_RELEASE=1",
+      "DYNPKG_RELEASE=1",
+      "NJS_VERSION=1.0.1",
+      "NJS_RELEASE=1",
+      "ACME_VERSION=0.4.1"
+    ],
+    "Healthcheck": null,
+    "Image": "nginx:alpine",
+    "Labels": {
+      "com.example.fixture": "dockering",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "StopTimeout": null,
+    "User": "",
+    "WorkingDir": "/"
+  },
+  "Created": "2026-10-01T23:09:38.973191141Z",
+  "HostConfig": {
+    "Memory": 0,
+    "NanoCpus": 0,
+    "NetworkMode": "bridge",
+    "Ulimits": []
+  },
+  "Id": "2e4fac8842183f22f337722c3648e5fd5cd5012ae01ea7651948b59f70f87365",
+  "Image": "sha256:3dd08163706a20b20622f310ec10258cc96e9007ab357f7201955bc880ac17f4",
+  "Labels": {
+    "com.example.fixture": "dockering",
+    "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+  },
+  "Mounts": [],
+  "Name": "/dk-fixture-nginx",
+  "NetworkSettings": {
+    "Networks": {
+      "bridge": {
+        "Aliases": [],
+        "DriverOpts": {},
+        "Gateway": "172.17.0.1",
+        "IPAMConfig": null,
+        "IPAddress": "172.17.0.2",
+        "IPPrefixLen": 16,
+        "Links": [],
+        "MacAddress": "02:42:ac:11:00:02"
+      }
+    }
+  },
+  "Ports": {
+    "80/tcp": [
+      {
+        "HostIp": "127.0.0.1",
+        "HostPort": "18081"
+      }
+    ]
+  },
+  "SizeRootFs": null,
+  "SizeRw": null,
+  "State": {
+    "ExitCode": 0,
+    "FinishedAt": "2026-10-01T23:10:03.533659248Z",
+    "Health": null,
+    "Running": true,
+    "StartedAt": "2026-10-01T23:10:05.094578019Z",
+    "Status": "running"
+  }
+}

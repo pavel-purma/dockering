@@ -8,6 +8,7 @@ mod check_blocking;
 mod fixtures;
 mod package;
 mod util;
+mod wslc_abi;
 
 use anyhow::bail;
 
@@ -34,6 +35,7 @@ fn main() -> anyhow::Result<()> {
         "record-fixtures" => fixtures::run(rest),
         "package" => package::run(rest),
         "dist" => package::run_dist(rest),
+        "wslc-abi-check" => wslc_abi::run(rest),
         "help" | "-h" | "--help" => {
             println!("{USAGE}");
             Ok(())

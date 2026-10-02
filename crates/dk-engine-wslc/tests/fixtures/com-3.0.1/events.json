@@ -1,0 +1,45 @@
+[
+  {
+    "Action": "create",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.project": "dkdemo",
+        "com.docker.compose.service": "web",
+        "image": "nginx:alpine",
+        "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>",
+        "name": "dk-probe"
+      },
+      "ID": "f03be1b72bbed4e471f85bcbbfba4fd9dab82788a24256e083360616649bd8b5"
+    },
+    "Type": "container",
+    "time": 1790892551
+  },
+  {
+    "Action": "connect",
+    "Actor": {
+      "Attributes": {
+        "container": "f03be1b72bbed4e471f85bcbbfba4fd9dab82788a24256e083360616649bd8b5",
+        "name": "bridge",
+        "type": "bridge"
+      },
+      "ID": "063ec9fc45f44d20ea118cdf1fe6734f84d6308083499a1a0ca401e7cdb3aaf0"
+    },
+    "Type": "network",
+    "time": 1790892551
+  },
+  {
+    "Action": "start",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.project": "dkdemo",
+        "com.docker.compose.service": "web",
+        "image": "nginx:alpine",
+        "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>",
+        "name": "dk-probe"
+      },
+      "ID": "f03be1b72bbed4e471f85bcbbfba4fd9dab82788a24256e083360616649bd8b5"
+    },
+    "Type": "container",
+    "time": 1790892551
+  }
+]

@@ -1,0 +1,51 @@
+{
+  "blkio_stats": {
+    "io_service_bytes_recursive": [
+      {
+        "op": "read",
+        "value": 8192
+      },
+      {
+        "op": "write",
+        "value": 8192
+      }
+    ]
+  },
+  "cpu_stats": {
+    "cpu_usage": {
+      "percpu_usage": null,
+      "total_usage": 143571000,
+      "usage_in_kernelmode": 90928000,
+      "usage_in_usermode": 52643000
+    },
+    "online_cpus": 20,
+    "system_cpu_usage": 174238860000000
+  },
+  "id": "2e4fac8842183f22f337722c3648e5fd5cd5012ae01ea7651948b59f70f87365",
+  "memory_stats": {
+    "limit": 16670859264,
+    "usage": 18292736
+  },
+  "name": "dk-fixture-nginx",
+  "networks": {
+    "eth0": {
+      "rx_bytes": 1506,
+      "rx_packets": 19,
+      "tx_bytes": 0,
+      "tx_packets": 0
+    }
+  },
+  "pids_stats": {
+    "current": 21
+  },
+  "precpu_stats": {
+    "cpu_usage": {
+      "percpu_usage": null,
+      "total_usage": 143571000,
+      "usage_in_kernelmode": 90928000,
+      "usage_in_usermode": 52643000
+    },
+    "online_cpus": 20,
+    "system_cpu_usage": 174218830000000
+  }
+}
