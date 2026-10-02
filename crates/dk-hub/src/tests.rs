@@ -1421,3 +1421,363 @@ async fn save_file_launch_and_diagnostics() {
     assert!(!d.contains("/fake/a.sock"), "endpoint paths stay out: {d}");
     hub.shutdown();
 }
+
+// ───────────────────────────── review fixes ─────────────────────────────
+
+/// Enabled-flag edit of the stored engine config, through the public API.
+async fn set_enabled(hub: &HubHandle, id: &str, enabled: bool) {
+    let mut cfg = hub
+        .engines()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.config.id.as_str() == id)
+        .unwrap()
+        .config;
+    cfg.enabled = enabled;
+    hub.update_engine(cfg).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_020_call_cancelled_when_engine_disabled_or_deactivated() {
+    let f = TestFactory::new();
+    let a = FakeEngine::new("a");
+    f.add(a.clone(), 20);
+    f.add(FakeEngine::new("b"), 30);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    // Every engine op now hangs (real helper-thread sleep; virtual time never reaches it).
+    a.set_latency(Duration::from_secs(3600));
+
+    // Disabling the engine drops its connection: the in-flight call resolves promptly.
+    let call = hub.call(&id, |e| async move {
+        e.list_containers(Default::default()).await
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    set_enabled(&hub, "a", false).await;
+    let r = tokio::time::timeout(Duration::from_millis(100), call)
+        .await
+        .expect("call must resolve once the connection is dropped");
+    match r {
+        Err(EngineError::Unreachable { reason, .. }) => assert!(reason.contains("disconnected")),
+        other => panic!("expected Unreachable, got {other:?}"),
+    }
+
+    // Re-enable, then switch the active engine away while a call is in flight.
+    a.set_latency(Duration::ZERO);
+    set_enabled(&hub, "a", true).await;
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    a.set_latency(Duration::from_secs(3600));
+    let call = hub.call(&id, |e| async move { e.ping().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    hub.set_active(&EngineId::new("b")).await.unwrap();
+    let r = tokio::time::timeout(Duration::from_millis(100), call)
+        .await
+        .expect("call must resolve once the engine is deactivated");
+    assert!(matches!(r, Err(EngineError::Unreachable { .. })), "{r:?}");
+    hub.shutdown();
+}
+
+/// A terminal whose `write` never resolves (wedged PTY / transport). `close()` or `exit()`
+/// resolves `wait()`.
+struct StuckTerminal {
+    exit_tx: Mutex<Option<futures::channel::oneshot::Sender<Option<i64>>>>,
+    exit_rx: Mutex<Option<futures::channel::oneshot::Receiver<Option<i64>>>>,
+    writes: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl StuckTerminal {
+    fn new() -> (Self, Arc<std::sync::atomic::AtomicUsize>) {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t = Self {
+            exit_tx: Mutex::new(Some(tx)),
+            exit_rx: Mutex::new(Some(rx)),
+            writes: writes.clone(),
+        };
+        (t, writes)
+    }
+    fn finish(&self, code: i64) {
+        if let Some(tx) = lock(&self.exit_tx).take() {
+            let _ = tx.send(Some(code));
+        }
+    }
+}
+
+#[async_trait]
+impl TerminalSession for StuckTerminal {
+    fn output(&mut self) -> EngineStream<Bytes> {
+        Box::pin(futures::stream::pending())
+    }
+    async fn write(&self, _data: Bytes) -> EngineResult<()> {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        futures::future::pending().await
+    }
+    async fn resize(&self, _cols: u16, _rows: u16) -> EngineResult<()> {
+        futures::future::pending().await
+    }
+    async fn wait(&self) -> EngineResult<Option<i64>> {
+        let rx = lock(&self.exit_rx).take();
+        match rx {
+            Some(rx) => Ok(rx.await.unwrap_or(None)),
+            None => Ok(None),
+        }
+    }
+    async fn close(&self) -> EngineResult<()> {
+        self.finish(130);
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn trm_008_stuck_write_does_not_block_close_or_engine_switch() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), 20);
+    f.add(FakeEngine::new("b"), 30);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    // Same wiring as `open_terminal` after a successful exec.
+    let open = |session: StuckTerminal| {
+        let conn = hub.inner.conn(&id).unwrap();
+        crate::terminal::start_actor(&hub.inner, &id, Box::new(session), conn.token)
+    };
+
+    // 1. `Close` while a write is stuck: the actor closes the session and resolves `exit`.
+    let (session, writes) = StuckTerminal::new();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"ls\r")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    // Input queued behind the stuck write (more than the channel holds) and the final
+    // `Close` are still accepted: the actor keeps reading its input while the write hangs.
+    let input = &mut t.input;
+    tokio::time::timeout(Duration::from_secs(1), async move {
+        for _ in 0..100 {
+            input
+                .send(TermCmd::Data(Bytes::from_static(b"x")))
+                .await
+                .unwrap();
+        }
+        input.send(TermCmd::Close).await.unwrap();
+    })
+    .await
+    .expect("input must not block behind a stuck write");
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("Close must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+    until(Duration::from_secs(1), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+
+    // 2. Process exit while a write is stuck.
+    let (session, writes) = StuckTerminal::new();
+    let exit_tx = lock(&session.exit_tx).take().unwrap();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"x")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    let _ = exit_tx.send(Some(3));
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("process exit must end a stuck session");
+    assert_eq!(code, Ok(Some(3)));
+    // After a natural exit the actor drains trailing output for up to EXIT_GRACE.
+    until(Duration::from_secs(3), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+
+    // 3. Engine switch (TRM-008) while a resize is stuck.
+    let (session, _) = StuckTerminal::new();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Resize { cols: 80, rows: 24 })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(hub.inner.terminals.count(&id), 1);
+    hub.set_active(&EngineId::new("b")).await.unwrap();
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("engine switch must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+    until(Duration::from_secs(1), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn trm_008_stuck_write_does_not_block_hub_shutdown() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), 20);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let (session, writes) = StuckTerminal::new();
+    let conn = hub.inner.conn(&id).unwrap();
+    let mut t = crate::terminal::start_actor(&hub.inner, &id, Box::new(session), conn.token);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"x")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    hub.shutdown();
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("hub shutdown must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_106_start_and_connect_activates_a_stopped_non_active_distro() {
+    // TestFactory overrides `start` (FakeFactory's default returns an error).
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let mut d = DiscoveredEngine::new(
+        EngineConfig {
+            endpoint: EngineEndpoint::WslDistro {
+                distro: "Ubuntu".into(),
+                mode: WslMode::DialStdio,
+            },
+            ..sock_cfg("wsl-ubuntu")
+        },
+        preference::WSL_DISTRO,
+    );
+    d.initial_state = Some(EngineState::Stopped);
+    f.add_discovered(d, Some(FakeEngine::new("wsl-ubuntu")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let wsl = EngineId::new("wsl-ubuntu");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("a")));
+    assert_eq!(state_of(&hub, "wsl-ubuntu"), Some(EngineState::Stopped));
+    assert!(!f.connects().contains(&"wsl-ubuntu".to_string()));
+    let mut ev = hub.hub_events();
+    let _ = next(&mut ev, Duration::from_secs(1)).await;
+
+    hub.start_wsl_distro(&wsl).await.unwrap();
+    assert_eq!(lock(&f.starts).clone(), vec![wsl.clone()]);
+    assert_eq!(hub.active_engine(), Some(wsl.clone()));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "wsl-ubuntu") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Disconnected));
+    loop {
+        match next(&mut ev, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(HubEvent::ActiveChanged(Some(id))))) => {
+                assert_eq!(id, wsl);
+                break;
+            }
+            Some(Ok(_)) => {}
+            other => panic!("expected ActiveChanged, got {other:?}"),
+        }
+    }
+    assert_eq!(hub.config().ui_state().last_engine, Some(wsl));
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn events_lost_yields_lagged_and_stream_continues() {
+    let f = TestFactory::new();
+    let fake = FakeEngine::new("a");
+    f.add(fake.clone(), 20);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let mut s1 = hub.events(&id);
+    let mut s2 = hub.events(&id);
+    until(Duration::from_secs(1), || fake.open_streams().0 == 1).await;
+    fake.emit_event(fixtures::event(ResourceKind::Container, "start", "c1"));
+    fake.emit_event_error(EngineError::events_lost());
+    fake.emit_event(fixtures::event(ResourceKind::Container, "die", "c2"));
+    for s in [&mut s1, &mut s2] {
+        match next(s, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(e))) => assert_eq!(e.id, "c1"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            next(s, Duration::from_secs(1)).await,
+            Some(Ok(Feed::Lagged { dropped: 0 }))
+        );
+        match next(s, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(e))) => assert_eq!(e.id, "c2"),
+            other => panic!("{other:?}"),
+        }
+    }
+    // Still one live upstream; other errors still end the stream.
+    assert_eq!(fake.open_streams().0, 1);
+    assert_eq!(fake.calls_to("events").len(), 1);
+    fake.fail_event_streams(EngineError::protocol("boom"));
+    assert!(matches!(
+        next(&mut s1, Duration::from_secs(1)).await,
+        Some(Err(EngineError::Protocol(m))) if m == "boom"
+    ));
+    assert!(next(&mut s1, Duration::from_secs(1)).await.is_none());
+    hub.shutdown();
+}
+
+#[test]
+fn save_file_concurrent_saves_to_one_path_all_succeed_durably() {
+    // Real runtime + real disk I/O (no Docker): N concurrent saves to the same path must not
+    // share a temp file; each lands whole, the last rename wins, and nothing is left behind.
+    let f = TestFactory::new();
+    let (hub, dir) = start_real(f);
+    let p = dir.path().join("export/logs.txt");
+    let payloads: Vec<Bytes> = (0..16u8)
+        .map(|i| Bytes::from(vec![b'a' + i; 64 * 1024]))
+        .collect();
+    let calls: Vec<_> = payloads
+        .iter()
+        .map(|b| hub.save_file(p.clone(), b.clone()))
+        .collect();
+    let results = block_on_timeout(futures::future::join_all(calls));
+    for r in results {
+        r.unwrap();
+    }
+    let got = Bytes::from(std::fs::read(&p).unwrap());
+    assert!(payloads.contains(&got), "mixed or torn file");
+    let names: Vec<_> = std::fs::read_dir(p.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["logs.txt".to_string()]);
+    hub.shutdown();
+}

@@ -406,15 +406,20 @@ where
     };
     let (mut tx, call) = HubCall::channel();
     let span = tracing::debug_span!("engine.call", engine = %engine);
+    let id = engine.clone();
     h.inner.handle.spawn(
         async move {
             let started = Instant::now();
+            let conn_token = conn.token;
             let engine = conn.engine;
             let fut = guarded(async move { f(engine).await });
             let res = tokio::select! {
                 r = fut => r,
                 // The caller dropped the HubCall: cancel the engine future.
                 _ = tx.cancellation() => return,
+                // The connection was dropped (engine switch, disable, ping failure, shutdown):
+                // the engine future is cancelled and the caller sees `Unreachable`.
+                _ = conn_token.cancelled() => Err(disconnected(&id)),
             };
             tracing::debug!(
                 elapsed_ms = started.elapsed().as_millis() as u64,
@@ -761,8 +766,12 @@ pub(crate) fn start_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                             .filter(|s| s.id == id)
                             .map(|s| s.retry.clone())
                     };
-                    if let Some(retry) = sup {
-                        retry.notify_one();
+                    match sup {
+                        // Already supervised: wake it so it connects now.
+                        Some(retry) => retry.notify_one(),
+                        // "Start & connect" (ENG-106): make it the active engine, exactly
+                        // like `set_active` (emits ActiveChanged, supervisor connects).
+                        None => inner.activate(&id, None, false)?,
                     }
                     Ok(())
                 }
@@ -811,7 +820,11 @@ pub(crate) fn save_file(h: &HubHandle, path: PathBuf, bytes: Bytes) -> HubCall<(
     call
 }
 
+/// Atomic, durable save: unique temp file in the same directory, `sync_all` (data on disk
+/// before it becomes visible under `path`), then rename. The temp file is removed on error.
 async fn write_atomic_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -819,15 +832,22 @@ async fn write_atomic_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Re
         .unwrap_or_else(|| PathBuf::from("."));
     tokio::fs::create_dir_all(&dir).await?;
     let tmp = config::temp_path(path);
-    if let Err(e) = tokio::fs::write(&tmp, bytes).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
+    let res = async {
+        let mut f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .await?;
+        f.write_all(bytes).await?;
+        f.sync_all().await?;
+        drop(f);
+        tokio::fs::rename(&tmp, path).await
     }
-    if let Err(e) = tokio::fs::rename(&tmp, path).await {
+    .await;
+    if res.is_err() {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
     }
-    Ok(())
+    res
 }
 
 pub(crate) fn launch(h: &HubHandle, argv: Vec<String>) -> HubCall<()> {

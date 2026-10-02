@@ -164,6 +164,13 @@ impl FakeEngine {
             .event_subs
             .retain(|s| s.unbounded_send(Ok(e.clone())).is_ok());
     }
+    /// Sends `err` as an item on every open event stream WITHOUT ending it (e.g.
+    /// `EngineError::events_lost()`, spec 20 §5.4).
+    pub fn emit_event_error(&self, err: EngineError) {
+        self.st()
+            .event_subs
+            .retain(|s| s.unbounded_send(Err(err.clone())).is_ok());
+    }
     /// Ends all event streams with `err` (simulates a dropped connection).
     pub fn fail_event_streams(&self, err: EngineError) {
         for s in self.st().event_subs.drain(..) {
