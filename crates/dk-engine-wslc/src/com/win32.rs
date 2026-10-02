@@ -26,7 +26,7 @@ use windows::Win32::System::Registry::{
 use windows::Win32::System::Threading::{
     CreateEventW, INFINITE, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
 };
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::{PCWSTR, w};
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -244,11 +244,6 @@ impl OwnedHandle {
         }
     }
 
-    /// Takes ownership of a raw handle value (as carried by `WSLCHandle`).
-    pub fn from_raw(v: usize) -> Option<Self> {
-        Self::new(HANDLE(v as *mut c_void))
-    }
-
     pub fn raw(&self) -> HANDLE {
         self.0
     }
@@ -294,13 +289,6 @@ impl Event {
     pub fn raw(&self) -> HANDLE {
         self.0.raw()
     }
-}
-
-/// Waits for `h` (e.g. a process exit event) up to `timeout_ms` (`None` = forever).
-/// Returns `true` when signalled.
-pub fn wait_handle(h: &OwnedHandle, timeout_ms: Option<u32>) -> bool {
-    // SAFETY: valid handle owned by `h`.
-    unsafe { WaitForSingleObject(h.raw(), timeout_ms.unwrap_or(INFINITE)) == WAIT_OBJECT_0 }
 }
 
 /// Waits until `h` or `cancel` is signalled. `true` = `h`, `false` = cancelled / error.
@@ -454,11 +442,6 @@ fn is_eof(e: &windows::core::Error) -> bool {
         || c == windows::core::HRESULT::from_win32(10054)
         || c == windows::core::HRESULT::from_win32(10058)
         || c == windows::core::HRESULT::from_win32(10101)
-}
-
-/// `HSTRING` for a path (used by tests/diagnostics).
-pub fn hstring(s: &str) -> HSTRING {
-    HSTRING::from(s)
 }
 
 #[cfg(test)]
