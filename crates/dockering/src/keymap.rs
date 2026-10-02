@@ -144,6 +144,8 @@ const SB: Option<&str> = Some(SIDEBAR);
 const SW: Option<&str> = Some("EngineSwitcher > Input");
 const QF: Option<&str> = Some("QuickFind > Input");
 const PAL: Option<&str> = Some(PALETTE);
+/// The logs search input (its own `enter` binding would otherwise win, S-8).
+const LGS: Option<&str> = Some("Logs > Input");
 
 /// The default keymap. Mirrors the tables in `docs/spec/features/keyboard.md`.
 pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
@@ -688,11 +690,12 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
     ),
     b!("left", detail::PrevTab, T, Os::ALL, s::CMD_PREV_TAB, Detail),
     // ── logs (KBD-050…053) ──────────────────────────────────────────────────────────────
-    b!("enter", logs::FindNext, G, Os::ALL, "Next match", Logs),
+    // Enter / Shift+Enter only in the logs search field (KBD-050).
+    b!("enter", logs::FindNext, LGS, Os::ALL, "Next match", Logs),
     b!(
         "shift-enter",
         logs::FindPrev,
-        G,
+        LGS,
         Os::ALL,
         "Previous match",
         Logs

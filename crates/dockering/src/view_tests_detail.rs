@@ -2,7 +2,7 @@
 //! + `FakeEngine` (no Docker); test names carry requirement ids.
 
 use dk_core::{ContainerState, EngineError, ResourceKind};
-use gpui_kit::{Entity, TestAppContext};
+use gpui_kit::{AppContext as _, Entity, TestAppContext};
 
 use crate::nav::{ContainerTab, Route};
 use crate::pages::container_detail::ContainerDetailPage;
@@ -468,5 +468,301 @@ fn cdt_040_inspect_shows_pretty_json_unmasked(cx: &mut TestAppContext) {
             .open
     });
     assert!(open);
+    h.shutdown();
+}
+
+// ── Logs (LOG-001…009, KBD-050…053) ───────────────────────────────────────────────────────
+
+use crate::pages::container_detail::logs::LogsView;
+
+fn logs_view(page: &Entity<ContainerDetailPage>, cx: &mut TestAppContext) -> Entity<LogsView> {
+    cx.read(|cx| page.read(cx).tabs().logs.clone())
+        .expect("logs tab entity")
+}
+
+fn push(h: &Harness, name: &str, stream: dk_core::LogStream, text: &str) {
+    h.engine.push_log(
+        &id_of(name),
+        dk_core::fake::fixtures::log_line(stream, text),
+    );
+}
+
+fn wait_lines(h: &Harness, cx: &mut TestAppContext, logs: &Entity<LogsView>, n: usize) {
+    h.wait_until(cx, "log lines", |_, cx| logs.read(cx).lines().len() >= n);
+}
+
+fn texts(logs: &Entity<LogsView>, cx: &mut TestAppContext) -> Vec<String> {
+    cx.read(|cx| {
+        logs.read(cx)
+            .lines()
+            .iter()
+            .map(|l| l.text.to_string())
+            .collect()
+    })
+}
+
+fn wait_log_stream(h: &Harness, cx: &mut TestAppContext) {
+    h.wait_until(cx, "log stream subscribed", |_, _| {
+        h.engine.open_streams().1 > 0
+    });
+}
+
+#[gpui_kit::test]
+fn log_001_initial_tail_then_follow(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let redis = id_of("redis");
+    h.engine.set_logs(
+        &redis,
+        (0..5)
+            .map(|i| {
+                dk_core::fake::fixtures::log_line(dk_core::LogStream::Stdout, &format!("old {i}"))
+            })
+            .collect(),
+    );
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_lines(&h, cx, &logs, 5);
+    wait_log_stream(&h, cx);
+    push(&h, "redis", dk_core::LogStream::Stdout, "live");
+    wait_lines(&h, cx, &logs, 6);
+    assert_eq!(texts(&logs, cx).last().map(String::as_str), Some("live"));
+    assert_eq!(h.engine.calls_to("logs").len(), 1, "one subscription");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_007_batching_many_pushes_few_notifies(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    for i in 0..1200 {
+        push(
+            &h,
+            "redis",
+            dk_core::LogStream::Stdout,
+            &format!("line {i}"),
+        );
+    }
+    wait_lines(&h, cx, &logs, 1200);
+    let flushes = cx.read(|cx| logs.read(cx).flushes());
+    assert!(flushes <= 30, "1200 lines in {flushes} batches (LOG-007)");
+    let t = texts(&logs, cx);
+    assert_eq!(t.first().map(String::as_str), Some("line 0"));
+    assert_eq!(t.last().map(String::as_str), Some("line 1199"));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_002_ansi_colours_and_stderr(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    push(
+        &h,
+        "redis",
+        dk_core::LogStream::Stdout,
+        "\x1b[1;32mOK\x1b[0m done \x1b]0;title\x07",
+    );
+    push(&h, "redis", dk_core::LogStream::Stderr, "warning!");
+    wait_lines(&h, cx, &logs, 2);
+    let (text, spans, stream) = cx.read(|cx| {
+        let l = logs.read(cx).lines();
+        (l[0].text.to_string(), l[0].spans.clone(), l[1].stream)
+    });
+    assert_eq!(text, "OK done ", "SGR kept, OSC stripped");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].0, 0..2);
+    assert!(spans[0].1.bold);
+    assert_eq!(spans[0].1.fg, Some(dk_core::ansi::AnsiColor::Indexed(2)));
+    assert_eq!(stream, dk_core::LogStream::Stderr, "stderr is tinted");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_005_ring_cap_with_dropped_indicator(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    logs.update(cx, |l, _| l.set_max_lines(100));
+    wait_log_stream(&h, cx);
+    for i in 0..250 {
+        push(&h, "redis", dk_core::LogStream::Stdout, &format!("n{i}"));
+    }
+    h.wait_until(cx, "all appended", |_, cx| {
+        logs.read(cx)
+            .lines()
+            .back()
+            .is_some_and(|l| l.text.as_ref() == "n249")
+    });
+    let (len, dropped, first) = cx.read(|cx| {
+        let l = logs.read(cx);
+        (l.lines().len(), l.dropped(), l.lines()[0].text.to_string())
+    });
+    assert_eq!(len, 100);
+    assert_eq!(dropped, 150);
+    assert_eq!(first, "n150");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_003_follow_pill(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    for i in 0..200 {
+        push(&h, "redis", dk_core::LogStream::Stdout, &format!("a{i}"));
+    }
+    wait_lines(&h, cx, &logs, 200);
+    assert!(
+        cx.read(|cx| logs.read(cx).is_following()),
+        "tail is on by default"
+    );
+    // Scrolling up pauses following (keyboard: focus the list, PgUp).
+    let f = cx.read(|cx| logs.read(cx).list_focus().clone());
+    h.focus(cx, &f);
+    h.press(cx, "pageup");
+    assert!(!cx.read(|cx| logs.read(cx).is_following()));
+    for i in 0..3 {
+        push(&h, "redis", dk_core::LogStream::Stdout, &format!("b{i}"));
+    }
+    wait_lines(&h, cx, &logs, 203);
+    assert_eq!(
+        cx.read(|cx| logs.read(cx).unseen()),
+        3,
+        "Jump to bottom (3 new)"
+    );
+    // End jumps to the bottom and re-enables follow (KBD-051).
+    h.press(cx, "end");
+    assert!(cx.read(|cx| logs.read(cx).is_following()));
+    assert_eq!(cx.read(|cx| logs.read(cx).unseen()), 0);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_004_search_next_prev(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    for t in ["alpha", "beta", "Alpha two", "gamma"] {
+        push(&h, "redis", dk_core::LogStream::Stdout, t);
+    }
+    wait_lines(&h, cx, &logs, 4);
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "ctrl-f");
+    let search_focused = cx
+        .update_window(h.any_window(), |_, window, cx| {
+            gpui_kit::Focusable::focus_handle(logs.read(cx).search_input(), cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(search_focused, "Mod+F focuses the logs search (KBD-050)");
+    h.type_text(cx, "alpha");
+    h.draw(cx);
+    let state = |cx: &mut TestAppContext| {
+        cx.read(|cx| {
+            let l = logs.read(cx);
+            (l.matches().to_vec(), l.current_match())
+        })
+    };
+    assert_eq!(
+        state(cx),
+        (vec![0, 2], Some(1)),
+        "case-insensitive, newest first"
+    );
+    h.press(cx, "enter");
+    assert_eq!(state(cx).1, Some(0), "Enter = next (wraps)");
+    h.press(cx, "shift-enter");
+    assert_eq!(state(cx).1, Some(1), "Shift+Enter = previous");
+    h.press(cx, "f3");
+    assert_eq!(state(cx).1, Some(0), "F3 = next");
+    // Typing in the search never triggers single-letter actions (KBD-008).
+    h.engine.clear_calls();
+    h.type_text(cx, "s");
+    h.draw(cx);
+    assert!(h.engine.calls_to("stop").is_empty());
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_004_toggles_clear_and_copy_all(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    push(&h, "redis", dk_core::LogStream::Stdout, "one");
+    push(&h, "redis", dk_core::LogStream::Stdout, "two");
+    wait_lines(&h, cx, &logs, 2);
+    let f = cx.read(|cx| logs.read(cx).list_focus().clone());
+    h.focus(cx, &f);
+    let (ts0, wrap0) = cx.read(|cx| (logs.read(cx).timestamps(), logs.read(cx).wrap()));
+    h.press(cx, "alt-t alt-w");
+    let (ts1, wrap1) = cx.read(|cx| (logs.read(cx).timestamps(), logs.read(cx).wrap()));
+    assert_eq!((ts1, wrap1), (!ts0, !wrap0), "Alt+T / Alt+W (KBD-052)");
+    if ts1 {
+        h.press(cx, "alt-t");
+    }
+    h.press(cx, "ctrl-shift-c");
+    let copied = cx
+        .read_from_clipboard()
+        .and_then(|c| c.text())
+        .unwrap_or_default();
+    assert_eq!(copied, "one\ntwo\n");
+    h.press(cx, "ctrl-shift-k");
+    assert!(
+        cx.read(|cx| logs.read(cx).lines().is_empty()),
+        "clear is client-side"
+    );
+    assert_eq!(h.engine.calls_to("logs").len(), 1, "no re-fetch");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_004_save_writes_through_hub(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    push(&h, "redis", dk_core::LogStream::Stdout, "saved line");
+    wait_lines(&h, cx, &logs, 1);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("redis.log");
+    let f = cx.read(|cx| logs.read(cx).list_focus().clone());
+    h.focus(cx, &f);
+    h.press(cx, "ctrl-s");
+    assert!(cx.did_prompt_for_new_path(), "native save dialog");
+    let target = path.clone();
+    cx.simulate_new_path_selection(move |_| Some(target));
+    h.wait_until(cx, "file written", |_, _| path.exists());
+    let text = std::fs::read_to_string(&path).expect("saved file"); // nfr-001-allow: test only
+    assert!(text.contains("saved line"));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn log_006_exit_footer_then_resume_on_start(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Logs);
+    let logs = logs_view(&page, cx);
+    wait_log_stream(&h, cx);
+    push(&h, "redis", dk_core::LogStream::Stdout, "before stop");
+    wait_lines(&h, cx, &logs, 1);
+    // Stop from the header (S): the engine ends the log stream.
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "s");
+    h.wait_until(cx, "exit footer", |_, cx| {
+        logs.read(cx).exit_footer(cx).as_deref() == Some("Container exited (code 0)")
+    });
+    // Start again: following resumes with `since = last ts` (no duplicates).
+    h.press(cx, "s");
+    h.wait_until(cx, "resubscribed", |_, _| {
+        h.engine.calls_to("logs").len() == 2 && h.engine.open_streams().1 > 0
+    });
+    push(&h, "redis", dk_core::LogStream::Stdout, "after start");
+    wait_lines(&h, cx, &logs, 2);
+    assert_eq!(texts(&logs, cx), vec!["before stop", "after start"]);
+    assert!(cx.read(|cx| logs.read(cx).exit_footer(cx)).is_none());
     h.shutdown();
 }
