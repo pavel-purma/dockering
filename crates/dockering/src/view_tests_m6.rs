@@ -524,3 +524,210 @@ fn img_011_tag_dialog_tags_image(cx: &mut TestAppContext) {
     });
     h.shutdown();
 }
+
+// ── VOL-* ────────────────────────────────────────────────────────────────────────────
+
+use crate::pages::volumes::{UsageState, VolumeFilter, VolumesPage};
+
+fn volumes_page(h: &Harness, cx: &mut TestAppContext) -> gpui_kit::Entity<VolumesPage> {
+    h.wait_containers(cx);
+    let page = h.goto::<VolumesPage>(cx, Route::Volumes);
+    h.wait_until(cx, "volume rows", |_, cx| {
+        !page.read(cx).table().read(cx).model(cx).rows().is_empty()
+    });
+    page
+}
+
+#[gpui_kit::test]
+fn vol_002_lazy_sizes(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.engine.clear_calls();
+    // Other pages never call disk_usage (spec 10 §4.2 step 5).
+    let _ = h.goto::<ImagesPage>(cx, Route::Images);
+    h.draw(cx);
+    assert!(h.engine.calls_to("disk_usage").is_empty());
+    // Slow df: the list renders first with skeleton sizes, then sizes arrive.
+    h.engine.set_latency(std::time::Duration::from_millis(200));
+    let page = h.goto::<VolumesPage>(cx, Route::Volumes);
+    h.wait_until(cx, "volume rows", |_, cx| {
+        !page.read(cx).table().read(cx).model(cx).rows().is_empty()
+    });
+    let loading = cx.read(|cx| matches!(page.read(cx).usage(), UsageState::Loading));
+    assert!(loading, "sizes load after the list renders");
+    h.wait_until(cx, "sizes known", |_, cx| {
+        matches!(page.read(cx).usage(), UsageState::Known(_))
+    });
+    h.engine.set_latency(std::time::Duration::ZERO);
+    assert_eq!(h.engine.calls_to("disk_usage").len(), 1);
+    let sized = cx.read(|cx| page.read(cx).rows().iter().all(|r| r.size.is_some()));
+    assert!(sized);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn vol_002_dash_without_disk_usage(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.engine
+        .set_capabilities(Capabilities::all() - Capabilities::DISK_USAGE);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::Refresh), cx)
+    });
+    h.wait_until(cx, "caps without df", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .info()
+                .is_some_and(|i| !i.capabilities.contains(Capabilities::DISK_USAGE))
+        })
+    });
+    let page = volumes_page(&h, cx);
+    h.wait_until(cx, "unavailable", |_, cx| {
+        matches!(page.read(cx).usage(), UsageState::Unavailable)
+    });
+    assert!(h.engine.calls_to("disk_usage").is_empty());
+    let rows = cx.read(|cx| page.read(cx).rows().to_vec());
+    assert!(rows.iter().all(|r| r.size.is_none()), "Size shows —");
+    // In use from container mounts (myshop-db-1 mounts myshop_pgdata).
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.name == "myshop_pgdata")
+            .map(|r| r.in_use()),
+        Some(1)
+    );
+    cx.update(|cx| page.update(cx, |p, cx| p.set_filter(VolumeFilter::Unused, cx)));
+    let unused = cx.read(|cx| page.read(cx).table().read(cx).model(cx).rows().len());
+    assert_eq!(unused, 1, "only old-cache is unused");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn vol_004_create_volume_with_n(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = volumes_page(&h, cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    h.press(cx, "n");
+    assert!(h.has_dialog(cx), "N opens Create volume");
+    h.draw(cx);
+    let dialog = cx
+        .read(|cx| page.read(cx).last_create_dialog())
+        .expect("dialog");
+    // Initial focus = name field (KBD-071).
+    let name_focus = cx.read(|cx| dialog.read(cx).name_input().focus_handle(cx));
+    assert!(h.is_focused(cx, &name_focus));
+    h.type_text(cx, "dk-test");
+    // Labels: Mod+Shift+Enter adds a row when focus is in the labels section.
+    let labels = cx.read(|cx| dialog.read(cx).labels().clone());
+    let add = cx.read(|cx| labels.read(cx).add_focus().clone());
+    h.focus(cx, &add);
+    h.press(cx, "ctrl-shift-enter");
+    h.type_text(cx, "team");
+    h.press(cx, "tab");
+    h.type_text(cx, "core");
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "create called", |_, _| {
+        !h.engine.calls_to("create_volume").is_empty()
+    });
+    assert_eq!(h.engine.calls_to("create_volume")[0].arg, "dk-test");
+    h.wait_until(cx, "new volume row", |_, cx| {
+        page.read(cx).rows().iter().any(|r| r.name == "dk-test")
+    });
+    assert!(!h.has_dialog(cx));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn vol_005_delete_and_prune(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = volumes_page(&h, cx);
+    h.wait_until(cx, "sizes", |_, cx| {
+        matches!(page.read(cx).usage(), UsageState::Known(_))
+    });
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row("old-cache", cx));
+    });
+    h.press(cx, "delete");
+    assert!(h.has_dialog(cx));
+    h.draw(cx);
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "old-cache gone", |_, cx| {
+        page.read(cx).rows().iter().all(|r| r.name != "old-cache")
+    });
+    // Prune via the palette command (list::Prune on the Volumes page).
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::list::Prune), cx)
+    });
+    assert!(h.has_dialog(cx));
+    h.draw(cx);
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "prune called", |_, _| {
+        !h.engine.calls_to("prune_volumes").is_empty()
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn vol_005_in_use_delete_fails_with_containers(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = volumes_page(&h, cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row("myshop_pgdata", cx));
+    });
+    h.press(cx, "delete");
+    h.draw(cx);
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "remove attempted", |_, _| {
+        !h.engine.calls_to("remove_volume").is_empty()
+    });
+    h.wait_until(cx, "error toast", |window, cx| {
+        use gpui_kit::component::WindowExt;
+        !window.notifications(cx).is_empty()
+    });
+    // The volume is still there.
+    let still = cx.read(|cx| {
+        page.read(cx)
+            .rows()
+            .iter()
+            .any(|r| r.name == "myshop_pgdata")
+    });
+    assert!(still);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn vol_010_detail_tabs_and_used_by(cx: &mut TestAppContext) {
+    use crate::nav::VolumeTab;
+    use crate::pages::volume_detail::VolumeDetailPage;
+    let h = start(cx, Setup::default());
+    let page = volumes_page(&h, cx);
+    let handle = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    h.focus(cx, &handle);
+    cx.update(|cx| {
+        let t = page.read(cx).table().clone();
+        t.update(cx, |t, cx| t.focus_row("myshop_pgdata", cx));
+    });
+    h.press(cx, "enter");
+    let detail = h.goto::<VolumeDetailPage>(
+        cx,
+        Route::VolumeDetail {
+            name: "myshop_pgdata".into(),
+            tab: VolumeTab::Overview,
+        },
+    );
+    h.wait_until(cx, "details", |_, cx| {
+        detail.read(cx).details().data().is_some()
+    });
+    let used = cx.read(|cx| detail.read(cx).details().data().map(|d| d.used_by.clone()));
+    assert_eq!(used.map(|u| u.len()), Some(1));
+    h.press(cx, "ctrl-tab");
+    assert_eq!(cx.read(|cx| detail.read(cx).tab()), VolumeTab::UsedBy);
+    h.press(cx, "ctrl-tab");
+    assert_eq!(cx.read(|cx| detail.read(cx).tab()), VolumeTab::Inspect);
+    h.shutdown();
+}
