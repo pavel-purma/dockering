@@ -404,6 +404,101 @@ pub const NAMESPACES: &[&str] = &[
     "palette::",
     "res::",
     "settings::",
+    // wip/detail
+    "rows::",
+    "stats::",
 ];
 
 pub use list::{OnRow, RowCommand, SetFilter, SetGroupBy, SortByColumn};
+
+// ── container detail (CDT-*, LOG-*, TRM-*, STA-*; wip/detail) ─────────────────────────────
+// Kept in their own modules so other pages' additions above don't collide.
+
+/// Detail tab selection (KBD-040 "Go to tab …").
+pub mod detail_tab {
+    use gpui_kit::Action;
+
+    use crate::nav::ContainerTab;
+
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = detail, no_json)]
+    pub struct SelectTab {
+        pub tab: ContainerTab,
+    }
+}
+
+/// Focusable description lists / tables in detail tabs (KBD-044).
+pub mod rows {
+    use gpui_kit::{Action, SharedString};
+
+    gpui_kit::actions!(
+        rows,
+        [
+            Up,
+            Down,
+            First,
+            Last,
+            PageUp,
+            PageDown,
+            /// `Mod+C`: copy the focused value.
+            CopyValue,
+            /// `Enter`: follow the row's link (volume, network, port) or reveal a secret.
+            Activate,
+            /// `Space`: reveal / hide a masked value (CDT-010).
+            ToggleReveal,
+        ]
+    );
+
+    /// Reveal toggle clicked on a row (dispatched on the panel's focus handle).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = rows, no_json)]
+    pub struct RevealRow {
+        pub key: SharedString,
+    }
+}
+
+/// Extra log navigation (KBD-051).
+pub mod logs_nav {
+    gpui_kit::actions!(logs, [LineUp, LineDown, PageUp, PageDown]);
+}
+
+/// Stats tab (KBD-070, STA-010).
+pub mod stats {
+    gpui_kit::actions!(
+        stats,
+        [
+            /// `1`
+            Window1m,
+            /// `5`
+            Window5m,
+            /// `F`
+            Window15m,
+            PrevWindow,
+            NextWindow,
+            /// STA-010 (on demand, `size=true` is expensive).
+            LoadDiskUsage,
+        ]
+    );
+}
+
+/// Terminal tab extras (TRM-004, TRM-009).
+pub mod term_ext {
+    use gpui_kit::Action;
+
+    gpui_kit::actions!(
+        term,
+        [
+            /// Restart the sub-tab's session with the picked shell / user.
+            Reconnect,
+            /// TRM-009 external terminal.
+            OpenExternal,
+        ]
+    );
+
+    /// Sub-tab clicked.
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = term, no_json)]
+    pub struct SelectSession {
+        pub ix: usize,
+    }
+}

@@ -110,7 +110,19 @@ fn main() -> ExitCode {
 
 #[cfg(feature = "demo")]
 fn demo_factories() -> Option<Vec<Arc<dyn dk_core::EngineFactory>>> {
-    Some(dockering::demo::factories())
+    let (factories, engine) = dockering::demo::factories();
+    // Live demo feed (log lines + stats samples) on a plain thread outside the UI; started
+    // before the first window (NFR-001 startup exception), it only pushes into the fake.
+    std::thread::Builder::new() // nfr-001-allow: demo-only feed thread, never on the UI thread
+        .name("demo-feed".into())
+        .spawn(move || {
+            for n in 0..=u64::MAX {
+                dockering::demo::tick(&engine, n);
+                std::thread::sleep(std::time::Duration::from_secs(1)); // nfr-001-allow: demo feed thread
+            }
+        })
+        .ok();
+    Some(factories)
 }
 
 #[cfg(not(feature = "demo"))]

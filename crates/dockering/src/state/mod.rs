@@ -4,11 +4,13 @@
 mod engine_list;
 mod engine_store;
 mod resource;
+mod terminals;
 mod ticker;
 
 pub use engine_list::{EngineListEvent, EngineListStore};
 pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
+pub use terminals::{ParkedSessions, TerminalRegistry};
 pub use ticker::Ticker;
 
 use dk_hub::{Config, HubHandle, UiState};

@@ -3,7 +3,9 @@
 
 use gpui_kit::{Action, App};
 
+use crate::actions::detail_tab::SelectTab;
 use crate::actions::*;
+use crate::nav::ContainerTab;
 use crate::strings as s;
 
 /// Palette group headings.
@@ -54,6 +56,9 @@ pub enum When {
     ResourceLists,
     /// Any of the Images, Volumes, Networks lists or detail pages.
     ResourcePages,
+    // ── container detail (wip/detail) ──
+    /// The container detail page (any tab).
+    ContainerDetail,
 }
 
 /// Context passed to availability checks.
@@ -369,6 +374,129 @@ pub static COMMANDS: &[CommandSpec] = &[
         Resources,
         ResourcePages,
         &["remove"]
+    ), // ── container detail (CDT-*, LOG-*, TRM-*, STA-*; wip/detail) ─────────────────────────
+    // KBD-040: "Go to tab …" entries, then the tab commands without a default chord.
+    c!(
+        s::CMD_DETAIL_TAB_OVERVIEW,
+        tab(ContainerTab::Overview),
+        Containers,
+        ContainerDetail,
+        &["tab"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_LOGS,
+        tab(ContainerTab::Logs),
+        Containers,
+        ContainerDetail,
+        &["tab"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_TERMINAL,
+        tab(ContainerTab::Terminal),
+        Containers,
+        ContainerDetail,
+        &["tab", "shell"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_STATS,
+        tab(ContainerTab::Stats),
+        Containers,
+        ContainerDetail,
+        &["tab", "cpu", "memory"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_MOUNTS,
+        tab(ContainerTab::Mounts),
+        Containers,
+        ContainerDetail,
+        &["tab", "volumes"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_NETWORK,
+        tab(ContainerTab::Network),
+        Containers,
+        ContainerDetail,
+        &["tab", "ports"]
+    ),
+    c!(
+        s::CMD_DETAIL_TAB_INSPECT,
+        tab(ContainerTab::Inspect),
+        Containers,
+        ContainerDetail,
+        &["tab", "json"]
+    ),
+    c!(
+        s::CMD_START_STOP,
+        container::StartStop,
+        Containers,
+        ContainerDetail
+    ),
+    c!(
+        s::CMD_RESTART,
+        container::Restart,
+        Containers,
+        ContainerDetail
+    ),
+    c!(
+        s::CMD_PAUSE,
+        container::PauseToggle,
+        Containers,
+        ContainerDetail
+    ),
+    c!(s::CMD_KILL, container::Kill, Containers, ContainerDetail),
+    c!(
+        s::CMD_OPEN_PORT,
+        container::OpenPort,
+        Containers,
+        ContainerDetail,
+        &["browser"]
+    ),
+    c!(s::CMD_COPY_ID, list::CopyId, Containers, ContainerDetail),
+    c!(
+        s::CMD_DELETE,
+        list::Delete,
+        Containers,
+        ContainerDetail,
+        &["remove"]
+    ),
+    c!(
+        s::CMD_TERM_RECONNECT,
+        term_ext::Reconnect,
+        Containers,
+        ContainerDetail,
+        &["shell"]
+    ),
+    c!(
+        s::CMD_TERM_EXTERNAL,
+        term_ext::OpenExternal,
+        Containers,
+        ContainerDetail,
+        &["shell", "console"]
+    ),
+    c!(
+        s::CMD_STATS_1M,
+        stats::Window1m,
+        Containers,
+        ContainerDetail
+    ),
+    c!(
+        s::CMD_STATS_5M,
+        stats::Window5m,
+        Containers,
+        ContainerDetail
+    ),
+    c!(
+        s::CMD_STATS_15M,
+        stats::Window15m,
+        Containers,
+        ContainerDetail
+    ),
+    c!(
+        s::CMD_STATS_DISK,
+        stats::LoadDiskUsage,
+        Containers,
+        ContainerDetail,
+        &["size"]
     ),
     // ── M9: Settings (SET-*, ENG-105) ──
     c!(
@@ -394,6 +522,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
 ];
 
+/// `detail::SelectTab` for a palette entry.
+const fn tab(tab: ContainerTab) -> SelectTab {
+    SelectTab { tab }
+}
+
 /// M6 availability (`When::ImagesPage` …).
 fn resource_when(when: When, cx: &CommandContext) -> bool {
     use crate::nav::Page;
@@ -408,6 +541,7 @@ fn resource_when(when: When, cx: &CommandContext) -> bool {
             matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)) && !cx.on_detail
         }
         When::ResourcePages => matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)),
+        When::ContainerDetail => page == Some(Page::Containers) && cx.on_detail,
         When::Always | When::Engine | When::ContainersPage => false,
     }
 }
@@ -450,6 +584,10 @@ pub fn plumbing_action(name: &str) -> bool {
         "res::RunRow",
         // M9: Settings › Engines row buttons (Tab-reachable, KBD-075).
         "settings::EngineOp",
+        // wip/detail: click plumbing (the keyed equivalents are bound or in the palette).
+        "detail::SelectTab",
+        "rows::RevealRow",
+        "term::SelectSession",
     ];
     PLUMBING.contains(&name)
 }

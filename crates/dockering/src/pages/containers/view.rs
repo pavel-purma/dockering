@@ -197,6 +197,36 @@ impl ContainersPage {
         &self.pending
     }
 
+    /// Puts the cursor on container `id`, expanding its group (KBD-042: `Alt+↑` from the
+    /// container detail lands on this row). Focuses the table.
+    pub fn reveal_row(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let id = id.to_owned();
+        self.table.update(cx, |t, cx| {
+            t.update_model(cx, |m| {
+                let full = m
+                    .all_item_keys()
+                    .into_iter()
+                    .find(|k| k.as_ref() == id || k.starts_with(id.as_str()));
+                let Some(full) = full else { return };
+                let group = m.nodes().iter().find_map(|n| match n {
+                    crate::ui::list_table::ListNode::Group { key, children, .. }
+                        if children.iter().any(|(k, _)| *k == full) =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                });
+                if let Some(g) = group {
+                    m.set_expanded(&g, true);
+                }
+                m.set_cursor(Some(full));
+            });
+        });
+        let h = self.table.focus_handle(cx);
+        window.focus(&h, cx);
+        cx.notify();
+    }
+
     fn caps(&self, cx: &App) -> Capabilities {
         self.store.read(cx).capabilities()
     }
