@@ -374,3 +374,86 @@ fn recorded_fixtures_parse() {
     );
     assert!(read("inspect_container.json")["State"]["Status"].is_string());
 }
+
+fn with_timeout_on_thread<T: Send + 'static>(
+    d: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(d).expect("timed out")
+}
+
+/// Resolves after `d` (no tokio in this crate's tests).
+async fn sleep(d: Duration) {
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(d);
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
+}
+
+/// Review finding 2 (TRM-008): a write to a TTY whose peer never reads blocks; `close()` must
+/// interrupt it promptly (not queue behind it) and the write must fail.
+#[test]
+fn exec_close_interrupts_a_stuck_write() {
+    let _serial = serial();
+    let (e, state) = engine();
+    // `TerminalSession` isn't `Sync`, so the future (borrowing it twice) is built and polled
+    // on the watchdog's worker thread.
+    let (write_res, close_res, close_took, write_pending_before_close) =
+        with_timeout_on_thread(Duration::from_secs(20), move || {
+            block_on(async move {
+                let req = dk_core::ExecRequest {
+                    cmd: vec!["sh".into()],
+                    tty: true,
+                    env: vec![],
+                    user: None,
+                    working_dir: None,
+                    cols: 80,
+                    rows: 24,
+                };
+                let term = e.exec("2e4fac884218", req).await.expect("exec");
+                let pending = std::sync::atomic::AtomicBool::new(true);
+                // Far more than the 1 KiB pipe buffer: the write pends until someone reads.
+                let write = async {
+                    let r = term.write(bytes::Bytes::from(vec![b'x'; 256 * 1024])).await;
+                    pending.store(false, Ordering::SeqCst);
+                    r
+                };
+                let close = async {
+                    sleep(Duration::from_millis(300)).await;
+                    let still_pending = pending.load(Ordering::SeqCst);
+                    let t = std::time::Instant::now();
+                    let r = term.close().await;
+                    (r, t.elapsed(), still_pending)
+                };
+                let (w, (c, took, still_pending)) = futures::join!(write, close);
+                // A write after close fails right away too.
+                let after = term.write(bytes::Bytes::from_static(b"y")).await;
+                assert!(after.is_err(), "write after close: {after:?}");
+                let exit = term.wait().await;
+                assert_eq!(exit, Ok(Some(129)), "SIGHUP → signalled exit");
+                (w, c, took, still_pending)
+            })
+        });
+    assert!(
+        write_pending_before_close,
+        "the write should block on the stalled pipe"
+    );
+    assert_eq!(close_res, Ok(()));
+    assert!(
+        close_took < Duration::from_secs(1),
+        "close took {close_took:?}"
+    );
+    assert!(
+        matches!(&write_res, Err(EngineError::Protocol(m)) if m == "TTY closed"),
+        "{write_res:?}"
+    );
+    let g = state.lock().expect("state");
+    assert!(g.calls.iter().any(|c| c == "Exec"));
+    assert_eq!(g.signalled, vec![1], "close sends SIGHUP");
+}

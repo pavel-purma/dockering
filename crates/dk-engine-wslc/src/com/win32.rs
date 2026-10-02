@@ -384,24 +384,47 @@ pub fn read_cancellable(
     }
 }
 
-/// Writes all of `data` to `h` (overlapped-safe; waits for each chunk).
-pub fn write_all(h: &OwnedHandle, mut data: &[u8]) -> windows::core::Result<()> {
+/// Writes all of `data` to `h`, interruptible by `cancel`.
+///
+/// Mirrors [`read_cancellable`]: each chunk is issued with an `OVERLAPPED`; if it pends we wait
+/// on the I/O event *and* `cancel`; on cancel we `CancelIoEx` the write and wait for it to settle
+/// so `data`/`ov` are never referenced after return. A write that blocks synchronously (a
+/// non-overlapped handle whose buffer is full) is interrupted by [`cancel_io`] from another
+/// thread. Cancellation → `Err(ERROR_OPERATION_ABORTED)`.
+pub fn write_all(h: &OwnedHandle, mut data: &[u8], cancel: &Event) -> windows::core::Result<()> {
+    let aborted = || windows::core::Error::from_hresult(ERROR_OPERATION_ABORTED.to_hresult());
+    let io_event = Event::new()?;
     while !data.is_empty() {
-        let io_event = Event::new()?;
+        if cancel.is_set() {
+            return Err(aborted());
+        }
+        io_event.reset();
         let mut ov = OVERLAPPED {
             hEvent: io_event.raw(),
             ..Default::default()
         };
         let mut n = 0u32;
         let len = data.len().min(u32::MAX as usize);
-        // SAFETY: `data[..len]` and `ov` outlive the I/O: on ERROR_IO_PENDING we block in
-        // GetOverlappedResult(bWait = TRUE) before they go out of scope.
+        // SAFETY: `data[..len]` and `ov` outlive the I/O: every pending path below either
+        // observes completion or cancels and waits for it (`GetOverlappedResult(.., TRUE)`).
         let r = unsafe { WriteFile(h.raw(), Some(&data[..len]), Some(&mut n), Some(&mut ov)) };
         match r {
             Ok(()) => {}
             Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
-                // SAFETY: waits for our own pending write on `h`.
-                unsafe { GetOverlappedResult(h.raw(), &ov, &mut n, true) }?;
+                let handles = [io_event.raw(), cancel.raw()];
+                // SAFETY: both handles are valid for the wait.
+                let w = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+                if w != WAIT_OBJECT_0 {
+                    // SAFETY: `ov` identifies our pending write on `h`; waiting for it to
+                    // settle guarantees the kernel no longer references `data`/`ov`.
+                    unsafe {
+                        let _ = CancelIoEx(h.raw(), Some(&ov));
+                        let _ = GetOverlappedResult(h.raw(), &ov, &mut n, true);
+                    }
+                    return Err(aborted());
+                }
+                // SAFETY: the write completed (event signalled); fetch the count, no wait.
+                unsafe { GetOverlappedResult(h.raw(), &ov, &mut n, false) }?;
             }
             Err(e) => return Err(e),
         }
@@ -415,7 +438,8 @@ pub fn write_all(h: &OwnedHandle, mut data: &[u8]) -> windows::core::Result<()> 
     Ok(())
 }
 
-/// Aborts all pending I/O on `h` issued by any thread (used to unblock a reader thread).
+/// Aborts all pending I/O on `h` issued by any thread of this process (unblocks a reader or a
+/// writer thread; non-blocking, safe to call from any thread).
 pub fn cancel_io(h: &OwnedHandle) {
     // SAFETY: `h` is valid; cancelling with no OVERLAPPED cancels all I/O of this process on it.
     let _ = unsafe { CancelIoEx(h.raw(), None) };

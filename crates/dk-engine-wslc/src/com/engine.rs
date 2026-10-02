@@ -1687,12 +1687,20 @@ struct ExecShared {
 }
 
 /// Interactive exec over `IWSLCProcess` with a real TTY (spec 21 §5).
+///
+/// Writes run on their own single-thread pool (`io`, keeps keystrokes ordered) and wait on
+/// `write_cancel`; COM control calls (`ResizeTty`, `Signal`) run on `ctl`, so `close()` never
+/// queues behind a write stuck on a peer that stopped reading.
 pub struct WslcComTerminal {
     shared: Arc<ExecShared>,
     out_rx: Option<mpsc::Receiver<EngineResult<Bytes>>>,
+    /// Stops the output reader thread.
     cancel: Cancel,
+    /// Interrupts pending and future writes (fired by `close()` / drop).
+    write_cancel: Cancel,
     exit_rx: Mutex<Option<oneshot::Receiver<Option<i64>>>>,
-    pool: Arc<RpcPool>,
+    io: Arc<RpcPool>,
+    ctl: Arc<RpcPool>,
 }
 
 fn start_exec(inner: &Inner, id: &str, req: &ExecRequest) -> EngineResult<WslcComTerminal> {
@@ -1803,8 +1811,10 @@ fn start_exec(inner: &Inner, id: &str, req: &ExecRequest) -> EngineResult<WslcCo
         shared,
         out_rx: Some(out_rx),
         cancel,
+        write_cancel: Cancel::new()?,
         exit_rx: Mutex::new(Some(exit_rx)),
-        pool: RpcPool::new(1),
+        io: RpcPool::new(1),
+        ctl: RpcPool::new(1),
     })
 }
 
@@ -1819,10 +1829,18 @@ impl TerminalSession for WslcComTerminal {
 
     async fn write(&self, data: Bytes) -> EngineResult<()> {
         let sh = self.shared.clone();
-        self.pool
+        let cancel = self.write_cancel.clone();
+        self.io
             .run(move || {
-                win32::write_all(&sh.tty, &data).map_err(|e| {
-                    EngineError::protocol(format!("TTY write failed: 0x{:08X}", e.code().0 as u32))
+                win32::write_all(&sh.tty, &data, cancel.event()).map_err(|e| {
+                    if cancel.is_fired() {
+                        EngineError::protocol("TTY closed")
+                    } else {
+                        EngineError::protocol(format!(
+                            "TTY write failed: 0x{:08X}",
+                            e.code().0 as u32
+                        ))
+                    }
                 })
             })
             .await
@@ -1830,7 +1848,7 @@ impl TerminalSession for WslcComTerminal {
 
     async fn resize(&self, cols: u16, rows: u16) -> EngineResult<()> {
         let sh = self.shared.clone();
-        self.pool
+        self.ctl
             .run(move || {
                 // SAFETY: verified IWSLCProcess slot 6 (F-7: `stty size` reflected it).
                 ffi::check(unsafe {
@@ -1856,14 +1874,18 @@ impl TerminalSession for WslcComTerminal {
     }
 
     async fn close(&self) -> EngineResult<()> {
+        // Interrupt a stuck write right here on the calling thread (non-blocking Win32 calls,
+        // no COM): the write wakes on `write_cancel`, and `CancelIoEx` also aborts a write
+        // blocked synchronously and the reader's pending read.
+        self.write_cancel.fire();
+        win32::cancel_io(&self.shared.tty);
         let sh = self.shared.clone();
         let _ = self
-            .pool
+            .ctl
             .run(move || {
                 // SIGHUP like a closed terminal; ignore "already exited".
                 // SAFETY: verified IWSLCProcess slot 0.
                 let _ = unsafe { sh.process.0.Signal(1) };
-                win32::cancel_io(&sh.tty);
                 Ok(())
             })
             .await;
@@ -1874,6 +1896,8 @@ impl TerminalSession for WslcComTerminal {
 
 impl Drop for WslcComTerminal {
     fn drop(&mut self) {
+        self.write_cancel.fire();
         self.cancel.fire();
+        win32::cancel_io(&self.shared.tty);
     }
 }
