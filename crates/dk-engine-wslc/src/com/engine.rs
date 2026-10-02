@@ -52,7 +52,10 @@ pub const COM_CAPABILITIES: Capabilities = Capabilities::EVENTS
 /// Stats polling period on COM (spec 20 §5.4).
 pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Message returned by `run_image` (CreateContainer is not verified live, see factory note).
+/// `EngineInfo.transport_note` of the COM transport (diagnostics, ENG-110).
+pub const COM_TRANSPORT_NOTE: &str = "Run via COM is not verified for this WSL version";
+
+/// Message returned by `run_image` (CreateContainer is not verified live, see the note).
 pub const RUN_NOT_VERIFIED: &str = "Run via COM is not verified for this WSL version";
 
 // ───────────────────────────── COM pointer wrappers ─────────────────────────────
@@ -713,7 +716,9 @@ impl Engine for WslcComEngine {
                 },
                 kind: EngineKind::Wslc,
                 transport: Some("com".into()),
-                transport_note: None,
+                // ENG-110 diagnostics: COM is fully in use except Run (CreateContainer's
+                // 30-field options struct is not verified live, so run_image returns 501).
+                transport_note: Some(COM_TRANSPORT_NOTE.into()),
                 server_version: wsl.map(|w| w.to_string()).unwrap_or(server_version),
                 // Diagnostics: which verified ABI module is in use (none for the test fake).
                 api_version: inner.abi.map(|m| format!("COM ABI {}", m.name())),
@@ -1599,11 +1604,12 @@ impl abi::IProgressCallback_Impl for ProgressSink_Impl {
         current: u64,
         total: u64,
     ) -> windows::core::HRESULT {
-        // SAFETY: `[unique] LPCSTR` args are null or NUL-terminated for the call's duration.
         let s = |p: PCSTR| {
             if p.is_null() {
                 String::new()
             } else {
+                // SAFETY: non-null `[unique] LPCSTR` args are NUL-terminated and valid for the
+                // duration of this callback.
                 unsafe { p.to_string() }.unwrap_or_default()
             }
         };

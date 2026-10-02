@@ -80,7 +80,10 @@ fn live_factory_discover_connect_auto_uses_com() {
     let info = block_on(engine.info()).expect("info");
     eprintln!("info: {info:#?}");
     assert_eq!(info.transport.as_deref(), Some("com"));
-    assert_eq!(info.transport_note, None);
+    assert_eq!(
+        info.transport_note.as_deref(),
+        Some(dk_engine_wslc::com::engine::COM_TRANSPORT_NOTE)
+    );
 }
 
 #[test]
