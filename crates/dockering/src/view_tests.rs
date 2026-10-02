@@ -563,3 +563,211 @@ fn con_033_enter_opens_detail_with_primary_focus(cx: &mut TestAppContext) {
     });
     h.shutdown();
 }
+
+#[gpui_kit::test]
+fn kbd_021_switcher_filter_arrows_enter(cx: &mut TestAppContext) {
+    let other = dk_core::fake::FakeEngine::new("other");
+    let h = start(
+        cx,
+        Setup {
+            extra_engines: vec![other],
+            ..Default::default()
+        },
+    );
+    h.wait_containers(cx);
+    h.wait_until(cx, "two engines listed", |_, cx| {
+        h.shell.read(cx).engines().read(cx).engines().len() == 2
+    });
+    h.press(cx, "ctrl-k");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    // Typing filters; Enter switches to the (only) match.
+    h.type_text(cx, "other");
+    h.press(cx, "enter");
+    h.wait_until(cx, "switched to other", |_, cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .is_some_and(|s| s.read(cx).engine_id().as_str() == "other")
+    });
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_037_quick_find_jumps(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "/");
+    h.type_text(cx, "redis");
+    cx.run_until_parked();
+    assert_eq!(h.cursor_key(cx), Some(id_of("redis")));
+    // Esc closes the find field and returns focus to the table.
+    h.press(cx, "escape");
+    let page = h.page(cx).unwrap();
+    let (open, focused) = cx
+        .update_window(h.any_window(), |_, window, cx| {
+            let t = page.read(cx).table().clone();
+            let t = t.read(cx);
+            (t.find_open(), t.focus_handle(cx).is_focused(window))
+        })
+        .unwrap();
+    assert!(!open && focused);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_036_shift_f10_opens_row_menu(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    h.focus_table(cx);
+    h.select_row(cx, &id_of("scratchpad"));
+    h.press(cx, "shift-f10");
+    let open = cx.read(|cx| page.read(cx).table().read(cx).key_menu_open());
+    assert!(open, "Shift+F10 opens the row menu");
+    // Enter on the first item (Start) runs it on the cursor row.
+    h.engine.clear_calls();
+    h.press(cx, "down enter");
+    h.wait_until(cx, "start from menu", |_, _| {
+        !h.engine.calls_to("start").is_empty()
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_039_group_by_none_flattens(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "ctrl-shift-g");
+    // Pick "None" from the menu (second item).
+    h.press(cx, "down down enter");
+    h.wait_until(cx, "flat list", |_, cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .rows()
+            .iter()
+            .all(|r| !r.is_group())
+    });
+    assert_eq!(
+        cx.read(|cx| page.read(cx).group_by().clone()),
+        dk_core::grouping::GroupBy::None
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn con_013_stop_all_stops_running_members(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.select_row(cx, "compose:myshop");
+    h.engine.clear_calls();
+    // S on a group row with running members = stop all (reverse dependency order).
+    h.press(cx, "s");
+    h.wait_until(cx, "3 stops", |_, _| h.engine.calls_to("stop").len() == 3);
+    let stopped: HashSet<String> = calls(&h, "stop").into_iter().collect();
+    let expect: HashSet<String> = ["myshop-web-1", "myshop-api-1", "myshop-db-1"]
+        .iter()
+        .map(|n| id_of(n))
+        .collect();
+    assert_eq!(stopped, expect);
+    // Reverse of start order: web (depends on api) stops before db.
+    let order = calls(&h, "stop");
+    let pos = |n: &str| order.iter().position(|i| *i == id_of(n)).unwrap();
+    assert!(pos("myshop-web-1") < pos("myshop-db-1"));
+    h.wait_until(cx, "aggregate 0/4", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx).containers.data().is_some_and(|d| {
+                d.iter()
+                    .filter(|c| c.name.starts_with("myshop-"))
+                    .all(|c| !c.state.is_running())
+            })
+        })
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn con_013_delete_all_lists_members_and_needs_force(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.select_row(cx, "compose:myshop");
+    h.press(cx, "delete");
+    let open = cx
+        .update_window(h.any_window(), |_, window, cx| window.has_active_dialog(cx))
+        .unwrap();
+    assert!(open);
+    // Without Force only the stopped member (the one-off migrate) is removed.
+    h.engine.clear_calls();
+    h.press(cx, "ctrl-enter");
+    h.wait_until(cx, "remove called once", |_, _| {
+        h.engine.calls_to("remove_container").len() == 1
+    });
+    assert_eq!(
+        calls(&h, "remove_container"),
+        vec![id_of("myshop-migrate-run-1a2b")]
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn spec10_polling_fallback_without_events_capability(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.engine
+        .set_capabilities(dk_core::Capabilities::all() - dk_core::Capabilities::EVENTS);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::Refresh), cx)
+    });
+    h.wait_until(cx, "polling mode", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .info()
+                .is_some_and(|i| !i.capabilities.contains(dk_core::Capabilities::EVENTS))
+                && s.read(cx).live_mode() == crate::state::LiveMode::Polling
+        })
+    });
+    // A change made behind our back shows up via polling.
+    let mut cs = crate::demo::containers();
+    cs.retain(|c| c.name != "redis");
+    h.engine.set_containers(cs);
+    h.wait_until(cx, "polled refresh drops redis", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .containers
+                .data()
+                .is_some_and(|d| d.iter().all(|c| c.name != "redis"))
+        })
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn con_030_engine_event_triggers_refetch(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.wait_until(cx, "subscribed", |_, _| h.engine.open_streams().0 > 0);
+    let mut cs = crate::demo::containers();
+    cs.push(dk_core::fake::fixtures::container(
+        "newcomer",
+        ContainerState::Running,
+    ));
+    h.engine.set_containers(cs);
+    h.engine.emit_event(dk_core::fake::fixtures::event(
+        dk_core::ResourceKind::Container,
+        "create",
+        "x",
+    ));
+    h.wait_until(cx, "newcomer appears", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .containers
+                .data()
+                .is_some_and(|d| d.iter().any(|c| c.name == "newcomer"))
+        })
+    });
+    h.shutdown();
+}

@@ -7,7 +7,7 @@ mod resource;
 mod ticker;
 
 pub use engine_list::{EngineListEvent, EngineListStore};
-pub use engine_store::{Collection, EngineStore, EngineStoreEvent};
+pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
 pub use ticker::Ticker;
 

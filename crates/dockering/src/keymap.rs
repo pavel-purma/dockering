@@ -129,8 +129,10 @@ const G: Option<&str> = Some(LOGS);
 const TERM: Option<&str> = Some(TERMINAL);
 const DLG: Option<&str> = Some(DIALOG);
 const SB: Option<&str> = Some(SIDEBAR);
-const SW: Option<&str> = Some(SWITCHER);
-const QF: Option<&str> = Some(QUICK_FIND);
+// Keys inside these overlays are typed into their filter `Input`, so the bindings must reach
+// the `Input` context to out-rank its own up/down/enter/escape (S-8).
+const SW: Option<&str> = Some("EngineSwitcher > Input");
+const QF: Option<&str> = Some("QuickFind > Input");
 const PAL: Option<&str> = Some(PALETTE);
 
 /// The default keymap. Mirrors the tables in `docs/spec/features/keyboard.md`.
