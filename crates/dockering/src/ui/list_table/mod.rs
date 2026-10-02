@@ -142,7 +142,7 @@ pub enum ListEvent {
     /// `Enter` / double-click on an item row (CON-033).
     Open(SharedString),
     /// Sort changed by header click or the sort menu (CON-003).
-    Sort(SortState),
+    Sort(Option<SortState>),
     /// A group was expanded/collapsed (persist, CON-011).
     Expanded { group: SharedString, expanded: bool },
     /// Cursor or multi-selection changed.
@@ -308,6 +308,8 @@ pub struct ListTable<D: ListDelegate> {
     prev_focus: Option<FocusHandle>,
     /// Persisted column widths key (`UiState.column_widths`).
     widths_key: Option<String>,
+    /// The last sort reported to the page.
+    reported_sort: Option<SortState>,
     /// Keyboard-opened row menu (KBD-036): menu, anchor position, dismiss subscription.
     key_menu: Option<KeyMenu>,
     /// Painted bounds of the list (for anchoring the keyboard menu).
@@ -358,6 +360,9 @@ impl<D: ListDelegate> ListTable<D> {
         let subs = vec![
             cx.subscribe_in(&table, window, Self::on_table_event),
             cx.subscribe_in(&find_input, window, Self::on_find_event),
+            // Header-click sorting happens inside the GPUI Kit table (perform_sort) without an
+            // event; detect sort changes on notify and report them (CON-003).
+            cx.observe(&table, |this, _, cx| this.check_sort_changed(cx)),
         ];
         Self {
             table,
@@ -366,6 +371,7 @@ impl<D: ListDelegate> ListTable<D> {
             next_focus: None,
             prev_focus: None,
             widths_key,
+            reported_sort: None,
             key_menu: None,
             bounds: gpui_kit::Bounds::default(),
             _subs: subs,
@@ -497,19 +503,29 @@ impl<D: ListDelegate> ListTable<D> {
             }
             _ => {}
         }
-        // Sort changes happen inside the delegate; report them.
-        let sort = self.model(cx).sort.clone();
-        if let Some(sort) = sort
-            && matches!(event, TableEvent::SelectColumn(_))
-        {
-            cx.emit(ListEvent::Sort(sort));
-        }
         let visible = self
             .table
             .update(cx, |t, _| t.delegate_mut().pending_visible.take());
         if let Some(range) = visible {
             cx.emit(ListEvent::VisibleRows(range));
         }
+    }
+
+    fn check_sort_changed(&mut self, cx: &mut Context<Self>) {
+        let sort = self.model(cx).sort.clone();
+        if sort != self.reported_sort {
+            self.reported_sort = sort.clone();
+            cx.emit(ListEvent::Sort(sort));
+        }
+    }
+
+    /// Sets the sort (sort menu, palette) and syncs the header arrows.
+    pub fn set_sort(&mut self, sort: Option<SortState>, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            t.delegate_mut().model.sort = sort;
+            t.refresh(cx);
+            cx.notify();
+        });
     }
 
     fn open_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {

@@ -447,23 +447,20 @@ impl ContainersPage {
 
     fn on_sort_by(&mut self, a: &SortByColumn, _: &mut Window, cx: &mut Context<Self>) {
         let key = a.key.clone();
-        self.table.update(cx, |t, cx| {
-            t.update_model(cx, |m| {
-                m.sort = match &m.sort {
-                    Some(s) if s.key == key && !s.descending => Some(SortState {
-                        key: key.clone(),
-                        descending: true,
-                    }),
-                    Some(s) if s.key == key => None,
-                    _ => Some(SortState {
-                        key: key.clone(),
-                        descending: false,
-                    }),
-                };
-            });
-            t.table().update(cx, |ts, cx| ts.refresh(cx));
-        });
-        self.rebuild(cx);
+        let current = self.table.read(cx).model(cx).sort.clone();
+        let next = match &current {
+            Some(s) if s.key == key && !s.descending => Some(SortState {
+                key: key.clone(),
+                descending: true,
+            }),
+            Some(s) if s.key == key => None,
+            _ => Some(SortState {
+                key: key.clone(),
+                descending: false,
+            }),
+        };
+        // The ListTable reports the change (ListEvent::Sort) and we rebuild there.
+        self.table.update(cx, |t, cx| t.set_sort(next, cx));
     }
 
     // ── menus (KBD-039, Mod+Shift+O, overflow) ─────────────────────────────────────────
