@@ -1,0 +1,28 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: list
+---
+[
+  {
+    "name": "dk-fx-data",
+    "driver": "local",
+    "mountpoint": "/var/lib/docker/volumes/dk-fx-data/_data",
+    "created": "2026-10-02T00:17:33Z",
+    "scope": "local",
+    "labels": {
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.volume": "data"
+    },
+    "size": null,
+    "ref_count": null,
+    "compose": {
+      "project": "dk-fx",
+      "service": "",
+      "number": null,
+      "working_dir": null,
+      "config_files": [],
+      "oneoff": false,
+      "depends_on": []
+    }
+  }
+]

@@ -29,6 +29,7 @@ async-trait.workspace = true
 dk-core = { workspace = true, features = ["test-support"] }
 insta.workspace = true
 futures = { workspace = true, features = ["executor"] }
+time.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 
 [lints]

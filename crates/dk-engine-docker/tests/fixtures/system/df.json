@@ -1,0 +1,242 @@
+{
+  "BuildCacheUsage": {
+    "Items": [],
+    "Reclaimable": 19626896986,
+    "TotalCount": 144,
+    "TotalSize": 19626896986
+  },
+  "ContainerUsage": {
+    "ActiveCount": 8,
+    "Items": [
+      {
+        "Command": "sh -c 'echo bye; exit 3'",
+        "Created": 1790900254,
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "none"
+        },
+        "HostConfig": {
+          "NetworkMode": "bridge"
+        },
+        "Id": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3",
+        "Image": "alpine:3.20",
+        "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "Labels": {
+          "desktop.docker.io/ports.scheme": "v2"
+        },
+        "Mounts": [],
+        "Names": [
+          "/dk-fx-exited"
+        ],
+        "NetworkSettings": {
+          "Networks": {
+            "bridge": {
+              "Aliases": null,
+              "DNSNames": null,
+              "DriverOpts": null,
+              "EndpointID": "",
+              "Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "GwPriority": 0,
+              "IPAMConfig": null,
+              "IPAddress": "",
+              "IPPrefixLen": 0,
+              "IPv6Gateway": "",
+              "Links": null,
+              "MacAddress": "",
+              "NetworkID": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+            }
+          }
+        },
+        "Ports": [],
+        "SizeRootFs": 8495104,
+        "SizeRw": 4096,
+        "State": "exited",
+        "Status": "Exited (3) 4 seconds ago"
+      },
+      {
+        "Command": "sh -c 'echo hello-tty; sleep 600'",
+        "Created": 1790900253,
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "none"
+        },
+        "HostConfig": {
+          "NetworkMode": "bridge"
+        },
+        "Id": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb",
+        "Image": "alpine:3.20",
+        "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "Labels": {
+          "com.docker.compose.container-number": "1",
+          "com.docker.compose.depends_on": "db:service_started:false",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "dk-fx",
+          "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+          "com.docker.compose.project.working_dir": "/srv/dk-fx",
+          "com.docker.compose.service": "tty",
+          "desktop.docker.io/ports.scheme": "v2"
+        },
+        "Mounts": [],
+        "Names": [
+          "/dk-fx-tty"
+        ],
+        "NetworkSettings": {
+          "Networks": {
+            "bridge": {
+              "Aliases": null,
+              "DNSNames": null,
+              "DriverOpts": null,
+              "EndpointID": "4cc8eeb9c86dc339c464c3877e1d6bb57879330848c9d03b6025cf374568e5d9",
+              "Gateway": "172.17.0.1",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "GwPriority": 0,
+              "IPAMConfig": null,
+              "IPAddress": "172.17.0.3",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "Links": null,
+              "MacAddress": "62:63:b9:1c:70:d3",
+              "NetworkID": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+            }
+          }
+        },
+        "Ports": [],
+        "SizeRootFs": 8495104,
+        "SizeRw": 4096,
+        "State": "running",
+        "Status": "Up 4 seconds"
+      },
+      {
+        "Command": "sh -c 'echo started; while true; do echo tick; sleep 1; done'",
+        "Created": 1790900253,
+        "Health": {
+          "FailingStreak": 0,
+          "Status": "healthy"
+        },
+        "HostConfig": {
+          "NetworkMode": "bridge"
+        },
+        "Id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+        "Image": "alpine:3.20",
+        "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "Labels": {
+          "com.docker.compose.container-number": "1",
+          "com.docker.compose.depends_on": "db:service_started:false",
+          "com.docker.compose.oneoff": "False",
+          "com.docker.compose.project": "dk-fx",
+          "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+          "com.docker.compose.project.working_dir": "/srv/dk-fx",
+          "com.docker.compose.service": "web",
+          "desktop.docker.io/ports.scheme": "v2",
+          "desktop.docker.io/ports/80/tcp": "127.0.0.1:"
+        },
+        "Mounts": [
+          {
+            "Destination": "/data",
+            "Driver": "local",
+            "Mode": "z",
+            "Name": "dk-fx-data",
+            "Propagation": "",
+            "RW": true,
+            "Source": "/var/lib/docker/volumes/dk-fx-data/_data",
+            "Type": "volume"
+          }
+        ],
+        "Names": [
+          "/dk-fx-web"
+        ],
+        "NetworkSettings": {
+          "Networks": {
+            "dk-fx-net": {
+              "Aliases": null,
+              "DNSNames": null,
+              "DriverOpts": null,
+              "EndpointID": "c39d6299dc7a69c369701ad38ea4a551b0fb71dc8c9168698352339a3e9a3b16",
+              "Gateway": "172.18.0.1",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "GwPriority": 0,
+              "IPAMConfig": null,
+              "IPAddress": "172.18.0.2",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "Links": null,
+              "MacAddress": "e2:35:a1:0b:74:67",
+              "NetworkID": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+            }
+          }
+        },
+        "Ports": [
+          {
+            "IP": "127.0.0.1",
+            "PrivatePort": 80,
+            "PublicPort": 32768,
+            "Type": "tcp"
+          }
+        ],
+        "SizeRootFs": 8499200,
+        "SizeRw": 8192,
+        "State": "running",
+        "Status": "Up 5 seconds (healthy)"
+      }
+    ],
+    "Reclaimable": 45056,
+    "TotalCount": 10,
+    "TotalSize": 56623104
+  },
+  "ImageUsage": {
+    "ActiveCount": 6,
+    "Items": [
+      {
+        "Containers": 3,
+        "Created": 1776383606,
+        "Descriptor": {
+          "digest": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "size": 9226
+        },
+        "Id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+        "Labels": {},
+        "ParentId": "",
+        "RepoDigests": [
+          "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+        ],
+        "RepoTags": [
+          "alpine:3.20"
+        ],
+        "SharedSize": 0,
+        "Size": 12182311
+      }
+    ],
+    "Reclaimable": 2402492757,
+    "TotalCount": 10,
+    "TotalSize": 10549371246
+  },
+  "VolumeUsage": {
+    "ActiveCount": 5,
+    "Items": [
+      {
+        "CreatedAt": "2026-10-02T00:17:33Z",
+        "Driver": "local",
+        "Labels": {
+          "com.docker.compose.project": "dk-fx",
+          "com.docker.compose.volume": "data"
+        },
+        "Mountpoint": "/var/lib/docker/volumes/dk-fx-data/_data",
+        "Name": "dk-fx-data",
+        "Options": null,
+        "Scope": "local",
+        "UsageData": {
+          "RefCount": 1,
+          "Size": 0
+        }
+      }
+    ],
+    "Reclaimable": 108419783,
+    "TotalCount": 7,
+    "TotalSize": 5983794631
+  }
+}

@@ -1,0 +1,157 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+{
+  "cmd": [
+    "sh",
+    "-c",
+    "echo started; while true; do echo tick; sleep 1; done"
+  ],
+  "entrypoint": [],
+  "env": [
+    {
+      "key": "APP_MODE",
+      "value": "<redacted>"
+    },
+    {
+      "key": "DB_PASSWORD",
+      "value": "<redacted>"
+    },
+    {
+      "key": "PATH",
+      "value": "<redacted>"
+    }
+  ],
+  "finished_at": null,
+  "health_log": [
+    {
+      "end": "2026-10-02T00:17:34.840832748Z",
+      "exit_code": 0,
+      "output": "",
+      "start": "2026-10-02T00:17:34.813286778Z"
+    },
+    {
+      "end": "2026-10-02T00:17:35.864600909Z",
+      "exit_code": 0,
+      "output": "",
+      "start": "2026-10-02T00:17:35.84205568Z"
+    },
+    {
+      "end": "2026-10-02T00:17:36.886741865Z",
+      "exit_code": 0,
+      "output": "",
+      "start": "2026-10-02T00:17:36.86581644Z"
+    }
+  ],
+  "hostname": "38bcb50e6629",
+  "mounts": [
+    {
+      "destination": "/data",
+      "kind": "volume",
+      "mode": "z",
+      "propagation": null,
+      "rw": true,
+      "source": "/var/lib/docker/volumes/dk-fx-data/_data",
+      "volume_name": "dk-fx-data"
+    }
+  ],
+  "network_settings": {
+    "dns": [],
+    "network_mode": "bridge",
+    "networks": [
+      {
+        "aliases": [
+          "web"
+        ],
+        "gateway": "172.18.0.1",
+        "ipv4": "172.18.0.2",
+        "ipv6": null,
+        "mac": "e2:35:a1:0b:74:67",
+        "network": "dk-fx-net",
+        "network_id": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+      }
+    ]
+  },
+  "pid": 17346,
+  "platform": "linux",
+  "port_bindings": [
+    {
+      "ip": "127.0.0.1",
+      "private": 80,
+      "proto": "tcp",
+      "public": 59748
+    }
+  ],
+  "resources": {
+    "cpu_shares": null,
+    "memory": 268435456,
+    "memory_swap": 536870912,
+    "nano_cpus": 500000000,
+    "pids_limit": null
+  },
+  "restart_count": 0,
+  "restart_policy": "unless-stopped",
+  "started_at": "2026-10-02T00:17:33.652134567Z",
+  "summary": {
+    "command": "sh -c echo started; while true; do echo tick; sleep 1; done",
+    "compose": {
+      "config_files": [
+        "/srv/dk-fx/compose.yaml"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "number": 1,
+      "oneoff": false,
+      "project": "dk-fx",
+      "service": "web",
+      "working_dir": "/srv/dk-fx"
+    },
+    "created": "2026-10-02T00:17:33.508896001Z",
+    "exit_code": null,
+    "health": "healthy",
+    "id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [
+      "172.18.0.2"
+    ],
+    "labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "web"
+    },
+    "mounts": [
+      {
+        "destination": "/data",
+        "kind": "volume",
+        "rw": true,
+        "source": "dk-fx-data"
+      }
+    ],
+    "name": "dk-fx-web",
+    "networks": [
+      "dk-fx-net"
+    ],
+    "ports": [
+      {
+        "ip": "127.0.0.1",
+        "private": 80,
+        "proto": "tcp",
+        "public": 59748
+      }
+    ],
+    "size_root_fs": null,
+    "size_rw": null,
+    "state": "running",
+    "status_text": "Up <duration> (healthy)"
+  },
+  "tty": false,
+  "user": null,
+  "working_dir": "/srv"
+}

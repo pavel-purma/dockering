@@ -1,0 +1,75 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+{
+  "cmd": [
+    "sh",
+    "-c",
+    "echo bye; exit 3"
+  ],
+  "entrypoint": [],
+  "env": [
+    {
+      "key": "PATH",
+      "value": "<redacted>"
+    }
+  ],
+  "finished_at": "2026-10-02T00:17:34.49000674Z",
+  "health_log": [],
+  "hostname": "5b0d0954e170",
+  "mounts": [],
+  "network_settings": {
+    "dns": [],
+    "network_mode": "bridge",
+    "networks": [
+      {
+        "aliases": [],
+        "gateway": null,
+        "ipv4": null,
+        "ipv6": null,
+        "mac": null,
+        "network": "bridge",
+        "network_id": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+      }
+    ]
+  },
+  "pid": null,
+  "platform": "linux",
+  "port_bindings": [],
+  "resources": {
+    "cpu_shares": null,
+    "memory": null,
+    "memory_swap": null,
+    "nano_cpus": null,
+    "pids_limit": null
+  },
+  "restart_count": 0,
+  "restart_policy": "no",
+  "started_at": "2026-10-02T00:17:34.359859155Z",
+  "summary": {
+    "command": "sh -c echo bye; exit 3",
+    "compose": null,
+    "created": "2026-10-02T00:17:34.150280708Z",
+    "exit_code": 3,
+    "health": null,
+    "id": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [],
+    "labels": {},
+    "mounts": [],
+    "name": "dk-fx-exited",
+    "networks": [
+      "bridge"
+    ],
+    "ports": [],
+    "size_root_fs": null,
+    "size_rw": null,
+    "state": "exited",
+    "status_text": "Exited (3) <ago>"
+  },
+  "tty": false,
+  "user": null,
+  "working_dir": "/"
+}

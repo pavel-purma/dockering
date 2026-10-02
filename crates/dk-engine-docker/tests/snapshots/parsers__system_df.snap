@@ -1,0 +1,22 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: du
+---
+{
+  "images_size": 10549371246,
+  "containers_size": 16384,
+  "volumes": [
+    [
+      "dk-fx-data",
+      0
+    ]
+  ],
+  "volume_refs": [
+    [
+      "dk-fx-data",
+      1
+    ]
+  ],
+  "build_cache": 19626896986,
+  "images_reclaimable": 2402492757
+}

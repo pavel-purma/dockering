@@ -1,0 +1,34 @@
+{
+  "Processes": [
+    [
+      "root",
+      "17346",
+      "17322",
+      "0",
+      "00:17",
+      "?",
+      "00:00:00",
+      "sh -c echo started; while true; do echo tick; sleep 1; done"
+    ],
+    [
+      "root",
+      "17535",
+      "17346",
+      "0",
+      "00:17",
+      "?",
+      "00:00:00",
+      "sleep 1"
+    ]
+  ],
+  "Titles": [
+    "UID",
+    "PID",
+    "PPID",
+    "C",
+    "STIME",
+    "TTY",
+    "TIME",
+    "CMD"
+  ]
+}

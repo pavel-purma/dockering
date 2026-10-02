@@ -1,0 +1,8 @@
+{
+  "ApiVersion": "1.56",
+  "Arch": "amd64",
+  "KernelVersion": "6.18.40.1-microsoft-standard-WSL2",
+  "MinAPIVersion": "1.40",
+  "Os": "linux",
+  "Version": "29.8.1"
+}

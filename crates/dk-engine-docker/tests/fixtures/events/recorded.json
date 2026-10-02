@@ -1,0 +1,629 @@
+[
+  {
+    "Action": "destroy",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:18081",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "046002e99cd37162778a04d65ed931f8f3832ea864baa02e77f23e1009502616"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900252,
+    "timeNano": 1790900252145769509
+  },
+  {
+    "Action": "destroy",
+    "Actor": {
+      "Attributes": {
+        "name": "dk-fx-net",
+        "type": "bridge"
+      },
+      "ID": "4aee072ba4601f34b896d2cd35e4de7163f7a6a97506db30df48b12ddd10b0a0"
+    },
+    "Type": "network",
+    "scope": "local",
+    "time": 1790900252,
+    "timeNano": 1790900252445194983
+  },
+  {
+    "Action": "pull",
+    "Actor": {
+      "Attributes": {
+        "name": "alpine"
+      },
+      "ID": "alpine:3.20"
+    },
+    "Type": "image",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253429609510
+  },
+  {
+    "Action": "create",
+    "Actor": {
+      "Attributes": {
+        "name": "dk-fx-net",
+        "type": "bridge"
+      },
+      "ID": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+    },
+    "Type": "network",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253481388616
+  },
+  {
+    "Action": "create",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253603575473
+  },
+  {
+    "Action": "connect",
+    "Actor": {
+      "Attributes": {
+        "container": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+        "name": "dk-fx-net",
+        "type": "bridge"
+      },
+      "ID": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+    },
+    "Type": "network",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253787904819
+  },
+  {
+    "Action": "start",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253812068958
+  },
+  {
+    "Action": "create",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "tty",
+        "desktop.docker.io/ports.scheme": "v2",
+        "image": "alpine:3.20",
+        "name": "dk-fx-tty"
+      },
+      "ID": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900253,
+    "timeNano": 1790900253946496062
+  },
+  {
+    "Action": "start",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "tty",
+        "desktop.docker.io/ports.scheme": "v2",
+        "image": "alpine:3.20",
+        "name": "dk-fx-tty"
+      },
+      "ID": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254121301640
+  },
+  {
+    "Action": "create",
+    "Actor": {
+      "Attributes": {
+        "desktop.docker.io/ports.scheme": "v2",
+        "image": "alpine:3.20",
+        "name": "dk-fx-exited"
+      },
+      "ID": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254315827966
+  },
+  {
+    "Action": "start",
+    "Actor": {
+      "Attributes": {
+        "desktop.docker.io/ports.scheme": "v2",
+        "image": "alpine:3.20",
+        "name": "dk-fx-exited"
+      },
+      "ID": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254501669726
+  },
+  {
+    "Action": "die",
+    "Actor": {
+      "Attributes": {
+        "desktop.docker.io/ports.scheme": "v2",
+        "execDuration": "0",
+        "exitCode": "3",
+        "image": "alpine:3.20",
+        "name": "dk-fx-exited"
+      },
+      "ID": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254695825268
+  },
+  {
+    "Action": "exec_create: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "222dc43a4d9019879d1813f79067b41dad97752c8fcf23a883f3663540ed4367",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254813314886
+  },
+  {
+    "Action": "exec_start: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "222dc43a4d9019879d1813f79067b41dad97752c8fcf23a883f3663540ed4367",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254813504217
+  },
+  {
+    "Action": "exec_die",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "222dc43a4d9019879d1813f79067b41dad97752c8fcf23a883f3663540ed4367",
+        "exitCode": "0",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254840629099
+  },
+  {
+    "Action": "health_status: healthy",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900254,
+    "timeNano": 1790900254841153007
+  },
+  {
+    "Action": "exec_create: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "c2849e75122d2d645f3a3fe2432fec2deb5cdfeef78402a50c3c0478bbde3c57",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900255,
+    "timeNano": 1790900255842099899
+  },
+  {
+    "Action": "exec_start: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "c2849e75122d2d645f3a3fe2432fec2deb5cdfeef78402a50c3c0478bbde3c57",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900255,
+    "timeNano": 1790900255842222210
+  },
+  {
+    "Action": "exec_die",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "c2849e75122d2d645f3a3fe2432fec2deb5cdfeef78402a50c3c0478bbde3c57",
+        "exitCode": "0",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900255,
+    "timeNano": 1790900255864484298
+  },
+  {
+    "Action": "exec_create: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "8a80d3e0ab25b460d7fefc77495f9b07d30f5ccb1fb91c16f516108fa63ed10a",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900256,
+    "timeNano": 1790900256865839758
+  },
+  {
+    "Action": "exec_start: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "8a80d3e0ab25b460d7fefc77495f9b07d30f5ccb1fb91c16f516108fa63ed10a",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900256,
+    "timeNano": 1790900256865949820
+  },
+  {
+    "Action": "exec_die",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "8a80d3e0ab25b460d7fefc77495f9b07d30f5ccb1fb91c16f516108fa63ed10a",
+        "exitCode": "0",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900256,
+    "timeNano": 1790900256886610460
+  },
+  {
+    "Action": "top",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900257,
+    "timeNano": 1790900257736835318
+  },
+  {
+    "Action": "exec_create: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "47419aa62d214412f0f64222c3b31a8bd386ca99c2ee6845bfc56b19e3e40749",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900257,
+    "timeNano": 1790900257887502249
+  },
+  {
+    "Action": "exec_start: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "47419aa62d214412f0f64222c3b31a8bd386ca99c2ee6845bfc56b19e3e40749",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900257,
+    "timeNano": 1790900257887657978
+  },
+  {
+    "Action": "exec_die",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "47419aa62d214412f0f64222c3b31a8bd386ca99c2ee6845bfc56b19e3e40749",
+        "exitCode": "0",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900257,
+    "timeNano": 1790900257907615044
+  },
+  {
+    "Action": "exec_create: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "eb638f5dcc3ae7a5dc7bdd2f4c68575814bf8e737f7a1aa93fb301c7e572df7c",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900258,
+    "timeNano": 1790900258908072801
+  },
+  {
+    "Action": "exec_start: true ",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "eb638f5dcc3ae7a5dc7bdd2f4c68575814bf8e737f7a1aa93fb301c7e572df7c",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900258,
+    "timeNano": 1790900258908151012
+  },
+  {
+    "Action": "exec_die",
+    "Actor": {
+      "Attributes": {
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "db:service_started:false",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "dk-fx",
+        "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+        "com.docker.compose.project.working_dir": "/srv/dk-fx",
+        "com.docker.compose.service": "web",
+        "desktop.docker.io/ports.scheme": "v2",
+        "desktop.docker.io/ports/80/tcp": "127.0.0.1:",
+        "execID": "eb638f5dcc3ae7a5dc7bdd2f4c68575814bf8e737f7a1aa93fb301c7e572df7c",
+        "exitCode": "0",
+        "image": "alpine:3.20",
+        "name": "dk-fx-web"
+      },
+      "ID": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f"
+    },
+    "Type": "container",
+    "scope": "local",
+    "time": 1790900258,
+    "timeNano": 1790900258930422071
+  }
+]

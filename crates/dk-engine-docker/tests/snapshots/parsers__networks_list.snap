@@ -1,0 +1,37 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: list
+---
+[
+  {
+    "id": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953",
+    "name": "dk-fx-net",
+    "driver": "bridge",
+    "scope": "local",
+    "internal": false,
+    "attachable": true,
+    "ipv6": false,
+    "created": "2026-10-02T00:17:33.441240914Z",
+    "subnets": [
+      {
+        "subnet": "172.18.0.0/16",
+        "gateway": "172.18.0.1",
+        "ip_range": null
+      }
+    ],
+    "labels": {
+      "com.docker.compose.network": "default",
+      "com.docker.compose.project": "dk-fx"
+    },
+    "compose": {
+      "project": "dk-fx",
+      "service": "",
+      "number": null,
+      "working_dir": null,
+      "config_files": [],
+      "oneoff": false,
+      "depends_on": []
+    },
+    "containers": null
+  }
+]

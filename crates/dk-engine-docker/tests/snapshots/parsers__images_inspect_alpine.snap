@@ -1,0 +1,42 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+{
+  "architecture": "amd64",
+  "author": null,
+  "config": {
+    "cmd": [
+      "/bin/sh"
+    ],
+    "entrypoint": [],
+    "env": [
+      "PATH=<redacted>"
+    ],
+    "exposed_ports": [],
+    "labels": {},
+    "user": null,
+    "volumes": [],
+    "working_dir": "/"
+  },
+  "os": "linux",
+  "root_fs_layers": [
+    "sha256:08bc4e534116aa76b16015484b82eac51f9a593416feae9296c8a2d4bb7aa4a2"
+  ],
+  "summary": {
+    "containers": null,
+    "created": "2026-04-16T23:53:26.803599608Z",
+    "dangling": false,
+    "id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "labels": {},
+    "repo_digests": [
+      "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+    ],
+    "repo_tags": [
+      "alpine:3.20"
+    ],
+    "shared_size": null,
+    "size": 12102484
+  },
+  "variant": null
+}

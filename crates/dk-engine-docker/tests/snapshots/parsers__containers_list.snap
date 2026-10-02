@@ -1,0 +1,135 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+[
+  {
+    "command": "sh -c 'echo bye; exit 3'",
+    "compose": null,
+    "created": "2026-10-02T00:17:34Z",
+    "exit_code": 3,
+    "health": null,
+    "id": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [],
+    "labels": {
+      "desktop.docker.io/ports.scheme": "v2"
+    },
+    "mounts": [],
+    "name": "dk-fx-exited",
+    "networks": [
+      "bridge"
+    ],
+    "ports": [],
+    "size_root_fs": 8495104,
+    "size_rw": 4096,
+    "state": "exited",
+    "status_text": "Exited (3) <ago>"
+  },
+  {
+    "command": "sh -c 'echo hello-tty; sleep 600'",
+    "compose": {
+      "config_files": [
+        "/srv/dk-fx/compose.yaml"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "number": 1,
+      "oneoff": false,
+      "project": "dk-fx",
+      "service": "tty",
+      "working_dir": "/srv/dk-fx"
+    },
+    "created": "2026-10-02T00:17:33Z",
+    "exit_code": null,
+    "health": null,
+    "id": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [
+      "172.17.0.3"
+    ],
+    "labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "tty",
+      "desktop.docker.io/ports.scheme": "v2"
+    },
+    "mounts": [],
+    "name": "dk-fx-tty",
+    "networks": [
+      "bridge"
+    ],
+    "ports": [],
+    "size_root_fs": 8495104,
+    "size_rw": 4096,
+    "state": "running",
+    "status_text": "Up <duration>"
+  },
+  {
+    "command": "sh -c 'echo started; while true; do echo tick; sleep 1; done'",
+    "compose": {
+      "config_files": [
+        "/srv/dk-fx/compose.yaml"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "number": 1,
+      "oneoff": false,
+      "project": "dk-fx",
+      "service": "web",
+      "working_dir": "/srv/dk-fx"
+    },
+    "created": "2026-10-02T00:17:33Z",
+    "exit_code": null,
+    "health": "healthy",
+    "id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [
+      "172.18.0.2"
+    ],
+    "labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "web",
+      "desktop.docker.io/ports.scheme": "v2",
+      "desktop.docker.io/ports/80/tcp": "127.0.0.1:"
+    },
+    "mounts": [
+      {
+        "destination": "/data",
+        "kind": "volume",
+        "rw": true,
+        "source": "dk-fx-data"
+      }
+    ],
+    "name": "dk-fx-web",
+    "networks": [
+      "dk-fx-net"
+    ],
+    "ports": [
+      {
+        "ip": "127.0.0.1",
+        "private": 80,
+        "proto": "tcp",
+        "public": 59748
+      }
+    ],
+    "size_root_fs": 8499200,
+    "size_rw": 8192,
+    "state": "running",
+    "status_text": "Up <duration> (healthy)"
+  }
+]

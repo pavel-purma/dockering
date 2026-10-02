@@ -1,0 +1,12 @@
+{
+  "CreatedAt": "2026-10-02T00:17:33Z",
+  "Driver": "local",
+  "Labels": {
+    "com.docker.compose.project": "dk-fx",
+    "com.docker.compose.volume": "data"
+  },
+  "Mountpoint": "/var/lib/docker/volumes/dk-fx-data/_data",
+  "Name": "dk-fx-data",
+  "Options": {},
+  "Scope": "local"
+}

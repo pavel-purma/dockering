@@ -1,0 +1,18 @@
+{
+  "Architecture": "x86_64",
+  "Containers": 10,
+  "ContainersPaused": 0,
+  "ContainersRunning": 8,
+  "ContainersStopped": 2,
+  "DockerRootDir": "/var/lib/docker",
+  "Driver": "overlayfs",
+  "ID": "00000000-0000-0000-0000-000000000000",
+  "Images": 10,
+  "KernelVersion": "6.18.40.1-microsoft-standard-WSL2",
+  "MemTotal": 16670846976,
+  "NCPU": 20,
+  "Name": "dk-fixture-host",
+  "OSType": "linux",
+  "OperatingSystem": "Docker Desktop (containerized)",
+  "ServerVersion": "29.8.1"
+}

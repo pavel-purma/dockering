@@ -1,0 +1,50 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+{
+  "containers": [
+    {
+      "id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+      "ipv4": "172.18.0.2/16",
+      "ipv6": null,
+      "mac": "e2:35:a1:0b:74:67",
+      "name": "dk-fx-web"
+    }
+  ],
+  "options": {
+    "com.docker.network.enable_ipv4": "true",
+    "com.docker.network.enable_ipv6": "false"
+  },
+  "summary": {
+    "attachable": true,
+    "compose": {
+      "config_files": [],
+      "depends_on": [],
+      "number": null,
+      "oneoff": false,
+      "project": "dk-fx",
+      "service": "",
+      "working_dir": null
+    },
+    "containers": 1,
+    "created": "2026-10-02T00:17:33.441240914Z",
+    "driver": "bridge",
+    "id": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953",
+    "internal": false,
+    "ipv6": false,
+    "labels": {
+      "com.docker.compose.network": "default",
+      "com.docker.compose.project": "dk-fx"
+    },
+    "name": "dk-fx-net",
+    "scope": "local",
+    "subnets": [
+      {
+        "gateway": "172.18.0.1",
+        "ip_range": null,
+        "subnet": "172.18.0.0/16"
+      }
+    ]
+  }
+}
