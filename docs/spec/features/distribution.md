@@ -1,0 +1,105 @@
+# Feature: Distribution, releases & updates (Windows first)
+
+- **Status:** planned (2026-10-02)
+- **Requirement prefixes:** REL (release, packaging, signing, winget, branding; REL-001…003 licensing stay in [spec 50](../50-build-and-release.md#licensing-rel-001)) · UPD (in-app updates)
+- **Plan:** [windows-distribution](../../plan/features/windows-distribution.md) · **ADR:** [0006](../../plan/adr/0006-windows-installer-and-updates.md)
+
+Dockering ships through **GitHub Releases** (the only storage for binaries), a branded **Inno Setup**
+installer on Windows, **winget**, and an opt-out **in-app updater** that reads a signed manifest
+from the latest GitHub Release. Windows is the first platform to get the full flow. The release
+flow, asset names, icon, and update manifest are cross-platform from day one, so macOS and Linux
+can reuse them later (macOS/Linux get *notify-only* updates now).
+
+The repository is **private** until the public launch (§6). Everything that depends on anonymous
+access to release assets (winget, the updater's default source, shields.io badges, SignPath) is
+gated on it.
+
+## 1. Release flow (REL-010…015)
+
+| ID | Requirement |
+|---|---|
+| REL-010 | **Release flow (release-plz).** Trunk-based on `main`, squash merges, and conventional-commit PR titles (enforced by a PR-title check). On every push to `main`, the `release-plz.yml` workflow opens or updates **one release PR** `chore(release): vX.Y.Z`. That PR bumps `[workspace.package] version` and `Cargo.lock` and adds the generated `CHANGELOG.md` section (REL-011). The steps are: (1) the maintainer reviews the release PR, edits the changelog wording if needed, runs the [release checklist](../../plan/release-checklist.md), and merges it; (2) release-plz then creates the tag `vX.Y.Z` on the merge commit with the release-bot GitHub App token, so the tag push starts `release.yml`; (3) `release.yml` builds, signs, and uploads every asset to a **draft** GitHub Release, with notes from that `CHANGELOG.md` section; (4) the maintainer smoke-tests the draft assets and clicks *Publish*. Publishing is the only step that makes a version visible to users, the updater (UPD-001), and winget (REL-041). release-plz never creates the GitHub Release itself. **Pre-releases** (`-alpha.N`, `-beta.N`, `-rc.N`): the maintainer sets the version in the release PR (`release-plz set-version` ⚠ verify, or a manual edit) before merging. They become GitHub *pre-releases* and are never "latest". **Hotfixes:** fix on `main` and release a patch. If `main` has unreleasable work, branch `release/X.Y` from the tag and cherry-pick; release-plz also runs on `release/*`. **Manual fallback:** the maintainer can still push a `v*` tag by hand (tag-ruleset bypass); `release.yml` checks it the same way. |
+| REL-011 | **Versioning and changelog are computed from commits** by release-plz (`release-plz.toml`, git-only mode: the last version comes from `v*` tags, and nothing is published to crates.io). Only the `dockering` package is released. Its version is the workspace version, and commits in every workspace crate count towards it. Bumps follow conventional commits: breaking change → minor while `0.x` (major from `1.0`); `feat` → minor; `fix`/`perf`/other → patch. `CHANGELOG.md` keeps the Keep a Changelog shape: `feat` → *Added*, `fix` → *Fixed*, `perf`/`refactor` → *Changed*; `docs`, `test`, `chore`, `ci`, and `style` commits are left out. Manual edits made in the release PR right before merging are kept. `release.yml` fails if the tag ≠ workspace version or if `CHANGELOG.md` has no section for the version. |
+| REL-012 | **Stable asset names.** Every release uploads version-less names, so `https://github.com/pavel-purma/dockering/releases/latest/download/<name>` is a permanent download link. Windows: `Dockering-Setup-x64.exe`, `Dockering-Setup-arm64.exe`, `Dockering-x64.zip`, `Dockering-arm64.zip`. macOS: `Dockering-aarch64.dmg`, `Dockering-x86_64.dmg`. Linux: `Dockering-x86_64.AppImage`, `Dockering-aarch64.AppImage`, `Dockering-x86_64.deb`, `Dockering-aarch64.deb`, `Dockering-x86_64.tar.gz`, `Dockering-aarch64.tar.gz`. Plus `SHA256SUMS` (all assets), `dockering-update.json`, and `dockering-update.json.minisig` (UPD-002/003). |
+| REL-013 | **Supply chain.** Every asset gets a GitHub build-provenance attestation (`actions/attest-build-provenance`; check with `gh attestation verify`). Third-party actions in `release.yml` and `winget.yml` are pinned to a commit SHA. Signing jobs run in the GitHub environment `release`, which needs maintainer approval. Workflows use least-privilege `permissions`. A tag ruleset limits creating `v*` tags to the release-bot GitHub App (release-plz) and the maintainer (bypass). The App's private key is a secret in the `release-plz` environment. Its permissions are only *Contents* and *Pull requests* read/write. GitHub *immutable releases* are enabled at the public launch. |
+| REL-014 | **CI builds the installer.** On pushes to `main`, CI builds the unsigned Windows installer for x64 and arm64 and uploads it as a workflow artifact. An `installer-smoke` job on `windows-2025` does the following: silent per-user install → `dockering.exe --version` from the install dir prints the workspace version → silent uninstall → the install dir and the uninstall registry key are gone. The same runs for `/ALLUSERS`. |
+| REL-015 | **Project home page.** `README.md` starts with the app icon, name, and one-line tagline. Then come badges, a screenshot, *Download* links per OS/arch (REL-012 stable links), install instructions (winget, installer, portable zip, build from source), the feature list, a *Privacy & network* section (what the updater contacts, how to turn it off; UPD-010), and links to the spec and contributing. Badges: CI (`ci.yml`) and Release (`release.yml`) workflow status now. Latest version, downloads, license, and winget version (shields.io) are added at the public launch, because shields.io can't read private repos. Repo *About*: description, topics, and the social-preview image (1280×640). Texts in [plan §A4](../../plan/features/windows-distribution.md#a4-home-page-copy). |
+
+## 2. Windows installer (REL-020…027)
+
+| ID | Requirement |
+|---|---|
+| REL-020 | **Inno Setup 6** installer per architecture (x64, arm64), built from `packaging/windows/dockering.iss` by `cargo xtask package` (format `inno`). It replaces the WiX `.msi` (x64) and NSIS `.exe` (arm64) on Windows. cargo-packager stays for macOS and Linux. |
+| REL-021 | **Install scope.** The default is per user without admin rights (`PrivilegesRequired=lowest`), into `%LocalAppData%\Programs\Dockering`. All-users install (`/ALLUSERS`, or the wizard's scope dialog) goes into `%ProgramFiles%\Dockering`. The `AppId` GUID is fixed forever. Installing a newer version upgrades in place; re-running the same version repairs. |
+| REL-022 | **Wizard.** `WizardStyle=modern` with branded images generated from the app icon (REL-050). Minimal pages: scope (only when interactive), optional desktop shortcut (off by default), install progress, finish with *Launch Dockering* (on). No licence-acceptance page (permissive licences); the licence files are installed. The uninstaller asks whether to remove settings and logs (default: keep). Silent uninstall keeps them. |
+| REL-023 | **Shell integration.** Start Menu shortcut *Dockering* with AppUserModelID `dev.dockering.Dockering`. The app sets the same AUMID at startup, so taskbar pinning and grouping match. An *Installed apps* entry with icon, publisher, version, and help/update URLs (GitHub). Installs `LICENSE-MIT`, `LICENSE-APACHE`, and `THIRD_PARTY_LICENSES.html` (REL-002). |
+| REL-024 | **Running app.** The app holds a named mutex `dev.dockering.Dockering` for its lifetime, next to the SHL-022 single-instance pipe. The installer uses it as `AppMutex` and closes a running Dockering via the Restart Manager (`CloseApplications=force`). Interactive installs ask first. Silent installs close it. |
+| REL-025 | **Silent mode** (winget, updater, CI): `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` exits 0 without UI. Silent uninstall leaves no files in the install dir and no *Installed apps* entry. |
+| REL-026 | **Portable zip** (`Dockering-<arch>.zip`): `dockering.exe` plus licence files. It runs without installation and is detected as *portable* (UPD-006). |
+| REL-027 | **Executable resources.** `dockering.exe` embeds the app icon as icon resource **ID 1** (GPUI's Windows backend loads resource 1 as the window and taskbar icon) and a `VERSIONINFO`: `ProductName`/`FileDescription` "Dockering", `CompanyName`, `LegalCopyright`, `OriginalFilename`, and `FileVersion`/`ProductVersion` from the workspace version. |
+
+## 3. Code signing (REL-030…032)
+
+| ID | Requirement |
+|---|---|
+| REL-030 | Every Windows executable in a **stable** public release (`dockering.exe`, the setup `.exe`, and the uninstaller that Inno writes) is Authenticode-signed with SHA-256 and an RFC 3161 timestamp. Signing runs only in CI, in the `release` environment. Keys and tokens never touch the repo or logs (NFR-020). |
+| REL-031 | **Pluggable provider.** `release.yml` picks the provider from the repo variable `WINDOWS_SIGNING` = `signpath` (SignPath Foundation, the default target for the public launch), `azure` (Azure Artifact Signing; existing wiring, needs an eligible organisation), or `none`. With `none`, only pre-release tags may publish; a stable tag fails the release job. Signing has two stages: binaries before packaging, then the installer. The order of steps is in [plan §A2](../../plan/features/windows-distribution.md#a2-windows-code-signing). |
+| REL-032 | CI checks every signed file (`signtool verify /pa /all` and that the signer subject is the expected one) and fails the job on any mismatch. |
+
+## 4. winget (REL-040…042)
+
+| ID | Requirement |
+|---|---|
+| REL-040 | winget package **`PavelPurma.Dockering`** (⚠ confirm before the first submission) in `microsoft/winget-pkgs`: `InstallerType: inno`, x64 + arm64, `Scope: user` (default) and `machine`, `UpgradeBehavior: install`, `ReleaseNotesUrl` = the GitHub release, `Moniker: dockering`, `License: MIT OR Apache-2.0`. The template lives in `packaging/winget/`. |
+| REL-041 | The first version is submitted **manually** (`komac new` or `wingetcreate new`) after the first public, signed release. Every later **stable** release is submitted by `.github/workflows/winget.yml` on `release: published` (pre-releases are skipped) through `vedantmgoyal9/winget-releaser` (classic PAT secret `WINGET_TOKEN`, scope `public_repo`; a fork of `winget-pkgs` under the maintainer's account). The workflow is gated by the repo variable `WINGET_ENABLED == 'true'`. |
+| REL-042 | The self-updater (UPD-007) updates the same *Installed apps* entry that winget reads, so `winget upgrade` shows the right version after a self-update. The manifest does **not** set `RequireExplicitUpgrade`. |
+
+## 5. App icon & branding (REL-050…051)
+
+| ID | Requirement |
+|---|---|
+| REL-050 | **Icon "Stacked D".** A rounded-square plate with a violet gradient (`#8E7AEB` → `#5840B5`, matching the SHL-009 accent `#6E56CF`) and a white **D** sliced into three stacked slabs: containers and image layers. Masters in `assets/app-icon/src/`: `icon.svg` (Windows/Linux, near full-bleed), `icon-macos.svg` (Apple 824/1024 grid with margin), and `icon-small.svg` (solid D for 16–24 px). `cargo xtask icons` (Rust, `resvg`) generates PNGs 16…1024, a multi-size `icon.ico` (16/20/24/32/40/48/64/256; ≤ 24 px from `icon-small.svg`), `icon.icns`, the Inno wizard bitmaps (100/125/150/175/200 % scale), `assets/brand/logo.svg`/`.png` for the README, and `assets/brand/social-preview.png`. CI fails if the generated files are stale. Concept renders: [plan folder](../../plan/features/windows-distribution/). |
+| REL-051 | The icon is used everywhere: exe resource (REL-027), installer and uninstaller, Start Menu, *Installed apps*, window and taskbar, macOS `.app`/`.dmg`, Linux hicolor icons plus the `.desktop` file (SHL-023), README, and social preview. |
+
+## 6. Public launch gate (REL-060)
+
+| ID | Requirement |
+|---|---|
+| REL-060 | Before the repo goes public: secret scan of the full history (gitleaks), no private paths or tokens in fixtures, branch protection on `main` (squash merges, PR-title check), tag ruleset (REL-013), release-bot App permissions reviewed, `release` environment reviewers, Dependabot and secret-scanning alerts on, About/topics/social preview set (REL-015). Then set the repo variables `PUBLIC_RELEASES=true` (turns the updater on in release builds, UPD-005), `WINDOWS_SIGNING`, and `WINGET_ENABLED`, and do the first manual winget submission (REL-041). Until then, releases are unsigned **pre-releases** for testers. |
+
+## 7. In-app updates (UPD-001…012)
+
+| ID | Requirement |
+|---|---|
+| UPD-001 | **Source = GitHub Releases only.** The app fetches `https://github.com/pavel-purma/dockering/releases/latest/download/dockering-update.json` and its `.minisig`. GitHub serves *latest* = the newest published non-pre-release, so drafts and pre-releases are never offered. No REST API calls are made, so there is no rate limit. A *Preview* channel (pre-releases) MAY be added later through the Releases API. |
+| UPD-002 | **Manifest** (JSON, `schema: 1`): `version`, `pub_date`, `notes_url`, and `platforms` keyed `<os>-<arch>` (`windows-x86_64`, `windows-aarch64`, `macos-aarch64`, …) → `{ kind: inno|zip|dmg|appimage|deb|tar.gz, url, sha256, size }`. `release.yml` generates it from the built assets with `cargo xtask update-manifest`. Unknown fields are ignored; an unknown `schema` means "no update". |
+| UPD-003 | **Integrity.** The manifest must carry a valid **minisign** (Ed25519) signature from the public key compiled into the app. The private key is the secret `UPDATE_SIGNING_KEY` in the `release` environment. Any manifest without a valid signature is rejected. A downloaded file must match `size` and `sha256` before use. On Windows, when the running `dockering.exe` is Authenticode-signed, the installer must also have a valid signature whose subject matches the running exe's subject (`WinVerifyTrust`). Otherwise it is deleted and never run. |
+| UPD-004 | **Schedule.** When enabled: first check 30 s after startup, then every 24 h (± 1 h jitter) while the app runs. *Check for updates* runs one now. Only a strictly greater SemVer is offered (no downgrades; a pre-release is never offered to a stable build). Errors on automatic checks are logged and retried next cycle. Only a manual check shows them. |
+| UPD-005 | **Opt-out & build gate.** Updates are compiled only with the `dockering` Cargo feature `updater` (off by default). `release.yml` enables it when `vars.PUBLIC_RELEASES == 'true'`. Dev builds, distro builds, and private-phase releases make **no** update requests. At runtime, checks are off when Settings → Updates → *Check for updates automatically* is off (default on), `DOCKERING_DISABLE_UPDATES=1` is set, on Windows the policy value `HKLM` or `HKCU\Software\Policies\Dockering\DisableUpdates` = 1 is set (it also hides *Check now*), or in `--demo` mode. Off means zero network requests. |
+| UPD-006 | **Install kind** decides the mode. *Installed per user* (Inno, writable install dir) → download in the background, then *Restart to update*. *Installed for all users* → the same, but applying needs a UAC prompt and the label says so. *Portable zip*, macOS, and Linux → **notify only**: "Dockering X.Y.Z is available" with *Download* (opens the release page); nothing is downloaded. |
+| UPD-007 | **Apply (Windows).** *Restart to update* makes the hub start the verified installer detached, with argv `/SILENT /SUPPRESSMSGBOXES /NORESTART /SP- /UPDATE /RELAUNCH` (no shell, NFR-022). The app then saves state and quits normally. The installer waits for the app to exit (REL-024), replaces the files behind a small progress window, and relaunches Dockering (`/RELAUNCH`). A downloaded but unapplied update stays offered across restarts. It is never applied without the user's action. Zed-style staged install with a post-exit swap helper MAY come later (ADR-0006). |
+| UPD-008 | **UI.** A status-bar item at the right edge shows: *Downloading update… n%* · **Restart to update (X.Y.Z)** (accent button) · *Dockering X.Y.Z available* (notify-only) · *Checking…* and the error only during a manual check. When an update becomes ready, one notification per version appears with *Restart now* and *Release notes*. After an update, the first launch shows "Updated to X.Y.Z" with *What's new* (`notes_url`). All URLs open in the browser through GPUI `open_url`. |
+| UPD-009 | **Settings → Updates** (SET-090): *Check for updates automatically* (switch), current version, last checked time and result, *Check now* (inline result), *View release notes*. When a policy disables updates, the section says so and the controls are disabled. |
+| UPD-010 | **Network & privacy.** HTTPS only, to `github.com` and its release-asset CDN host. OS root certificates, so corporate TLS inspection works. `HTTPS_PROXY`/`NO_PROXY` are honoured. `User-Agent: Dockering/<version> (<os>; <arch>)`. No cookies, ids, or telemetry. NFR-023 is amended to allow exactly this. |
+| UPD-011 | **Threading.** Fetching, verifying, and downloading run on the hub runtime in crate `dk-update` (no GPUI). The UI uses `HubHandle::update_status() -> HubStream<UpdateStatus>`, `check_for_updates() -> HubCall<UpdateCheck>`, and `apply_update() -> HubCall<()>`. The `UpdateStore` entity owns their tasks (NFR-004) and ignores results of superseded checks (NFR-005). |
+| UPD-012 | **Files.** Downloads go to `<data-local>/updates/<version>/`. Partial or stale downloads are removed at startup. State (`last_check`, `last_result`, `last_run_version`, `notified_version`) lives in `state.json`. The *Check automatically* switch lives in `config.toml` `[updates] check`. |
+
+## UI
+
+```
+StatusBar:  ● Connected · Docker 29.8.1 · API 1.53 · linux/amd64          [⟳ Restart to update (0.3.0)]
+                                                                            ^ accent button, focusable (F6 → status bar)
+```
+
+Keyboard (KBD-076): *Check for Updates*, *Restart to Update*, and *View Release Notes* are command-palette
+entries without default chords. On macOS, *Check for Updates…* is also in the app menu (SHL-020).
+
+## Verification
+
+Planned. The test plan is in [plan §8](../../plan/features/windows-distribution.md#8-test-plan).
+
+## Known gaps (planned scope)
+
+- macOS and Linux get notify-only updates. In-app install there (Sparkle-style `.app` swap, AppImage replace) is a follow-up.
+- No *Preview* update channel yet (UPD-001 MAY).
+- No delta updates. A full installer is about 20–30 MB.

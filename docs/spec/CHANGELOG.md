@@ -2,6 +2,19 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-02 · release · **planned (revised)** the release flow uses **release-plz**. REL-010: an always-open release PR is merged, and release-plz then tags through a GitHub App token, which starts `release.yml`. REL-011: version and changelog come from conventional commits (git-only mode, only `dockering` is released, Keep a Changelog groups); this replaces `cargo xtask release prepare`. REL-013: the tag ruleset allows the release-bot App. REL-060: squash merges and a PR-title check. Spec 50 adds the `release-plz` and `pr-title` workflows. · [plan](../plan/features/windows-distribution.md)
+
+- 2026-10-02 · release/distribution · **planned** new feature spec `distribution.md`:
+  - release flow standard, including README badges and download links (REL-010…015);
+  - Inno Setup installer for Windows x64/arm64, replacing WiX/NSIS (REL-020…027);
+  - pluggable Authenticode signing, with SignPath Foundation as the target (REL-030…032);
+  - winget (REL-040…042);
+  - "Stacked D" app icon, used on all platforms (REL-050/051);
+  - public-launch gate (REL-060);
+  - opt-out GitHub Releases updater (UPD-001…012).
+
+  New prefix `UPD`; `REL` extended. Added SET-090 and KBD-076. Changed NFR-023 (updater exception) and spec 50 (CI, packaging, signing, updates). [ADR-0006](../plan/adr/0006-windows-installer-and-updates.md). · [plan](../plan/features/windows-distribution.md)
+
 - 2026-10-02 · ui/settings · **planned** SHL-025 segmented detail tabs with icons; SET-080 Settings uses the app sidebar (same nav component) with a *Back to <Page>* item; KBD-005/024 clarified. · [plan](../plan/features/ui-tabs-settings-nav.md)
 - 2026-10-02 · diagnostics · Missing optional DirectX debug tools emit one warning; graphics initialization failures still propagate as errors (NFR-050). · [spec 10 §8](10-architecture.md#8-logging--diagnostics)
 - 2026-10-02 · ui/containers · **UI polish.** Accent `#1D63ED` → violet `#6E56CF` (SHL-009), which also tints the row cursor and selection. Soft status chips with a leading dot replace the solid green/amber `Tag`s (spec 30 §4). Sidebar: custom nav items with a hover tint and an accent-tinted active page; the focus ring sits on the cursor item, not around the region (no layout shift). Lists: a click anywhere on a row opens it, or toggles a group; names are plain text, not links (CON-033, spec 30 §2). Compose groups start expanded (CON-011). The *Actions* column is pinned to the right edge of every list (CON-002).
