@@ -75,6 +75,7 @@ pub fn tab_bar(
         .id("detail-tabs")
         .key_context(ctx::DETAIL_TABS)
         .track_focus(focus)
+        .px_1()
         .rounded(cx.theme().radius)
         .map(|el| focus_ring(el, focused, cx))
         .child(
@@ -497,6 +498,11 @@ impl Render for InspectView {
                     .child(Editor::new(&self.editor).readonly(true).h_full()),
             )
     }
+}
+
+/// A chip value that keeps its intrinsic width inside a description list cell.
+pub fn chip_value(chip: impl IntoElement) -> AnyElement {
+    h_flex().child(chip).into_any_element()
 }
 
 #[cfg(test)]

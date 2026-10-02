@@ -275,10 +275,9 @@ impl VolumeDetailPage {
                 (
                     s::COL_STATUS,
                     if n > 0 {
-                        Tag::success()
-                            .small()
-                            .child(s::in_use_by(n))
-                            .into_any_element()
+                        crate::pages::resources::detail::chip_value(
+                            Tag::success().small().child(s::in_use_by(n)),
+                        )
                     } else {
                         text_value(Some(s::NOT_USED), cx)
                     },
@@ -289,7 +288,7 @@ impl VolumeDetailPage {
                 ),
                 (s::LABELS, map_value(&v.labels, cx)),
                 (s::OPTIONS, map_value(&d.options, cx)),
-                (s::STATUS, text_value(status, cx)),
+                (s::DRIVER_STATUS, text_value(status, cx)),
             ],
             cx,
         )

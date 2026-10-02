@@ -534,6 +534,7 @@ pub const VOLUME_IN_USE_BODY: &str =
 pub const MOUNTPOINT: &str = "Mountpoint";
 pub const OPTIONS: &str = "Options";
 pub const STATUS: &str = "Status";
+pub const DRIVER_STATUS: &str = "Driver status";
 pub const NAME: &str = "Name";
 pub const CONFIRM_DELETE_VOLUMES_BODY: &str = "The data in the volume is deleted permanently.";
 pub fn confirm_delete_volumes(n: usize) -> String {

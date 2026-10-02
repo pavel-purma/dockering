@@ -24,7 +24,8 @@ demo = ["dk-core/test-support"]
 dk-core.workspace = true
 dk-hub.workspace = true
 dk-terminal.workspace = true
-gpui-kit.workspace = true
+# `tree-sitter`: JSON syntax highlighting in the Inspect tabs (spec 30 §1 "Raw JSON").
+gpui-kit = { workspace = true, features = ["tree-sitter"] }
 futures.workspace = true
 bytes.workspace = true
 serde.workspace = true

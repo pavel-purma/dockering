@@ -405,10 +405,9 @@ impl ImageDetailPage {
                     (
                         s::STATUS,
                         if in_use > 0 {
-                            Tag::success()
-                                .small()
-                                .child(s::in_use_by(in_use))
-                                .into_any_element()
+                            crate::pages::resources::detail::chip_value(
+                                Tag::success().small().child(s::in_use_by(in_use)),
+                            )
                         } else {
                             text_value(Some(s::NOT_USED), cx)
                         },
@@ -426,8 +425,8 @@ impl ImageDetailPage {
             .child(kv_section(
                 Some("Config"),
                 vec![
-                    (s::ENTRYPOINT, mono_value(c.entrypoint.join(" "), cx)),
-                    (s::CMD, mono_value(c.cmd.join(" "), cx)),
+                    (s::ENTRYPOINT, text_or_dash_mono(c.entrypoint.join(" "), cx)),
+                    (s::CMD, text_or_dash_mono(c.cmd.join(" "), cx)),
                     (s::ENV, lines_value(&c.env, cx)),
                     (s::EXPOSED_PORTS, lines_value(&c.exposed_ports, cx)),
                     (s::WORKDIR, text_value(c.working_dir.clone(), cx)),
@@ -488,6 +487,10 @@ impl ImageDetailPage {
                             TableCell::new().child(
                                 div()
                                     .text_xs()
+                                    .w_full()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .truncate()
                                     .font_family(cx.theme().mono_font_family.clone())
                                     .child(l.created_by.clone()),
                             ),
@@ -674,4 +677,13 @@ pub fn label_of(t: ImageTab) -> &'static str {
 fn _unused(_: SharedString, _: bool) -> AnyElement {
     let _ = h_flex();
     bool_value(false)
+}
+
+/// Monospace value, or "—" when empty.
+fn text_or_dash_mono(v: String, cx: &App) -> AnyElement {
+    if v.is_empty() {
+        crate::pages::resources::chrome::dash(cx)
+    } else {
+        mono_value(v, cx)
+    }
 }
