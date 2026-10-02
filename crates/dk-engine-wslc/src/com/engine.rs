@@ -1875,11 +1875,10 @@ impl TerminalSession for WslcComTerminal {
     }
 
     async fn close(&self) -> EngineResult<()> {
-        // Interrupt a stuck write right here on the calling thread (non-blocking Win32 calls,
-        // no COM): the write wakes on `write_cancel`, and `CancelIoEx` also aborts a write
-        // blocked synchronously and the reader's pending read.
+        // Interrupt a stuck write right here on the calling thread (`SetEvent`, no COM): the
+        // pending overlapped write wakes on `write_cancel`, cancels its own I/O and fails.
+        // Writes run on `io`, so nothing below queues behind them.
         self.write_cancel.fire();
-        win32::cancel_io(&self.shared.tty);
         let sh = self.shared.clone();
         let _ = self
             .ctl
@@ -1890,6 +1889,9 @@ impl TerminalSession for WslcComTerminal {
                 Ok(())
             })
             .await;
+        // Then abort all remaining I/O (the reader's pending read, a write blocked on a
+        // non-overlapped handle) and stop the reader, which collects the exit state.
+        win32::cancel_io(&self.shared.tty);
         self.cancel.fire();
         Ok(())
     }
