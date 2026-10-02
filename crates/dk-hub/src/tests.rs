@@ -1421,3 +1421,66 @@ async fn save_file_launch_and_diagnostics() {
     assert!(!d.contains("/fake/a.sock"), "endpoint paths stay out: {d}");
     hub.shutdown();
 }
+
+// ───────────────────────────── review fixes ─────────────────────────────
+
+/// Enabled-flag edit of the stored engine config, through the public API.
+async fn set_enabled(hub: &HubHandle, id: &str, enabled: bool) {
+    let mut cfg = hub
+        .engines()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.config.id.as_str() == id)
+        .unwrap()
+        .config;
+    cfg.enabled = enabled;
+    hub.update_engine(cfg).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_020_call_cancelled_when_engine_disabled_or_deactivated() {
+    let f = TestFactory::new();
+    let a = FakeEngine::new("a");
+    f.add(a.clone(), 20);
+    f.add(FakeEngine::new("b"), 30);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    // Every engine op now hangs (real helper-thread sleep; virtual time never reaches it).
+    a.set_latency(Duration::from_secs(3600));
+
+    // Disabling the engine drops its connection: the in-flight call resolves promptly.
+    let call = hub.call(&id, |e| async move {
+        e.list_containers(Default::default()).await
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    set_enabled(&hub, "a", false).await;
+    let r = tokio::time::timeout(Duration::from_millis(100), call)
+        .await
+        .expect("call must resolve once the connection is dropped");
+    match r {
+        Err(EngineError::Unreachable { reason, .. }) => assert!(reason.contains("disconnected")),
+        other => panic!("expected Unreachable, got {other:?}"),
+    }
+
+    // Re-enable, then switch the active engine away while a call is in flight.
+    a.set_latency(Duration::ZERO);
+    set_enabled(&hub, "a", true).await;
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    a.set_latency(Duration::from_secs(3600));
+    let call = hub.call(&id, |e| async move { e.ping().await });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    hub.set_active(&EngineId::new("b")).await.unwrap();
+    let r = tokio::time::timeout(Duration::from_millis(100), call)
+        .await
+        .expect("call must resolve once the engine is deactivated");
+    assert!(matches!(r, Err(EngineError::Unreachable { .. })), "{r:?}");
+    hub.shutdown();
+}

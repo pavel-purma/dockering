@@ -406,15 +406,20 @@ where
     };
     let (mut tx, call) = HubCall::channel();
     let span = tracing::debug_span!("engine.call", engine = %engine);
+    let id = engine.clone();
     h.inner.handle.spawn(
         async move {
             let started = Instant::now();
+            let conn_token = conn.token;
             let engine = conn.engine;
             let fut = guarded(async move { f(engine).await });
             let res = tokio::select! {
                 r = fut => r,
                 // The caller dropped the HubCall: cancel the engine future.
                 _ = tx.cancellation() => return,
+                // The connection was dropped (engine switch, disable, ping failure, shutdown):
+                // the engine future is cancelled and the caller sees `Unreachable`.
+                _ = conn_token.cancelled() => Err(disconnected(&id)),
             };
             tracing::debug!(
                 elapsed_ms = started.elapsed().as_millis() as u64,
