@@ -357,6 +357,9 @@ impl AppShell {
         cx.set_global(ShellState {
             engine_state: self.active_status(cx).map(|s| s.state),
         });
+        // TRM-008: terminal sessions don't survive an engine switch.
+        let keep = self.store.as_ref().map(|s| s.read(cx).engine_id().clone());
+        crate::state::TerminalRegistry::close_other_engines(keep.as_ref(), cx);
         self.mount_page(window, cx);
         self.focus_page_pending.set(true);
         cx.notify();
@@ -465,6 +468,16 @@ impl AppShell {
                 }
                 None => ShellPage::None,
             },
+            // Same container on the same store: keep the page and its tab state, switch the
+            // tab in place (CDT-002/081).
+            (Route::ContainerDetail { id, tab }, ShellPage::ContainerDetail(p))
+                if p.read(cx).container_id() == id
+                    && p.read(cx).store_id() == self.store.as_ref().map(|s| s.entity_id()) =>
+            {
+                let tab = *tab;
+                p.update(cx, |p, cx| p.set_tab(tab, window, cx));
+                ShellPage::ContainerDetail(p.clone())
+            }
             (Route::ContainerDetail { id, tab }, _) => ShellPage::ContainerDetail(
                 pages::container_detail::new(id.clone(), *tab, self.store.clone(), window, cx),
             ),
@@ -1443,8 +1456,16 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_back))
             .on_action(cx.listener(Self::on_forward))
             .on_action(cx.listener(|this, _: &detail::ParentList, w, cx| {
+                // KBD-042: from a container detail, the list's cursor lands on its row.
+                let from = match this.history.current() {
+                    Route::ContainerDetail { id, .. } => Some(id.clone()),
+                    _ => None,
+                };
                 let parent = this.history.current().parent_list();
-                this.go(parent, w, cx)
+                this.go(parent, w, cx);
+                if let (Some(id), Some(page)) = (from, this.containers_page().cloned()) {
+                    page.update(cx, |p, cx| p.reveal_row(&id, w, cx));
+                }
             }))
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_theme))

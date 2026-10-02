@@ -65,6 +65,16 @@ pub mod ctx {
     pub const SWITCHER: &str = "EngineSwitcher";
     /// The ListTable quick-find field.
     pub const QUICK_FIND: &str = "QuickFind";
+    // ── container detail (wip/detail) ──
+    /// Focusable key/value panels in detail tabs (KBD-044).
+    pub const DETAIL_ROWS: &str = "DetailRows";
+    /// The log line list (KBD-051).
+    pub const LOG_LINES: &str = "LogLines";
+    /// The stats time-window selector (KBD-070).
+    pub const STATS_WINDOW: &str = "StatsWindow";
+    /// Single-letter window keys: only on the (non-input) selector, inside the detail
+    /// header scope (KBD-008 by construction).
+    pub const STATS_WINDOW_KEYS: &str = "DetailHeader && StatsWindow";
 }
 
 /// Shortcut-reference group (KBD-022).
@@ -862,6 +872,151 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
         "Remove row",
         Dialogs
     ),
+    // ── container detail (KBD-044, KBD-051, KBD-070; wip/detail) ────────────────────────
+    b!(
+        "up",
+        rows::Up,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Previous row",
+        Detail
+    ),
+    b!(
+        "down",
+        rows::Down,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Next row",
+        Detail
+    ),
+    b!(
+        "home",
+        rows::First,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "First row",
+        Detail
+    ),
+    b!(
+        "end",
+        rows::Last,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Last row",
+        Detail
+    ),
+    b!(
+        "pageup",
+        rows::PageUp,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Page up",
+        Detail
+    ),
+    b!(
+        "pagedown",
+        rows::PageDown,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Page down",
+        Detail
+    ),
+    b!(
+        "secondary-c",
+        rows::CopyValue,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Copy the focused value",
+        Detail
+    ),
+    b!(
+        "enter",
+        rows::Activate,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Follow link / reveal value",
+        Detail
+    ),
+    b!(
+        "space",
+        rows::ToggleReveal,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        "Reveal / hide a masked value",
+        Detail
+    ),
+    b!(
+        "up",
+        logs_nav::LineUp,
+        Some(LOG_LINES),
+        Os::ALL,
+        "Scroll up",
+        Logs
+    ),
+    b!(
+        "down",
+        logs_nav::LineDown,
+        Some(LOG_LINES),
+        Os::ALL,
+        "Scroll down",
+        Logs
+    ),
+    b!(
+        "pageup",
+        logs_nav::PageUp,
+        Some(LOG_LINES),
+        Os::ALL,
+        "Page up",
+        Logs
+    ),
+    b!(
+        "pagedown",
+        logs_nav::PageDown,
+        Some(LOG_LINES),
+        Os::ALL,
+        "Page down",
+        Logs
+    ),
+    b!(
+        "left",
+        stats::PrevWindow,
+        Some(STATS_WINDOW),
+        Os::ALL,
+        "Shorter stats window",
+        Detail
+    ),
+    b!(
+        "right",
+        stats::NextWindow,
+        Some(STATS_WINDOW),
+        Os::ALL,
+        "Longer stats window",
+        Detail
+    ),
+    b!(
+        "1",
+        stats::Window1m,
+        Some(STATS_WINDOW_KEYS),
+        Os::ALL,
+        "Stats window: 1 minute",
+        Detail
+    ),
+    b!(
+        "5",
+        stats::Window5m,
+        Some(STATS_WINDOW_KEYS),
+        Os::ALL,
+        "Stats window: 5 minutes",
+        Detail
+    ),
+    b!(
+        "f",
+        stats::Window15m,
+        Some(STATS_WINDOW_KEYS),
+        Os::ALL,
+        "Stats window: 15 minutes",
+        Detail
+    ),
     // ── M6: images / volumes / networks (detail header single letters, KBD-041) ──────────────
     b!("u", image::Run, D, Os::ALL, s::CMD_RUN_IMAGE, Detail),
 ];
@@ -1120,7 +1275,10 @@ mod tests {
             let single = b.keys.chars().count() == 1;
             if single {
                 assert!(
-                    matches!(b.context, Some(LIST_KEYS) | Some(DETAIL_HEADER)),
+                    matches!(
+                        b.context,
+                        Some(LIST_KEYS) | Some(DETAIL_HEADER) | Some(STATS_WINDOW_KEYS)
+                    ),
                     "KBD-008: single key {:?} bound in {:?}",
                     b.keys,
                     b.context

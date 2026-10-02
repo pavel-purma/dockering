@@ -606,3 +606,205 @@ pub const CMD_PRUNE_VOLUMES: &str = "Prune unused volumes";
 pub const CMD_PRUNE_NETWORKS: &str = "Prune unused networks";
 pub const CMD_DELETE_RESOURCE: &str = "Delete";
 pub const CMD_COPY_RESOURCE_ID: &str = "Copy id";
+// ── container detail (CDT-*, LOG-*, TRM-*, STA-*; wip/detail) ─────────────────────────────
+pub const CONTAINER_DETAIL_LOAD_FAILED: &str = "Couldn't load the container details";
+pub const DETAIL_READ_ONLY: &str = "Read-only: the container was removed.";
+pub const COPY_VALUE: &str = "Copy value";
+pub const REVEAL_VALUE: &str = "Reveal value";
+pub const HIDE_VALUE: &str = "Hide value";
+pub const MASKED_VALUE: &str = "••••••••";
+pub const NONE_VALUE: &str = "—";
+pub const UNLIMITED: &str = "Unlimited";
+pub const OPEN_IMAGE: &str = "Open image";
+// Overview (CDT-010)
+pub const SEC_GENERAL: &str = "General";
+pub const SEC_COMMAND: &str = "Command";
+pub const SEC_COMPOSE: &str = "Compose";
+pub const SEC_ENVIRONMENT: &str = "Environment";
+pub const SEC_LABELS: &str = "Labels";
+pub const SEC_RESOURCES: &str = "Resources";
+pub const SEC_HEALTH: &str = "Health";
+pub const F_ID: &str = "ID";
+pub const F_NAME: &str = "Name";
+pub const F_IMAGE: &str = "Image";
+pub const F_IMAGE_ID: &str = "Image ID";
+pub const F_CREATED: &str = "Created";
+pub const F_STARTED: &str = "Started";
+pub const F_FINISHED: &str = "Finished";
+pub const F_RESTART_COUNT: &str = "Restart count";
+pub const F_RESTART_POLICY: &str = "Restart policy";
+pub const F_PLATFORM: &str = "Platform";
+pub const F_PID: &str = "PID";
+pub const F_EXIT_CODE: &str = "Exit code";
+pub const F_ENTRYPOINT: &str = "Entrypoint";
+pub const F_CMD: &str = "Command";
+pub const F_WORKDIR: &str = "Working dir";
+pub const F_USER: &str = "User";
+pub const F_TTY: &str = "TTY";
+pub const F_PROJECT: &str = "Project";
+pub const F_SERVICE: &str = "Service";
+pub const F_NUMBER: &str = "Number";
+pub const F_CONFIG_FILES: &str = "Config files";
+pub const F_CPU_LIMIT: &str = "CPU limit";
+pub const F_MEMORY_LIMIT: &str = "Memory limit";
+pub const F_PIDS_LIMIT: &str = "PIDs limit";
+pub const NO_ENV: &str = "No environment variables";
+pub const NO_LABELS: &str = "No labels";
+pub const F_KEY: &str = "Key";
+pub const F_VALUE: &str = "Value";
+pub const NO_HEALTH: &str = "No health check results yet";
+pub fn cpus(n: f64) -> String {
+    if (n - 1.0).abs() < f64::EPSILON {
+        "1 CPU".to_owned()
+    } else {
+        format!("{n} CPUs")
+    }
+}
+pub fn health_result(code: i64, when: &str) -> String {
+    format!("exit {code} · {when}")
+}
+// Mounts (CDT-020)
+pub const COL_TYPE: &str = "Type";
+pub const COL_SOURCE: &str = "Source";
+pub const COL_RW: &str = "RW";
+pub const NO_MOUNTS: &str = "This container has no mounts";
+// Network (CDT-030)
+pub const SEC_PORTS: &str = "Port bindings";
+pub const SEC_NETWORKS: &str = "Networks";
+pub const SEC_NET_SETTINGS: &str = "Settings";
+pub const COL_CONTAINER_PORT: &str = "Container port";
+pub const COL_HOST_IP: &str = "Host IP";
+pub const COL_HOST_PORT: &str = "Host port";
+pub const COL_NETWORK: &str = "Network";
+pub const COL_ALIASES: &str = "Aliases";
+pub const F_HOSTNAME: &str = "Hostname";
+pub const F_DNS: &str = "DNS";
+pub const F_NETWORK_MODE: &str = "Network mode";
+pub const NO_PORTS: &str = "No published ports";
+pub const NO_CONTAINER_NETWORKS: &str = "Not attached to any network";
+// Inspect (CDT-040)
+pub const INSPECT_UNMASKED: &str =
+    "Environment values are not masked here. Be careful when sharing this output.";
+pub const COPY_JSON: &str = "Copy JSON";
+pub const SEARCH_JSON: &str = "Search";
+pub const FORMATTING: &str = "Formatting…";
+// Logs (LOG-*)
+pub const LOGS_SEARCH: &str = "Search logs…";
+pub const LOGS_TIMESTAMPS: &str = "Timestamps";
+pub const LOGS_WRAP: &str = "Wrap lines";
+pub const LOGS_CLEAR: &str = "Clear view";
+pub const LOGS_COPY_ALL: &str = "Copy all";
+pub const LOGS_SAVE: &str = "Save to file…";
+pub const LOGS_PREV: &str = "Previous match";
+pub const LOGS_NEXT: &str = "Next match";
+pub const LOGS_FOLLOW: &str = "Jump to bottom and follow";
+pub const LOGS_EMPTY: &str = "No log output yet";
+pub const LOGS_FAILED: &str = "The log stream failed";
+pub const LOGS_SAVED: &str = "Logs saved";
+pub const LOGS_SAVE_FAILED: &str = "Couldn't save the logs";
+pub fn logs_dropped(n: u64) -> String {
+    format!("{n} earlier lines dropped (buffer limit)")
+}
+pub fn logs_jump(n: usize) -> String {
+    format!("Jump to bottom ({n} new)")
+}
+pub fn logs_matches(current: usize, total: usize) -> String {
+    if total == 0 {
+        "No matches".to_owned()
+    } else {
+        format!("{current} of {total}")
+    }
+}
+pub fn container_exited(code: Option<i64>) -> String {
+    match code {
+        Some(code) => format!("Container exited (code {code})"),
+        None => "Container exited".to_owned(),
+    }
+}
+pub fn logs_file_name(name: &str) -> String {
+    format!("{name}.log")
+}
+// Terminal (TRM-*)
+pub const TERMINAL_START_HINT: &str = "Start the container to open a terminal";
+pub const TERMINAL_UNSUPPORTED: &str = "This engine doesn't support interactive terminals";
+pub const TERMINAL_NEW: &str = "New terminal";
+pub const TERMINAL_CLOSE: &str = "Close session";
+pub const TERMINAL_RECONNECT: &str = "Reconnect";
+pub const TERMINAL_SHELL: &str = "Shell";
+pub const TERMINAL_USER: &str = "User (optional)";
+pub const TERMINAL_CUSTOM_CMD: &str = "Command, e.g. /bin/sh -l";
+pub const TERMINAL_CONNECTING: &str = "Connecting…";
+pub const TERMINAL_EXTERNAL: &str = "Open in external terminal";
+pub const TERMINAL_EXTERNAL_FAILED: &str = "Couldn't open the external terminal";
+pub const TERMINAL_OPEN_FAILED: &str = "Couldn't open a terminal";
+pub const SHELL_AUTO: &str = "Auto";
+pub const SHELL_CUSTOM: &str = "Custom";
+pub fn terminal_leave_hint(keys: &str) -> String {
+    format!("The terminal captures all keys. Press {keys} to leave it.")
+}
+pub fn terminal_session(n: usize, shell: &str) -> String {
+    format!("{n}: {shell}")
+}
+// Stats (STA-*)
+pub const STATS_CPU: &str = "CPU";
+pub const STATS_MEMORY: &str = "Memory";
+pub const STATS_NETWORK: &str = "Network I/O";
+pub const STATS_DISK: &str = "Disk I/O";
+pub const STATS_WINDOW: &str = "Window";
+pub const STATS_PROCESSES: &str = "Processes";
+pub const STATS_WAITING: &str = "Waiting for samples…";
+pub const STATS_DISK_USAGE: &str = "Disk usage";
+pub const STATS_LOAD_DISK: &str = "Load disk usage";
+pub const STATS_RX: &str = "Received";
+pub const STATS_TX: &str = "Sent";
+pub const STATS_READ: &str = "Read";
+pub const STATS_WRITE: &str = "Write";
+pub const STATS_FAILED: &str = "Couldn't read stats";
+pub const NOT_RUNNING: &str = "Container not running";
+pub fn stats_mem(used: &str, limit: Option<&str>) -> String {
+    match limit {
+        Some(l) => format!("{used} / {l}"),
+        None => used.to_owned(),
+    }
+}
+pub fn stats_net(rx: &str, tx: &str) -> String {
+    format!("↓ {rx}  ↑ {tx}")
+}
+pub fn stats_io(r: &str, w: &str) -> String {
+    format!("R {r}  W {w}")
+}
+pub fn stats_pids(n: u64) -> String {
+    format!("PIDs: {n}")
+}
+pub fn stats_totals(rx: &str, tx: &str, r: &str, w: &str) -> String {
+    format!("Totals: ↓ {rx} ↑ {tx} · R {r} W {w}")
+}
+pub fn stats_gap(n: u64) -> String {
+    format!("{n} samples skipped")
+}
+pub fn stats_disk(rw: &str, root: &str) -> String {
+    format!("Writable layer: {rw} · Root FS: {root}")
+}
+// Command labels (palette)
+pub const CMD_DETAIL_TAB_OVERVIEW: &str = "Go to tab: Overview";
+pub const CMD_DETAIL_TAB_LOGS: &str = "Go to tab: Logs";
+pub const CMD_DETAIL_TAB_TERMINAL: &str = "Go to tab: Terminal";
+pub const CMD_DETAIL_TAB_STATS: &str = "Go to tab: Stats";
+pub const CMD_DETAIL_TAB_MOUNTS: &str = "Go to tab: Mounts";
+pub const CMD_DETAIL_TAB_NETWORK: &str = "Go to tab: Network";
+pub const CMD_DETAIL_TAB_INSPECT: &str = "Go to tab: Inspect";
+pub const CMD_TERM_RECONNECT: &str = "Reconnect terminal session";
+pub const CMD_TERM_EXTERNAL: &str = "Open in external terminal";
+pub const CMD_STATS_DISK: &str = "Load container disk usage";
+pub const CMD_STATS_1M: &str = "Stats window: 1 minute";
+pub const CMD_STATS_5M: &str = "Stats window: 5 minutes";
+pub const CMD_STATS_15M: &str = "Stats window: 15 minutes";
+pub const CMD_LOGS_FIND_NEXT: &str = "Logs: next match";
+pub const CMD_LOGS_FIND_PREV: &str = "Logs: previous match";
+pub const CMD_LOGS_TIMESTAMPS: &str = "Logs: toggle timestamps";
+pub const CMD_LOGS_WRAP: &str = "Logs: toggle wrap";
+pub const CMD_LOGS_CLEAR: &str = "Logs: clear view";
+pub const CMD_LOGS_SAVE: &str = "Logs: save to file…";
+pub const CMD_LOGS_COPY: &str = "Logs: copy all";
+pub const CMD_TERM_NEW: &str = "New terminal session";
+pub const CMD_TERM_CLOSE: &str = "Close terminal session";
