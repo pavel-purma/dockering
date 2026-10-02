@@ -110,7 +110,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - name: cargo nextest (real dockerd)
-        run: cargo nextest run -p dk-engine-docker --features it --locked
+        # --no-tests=warn: integration tests land with the engine work (M2); drop it then.
+        run: cargo nextest run -p dk-engine-docker --features it --locked --no-tests=warn
 
   build:
     name: build (${{ matrix.target }})
