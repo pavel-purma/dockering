@@ -1,0 +1,66 @@
+# Weekly WSLC ABI drift check (spec 20 §5.7, spec 50 "CI"; ADR-0003).
+# `cargo xtask wslc-abi-check latest` diffs the latest microsoft/WSL release's wslc.idl against
+# the newest vendored copy in crates/dk-engine-wslc/idl/. A non-zero exit (ABI changed, or the
+# check couldn't run) opens a tracking issue unless one is already open.
+name: WSLC ABI watch
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: wslc-abi-watch
+  cancel-in-progress: true
+
+env:
+  RUST_TOOLCHAIN: "1.98"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wslc-abi-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # xtask only; keep this cache apart from the full-workspace caches.
+          shared-key: xtask
+      - name: cargo xtask wslc-abi-check latest
+        id: check
+        env:
+          # Authenticated GitHub API requests for release/tag lookups (higher rate limit).
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          cargo xtask wslc-abi-check latest 2>&1 | tee "$RUNNER_TEMP/abi-report.txt"
+      - name: Open issue on ABI drift
+        if: failure() && steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="WSLC ABI drift detected in the latest WSL release"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          {
+            echo "The weekly \`cargo xtask wslc-abi-check latest\` failed (spec 20 §5.7)."
+            echo
+            echo "Until a matching ABI module ships, users on that WSL release fall back to the CLI transport (ADR-0003)."
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo '```text'
+            tail -c 60000 "$RUNNER_TEMP/abi-report.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          fi

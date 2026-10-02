@@ -18,6 +18,21 @@
 
 **Self-hosted runner.** GitHub-hosted Windows runners can't run WSL2 distros or WSLC, so the WSL/WSLC integration tests (M7/M8) run on a self-hosted Windows 11 runner (label `wsl`) with WSL ≥ 3.0, an Ubuntu distro with Docker Engine, and WSLC enabled.
 
+**Release tooling** (CI installs these; locally you only need them for the matching task):
+
+| Tool | Needed for | Install |
+|---|---|---|
+| `cargo-nextest` | `cargo nextest run` | `cargo install cargo-nextest --locked` |
+| `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
+| `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
+| `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` | `cargo install cargo-packager --locked --version 0.11.8` |
+
+cargo-packager downloads WiX 3 / NSIS (Windows) and linuxdeploy (AppImage) on first use. WiX 3 can't target ARM64, so `aarch64-pc-windows-msvc` ships an NSIS `.exe` instead of an `.msi`.
+
+**Release signing secrets** live only in the GitHub environment `release`. Steps are skipped when the secrets are absent, which gives an unsigned build.
+Windows: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
+macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
+
 ## Cargo profiles
 
 ```toml

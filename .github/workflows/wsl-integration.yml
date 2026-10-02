@@ -1,0 +1,34 @@
+# WSL distro + WSLC integration tests (M7/M8; spec 50 "Self-hosted runner").
+# GitHub-hosted Windows runners can't run WSL2 distros or WSLC. This runs on a self-hosted
+# Windows 11 runner labelled `wsl` that has WSL >= 3.0, an Ubuntu distro with Docker Engine,
+# WSLC enabled, and VS Build Tools (scripts/bootstrap.ps1).
+# Manual trigger only: never run untrusted PR code on a self-hosted runner.
+name: WSL integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wsl-integration
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  wsl-integration:
+    runs-on: [self-hosted, windows, wsl]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prerequisites
+        shell: pwsh
+        run: |
+          pwsh -NoProfile scripts/bootstrap.ps1
+          wsl.exe --version
+      - name: cargo test (ignored WSL/WSLC tests)
+        shell: pwsh
+        run: pwsh -NoProfile scripts/dev.ps1 test --locked -p dk-wsl -p dk-engine-wslc -- --ignored

@@ -2,3 +2,5 @@
 crates/*/tests/fixtures/** -text
 crates/*/fixtures/** -text
 *.snap -text
+# Shell scripts must keep LF so bash works on Windows/WSL checkouts.
+*.sh text eol=lf

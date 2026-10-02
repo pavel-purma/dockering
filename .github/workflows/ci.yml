@@ -1,0 +1,166 @@
+# CI per docs/spec/50-build-and-release.md (NFR-001, NFR-040, REL-002, REL-003).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep in sync with rust-toolchain.toml (checked in the lint job).
+  RUST_TOOLCHAIN: "1.98"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: short
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain pin matches rust-toolchain.toml
+        run: grep -Eq "^channel = \"${RUST_TOOLCHAIN}\"" rust-toolchain.toml
+      - name: actionlint (workflows)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+      - name: Linux prerequisites (GPUI Kit)
+        run: bash scripts/bootstrap.sh
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: NFR-001 blocking-call check
+        run: cargo xtask check-blocking
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo deny (licences, bans, sources, advisories)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: ${{ env.RUST_TOOLCHAIN }}
+          command: check
+          command-arguments: advisories bans licenses sources
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2 # match the version that generated the committed file
+      - name: THIRD_PARTY_LICENSES.html is up to date (REL-002)
+        run: |
+          cargo about generate --locked about.hbs -o "$RUNNER_TEMP/THIRD_PARTY_LICENSES.html"
+          if ! diff -q --strip-trailing-cr THIRD_PARTY_LICENSES.html "$RUNNER_TEMP/THIRD_PARTY_LICENSES.html"; then
+            echo "::error file=THIRD_PARTY_LICENSES.html::Stale third-party notices. Run: cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html"
+            exit 1
+          fi
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux prerequisites (GPUI Kit)
+        if: runner.os == 'Linux'
+        run: bash scripts/bootstrap.sh
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+      # The lint job lints Linux. This step covers cfg(windows)/cfg(macos) code (dk-wsl, WSLC COM).
+      - name: cargo clippy (platform cfg)
+        if: runner.os != 'Linux'
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo nextest
+        run: cargo nextest run --workspace --locked
+      - name: doc tests
+        if: runner.os == 'Linux'
+        run: cargo test --workspace --doc --locked
+
+  integration-docker:
+    name: integration-docker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Docker is available
+        run: docker version
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+      - name: cargo nextest (real dockerd)
+        # --no-tests=warn: integration tests land with the engine work (M2); drop it then.
+        run: cargo nextest run -p dk-engine-docker --features it --locked --no-tests=warn
+
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux prerequisites (GPUI Kit)
+        if: runner.os == 'Linux'
+        run: bash scripts/bootstrap.sh
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo build --release
+        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
+      # Packaging smoke test on main (PRs only build, to keep them fast).
+      - name: Install cargo-packager
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: cargo packager --version 2>/dev/null || cargo install cargo-packager --locked --version 0.11.8
+      - name: cargo xtask package
+        if: github.event_name != 'pull_request'
+        run: cargo xtask package --target ${{ matrix.target }}
+      - name: Collect binary
+        shell: bash
+        run: |
+          mkdir -p upload
+          exe=dockering; [[ "${{ matrix.target }}" == *windows* ]] && exe=dockering.exe
+          cp "target/${{ matrix.target }}/release/$exe" upload/
+          if [[ -d "target/dist/${{ matrix.target }}" ]]; then
+            find "target/dist/${{ matrix.target }}" -maxdepth 1 -type f -exec cp {} upload/ \;
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dockering-${{ matrix.target }}
+          path: upload/
+          retention-days: 14
+          if-no-files-found: error

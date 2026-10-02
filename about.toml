@@ -1,0 +1,40 @@
+# REL-002: cargo-about input for the notice bundled in every package.
+accepted = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "MPL-2.0",
+  "CC0-1.0",
+]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+]
+# Build deps can generate code that ends up in the binary, so keep them. Dev-only deps
+# (proptest, insta, test-support) never ship.
+ignore-build-dependencies = false
+ignore-dev-dependencies = true
+ignore-transitive-dependencies = false
+# Our own workspace crates are publish = false and covered by LICENSE-MIT/LICENSE-APACHE.
+private = { ignore = true }
+
+# Per-crate acceptances mirror the `exceptions` in deny.toml (REL-003). Keep both in sync.
+# 0BSD (public-domain-equivalent), transitive via gpui-component (gpui-kit 0.7).
+[enum-iterator]
+accepted = ["0BSD"]
+
+[enum-iterator-derive]
+accepted = ["0BSD"]
+
+# Permissive BSD-style bzip2 licence, transitive via gpui's http client (async-compression).
+[libbz2-rs-sys]
+accepted = ["bzip2-1.0.6"]

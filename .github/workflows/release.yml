@@ -1,0 +1,192 @@
+# Release on tag v* (spec 50 "CI" + "Packaging"; REL-002).
+# Signing secrets live only in the GitHub environment `release`. Every signing step is skipped
+# when its secrets are absent, which produces an unsigned build (fine for nightly/dev, not for
+# public releases).
+#
+# Windows (Azure Trusted Signing, via Azure/artifact-signing-action):
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+#   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE
+# macOS (Developer ID codesign by cargo-packager + notarytool):
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_API_KEY (key id), APPLE_API_ISSUER, APPLE_API_KEY_P8 (contents of AuthKey_<id>.p8)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: "1.98"
+  PACKAGER_VERSION: "0.11.8"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  package:
+    name: package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+    env:
+      TARGET: ${{ matrix.target }}
+      # Mapped here so `if: env.X != ''` can gate steps. Values stay masked in logs.
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches workspace version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          [[ "${GITHUB_REF_NAME#v}" == "$version" ]] || { echo "::error::tag $GITHUB_REF_NAME != workspace version $version"; exit 1; }
+      - name: Linux prerequisites (GPUI Kit)
+        if: runner.os == 'Linux'
+        run: bash scripts/bootstrap.sh
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - name: Install cargo-packager
+        shell: bash
+        run: cargo install cargo-packager --locked --version "$PACKAGER_VERSION"
+
+      - name: cargo build --release
+        run: cargo build --release --locked -p dockering --target ${{ matrix.target }}
+
+      # --- Windows: sign the exe before it goes into the installer and zip ---
+      - name: Sign dockering.exe (Azure Trusted Signing)
+        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
+        uses: Azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files: ${{ github.workspace }}\target\${{ matrix.target }}\release\dockering.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # --- macOS: cargo-packager signs and notarises the .app when the identity is set ---
+      - name: Prepare macOS signing
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          echo "DOCKERING_MACOS_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          if [[ -n "$APPLE_API_KEY" ]]; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+            printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
+            chmod 600 "$key_path"
+            echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          fi
+
+      - name: cargo xtask package
+        env:
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: cargo xtask package --target ${{ matrix.target }}
+
+      - name: Sign Windows installers (Azure Trusted Signing)
+        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
+        uses: Azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\dist\${{ matrix.target }}
+          files-folder-filter: msi,exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign, notarise and staple the DMG
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != '' && env.APPLE_API_KEY != ''
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for dmg in target/dist/"$TARGET"/*.dmg; do
+            codesign --force --timestamp --sign "$DOCKERING_MACOS_SIGNING_IDENTITY" "$dmg"
+            xcrun notarytool submit "$dmg" --wait \
+              --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER"
+            xcrun stapler staple "$dmg"
+          done
+
+      - name: Remove signing material
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd "target/dist/$TARGET"
+          for f in *; do
+            [[ -f "$f" && "$f" != *.sha256 ]] || continue
+            if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi > "$f.sha256"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            target/dist/${{ matrix.target }}/*.*
+            !target/dist/${{ matrix.target }}/.cargo-packager/**
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          [[ -s "$RUNNER_TEMP/notes.md" ]] || echo "See CHANGELOG.md." > "$RUNNER_TEMP/notes.md"
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          body_path: ${{ runner.temp }}/notes.md
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
