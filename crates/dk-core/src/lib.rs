@@ -25,6 +25,6 @@ pub use engine::{
     DiscoveredEngine, Engine, EngineFactory, EngineStream, ProbeResult, TerminalSession,
     error_stream, unsupported_stream,
 };
-pub use error::{EngineError, EngineResult};
+pub use error::{EVENTS_LOST_MESSAGE, EngineError, EngineResult};
 pub use model::*;
 pub use secret::SecretString;

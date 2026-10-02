@@ -18,7 +18,9 @@ use crate::bridge::HubEvent;
 use crate::config::EngineSettings;
 
 /// A live connection of the active engine. `token` is cancelled when the connection is dropped
-/// (engine switch, ping failure, disable), which ends every call/stream bound to it.
+/// (engine switch, ping failure, disable, hub shutdown). Every `call`, `subscribe`, shared
+/// event upstream and terminal actor bound to it races this token and ends with
+/// `Unreachable("engine '<id>' disconnected")` when it fires.
 #[derive(Clone)]
 pub(crate) struct Conn {
     pub engine: Arc<dyn Engine>,

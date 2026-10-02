@@ -485,7 +485,8 @@ pub struct MountRequest {
     pub read_only: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+/// `Debug` prints env keys only (NFR-020).
+#[derive(Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RunSpec {
     pub image: String,
     pub name: Option<String>,
@@ -495,6 +496,65 @@ pub struct RunSpec {
     pub auto_remove: bool,
     pub cmd: Option<Vec<String>>,
     pub labels: BTreeMap<String, String>,
+}
+
+/// Debug view of environment variable keys; values are never printed (NFR-020).
+struct EnvKeys<'a, I>(&'a I);
+
+impl<'a, I, K> fmt::Debug for EnvKeys<'a, I>
+where
+    &'a I: IntoIterator<Item = K>,
+    K: EnvKey,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.0.into_iter().map(|e| e.env_key().to_owned()))
+            .finish()
+    }
+}
+
+/// The key of one environment entry, in any of the DTO shapes.
+trait EnvKey {
+    fn env_key(&self) -> &str;
+}
+
+impl EnvKey for &(String, String) {
+    fn env_key(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `KEY=VALUE` (Docker's exec/create form); a bare `KEY` is a key too.
+impl EnvKey for &String {
+    fn env_key(&self) -> &str {
+        self.split_once('=').map_or(self.as_str(), |(k, _)| k)
+    }
+}
+
+impl fmt::Debug for RunSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Exhaustive destructuring: a new field must decide how it is printed.
+        let Self {
+            image,
+            name,
+            ports,
+            env,
+            mounts,
+            auto_remove,
+            cmd,
+            labels,
+        } = self;
+        f.debug_struct("RunSpec")
+            .field("image", image)
+            .field("name", name)
+            .field("ports", ports)
+            .field("env_keys", &EnvKeys(env))
+            .field("mounts", mounts)
+            .field("auto_remove", auto_remove)
+            .field("cmd", cmd)
+            .field("labels", labels)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -657,10 +717,17 @@ pub struct ContainerSummary {
     pub compose: Option<ComposeInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `Debug` prints `KEY=***`, never the value (NFR-020).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvVar {
     pub key: String,
     pub value: String,
+}
+
+impl fmt::Debug for EnvVar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}=***", self.key)
+    }
 }
 
 impl EnvVar {
@@ -725,7 +792,8 @@ pub struct HealthCheckResult {
     pub output: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `Debug` masks env values and omits the raw inspect JSON (it contains the env, NFR-020).
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContainerDetails {
     pub summary: ContainerSummary,
     #[serde(with = "time::serde::rfc3339::option", default)]
@@ -750,6 +818,56 @@ pub struct ContainerDetails {
     pub health_log: Vec<HealthCheckResult>,
     /// Full inspect JSON for the Inspect tab (unmasked, CDT-040).
     pub raw: serde_json::Value,
+}
+
+impl fmt::Debug for ContainerDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Exhaustive destructuring: a new field must decide how it is printed.
+        let Self {
+            summary,
+            started_at,
+            finished_at,
+            restart_count,
+            restart_policy,
+            pid,
+            platform,
+            entrypoint,
+            cmd,
+            working_dir,
+            user,
+            hostname,
+            tty,
+            env,
+            mounts,
+            network_settings,
+            port_bindings,
+            resources,
+            health_log,
+            raw: _,
+        } = self;
+        f.debug_struct("ContainerDetails")
+            .field("summary", summary)
+            .field("started_at", started_at)
+            .field("finished_at", finished_at)
+            .field("restart_count", restart_count)
+            .field("restart_policy", restart_policy)
+            .field("pid", pid)
+            .field("platform", platform)
+            .field("entrypoint", entrypoint)
+            .field("cmd", cmd)
+            .field("working_dir", working_dir)
+            .field("user", user)
+            .field("hostname", hostname)
+            .field("tty", tty)
+            .field("env", env)
+            .field("mounts", mounts)
+            .field("network_settings", network_settings)
+            .field("port_bindings", port_bindings)
+            .field("resources", resources)
+            .field("health_log", health_log)
+            .field("raw", &format_args!("<redacted json>"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -851,15 +969,41 @@ pub struct StatsSample {
     pub pids: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `Debug` prints env keys only (NFR-020).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecRequest {
     pub cmd: Vec<String>,
     pub tty: bool,
+    /// `KEY=VALUE` entries.
     pub env: Vec<String>,
     pub user: Option<String>,
     pub working_dir: Option<String>,
     pub cols: u16,
     pub rows: u16,
+}
+
+impl fmt::Debug for ExecRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Exhaustive destructuring: a new field must decide how it is printed.
+        let Self {
+            cmd,
+            tty,
+            env,
+            user,
+            working_dir,
+            cols,
+            rows,
+        } = self;
+        f.debug_struct("ExecRequest")
+            .field("cmd", cmd)
+            .field("tty", tty)
+            .field("env_keys", &EnvKeys(env))
+            .field("user", user)
+            .field("working_dir", working_dir)
+            .field("cols", cols)
+            .field("rows", rows)
+            .finish()
+    }
 }
 
 impl ExecRequest {
@@ -1075,4 +1219,90 @@ pub struct EngineEvent {
     pub action: String,
     pub id: String,
     pub attributes: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "hunter2-s3cr3t";
+
+    fn assert_no_secret(dbg: &str) {
+        assert!(!dbg.contains(SECRET), "secret leaked: {dbg}");
+        assert!(!dbg.contains("hunter2"), "secret leaked: {dbg}");
+    }
+
+    #[test]
+    fn nfr_020_env_var_debug_masks_value() {
+        let v = EnvVar {
+            key: "DB_PASSWORD".into(),
+            value: SECRET.into(),
+        };
+        assert_eq!(format!("{v:?}"), "DB_PASSWORD=***");
+        assert_no_secret(&format!("{v:#?}"));
+    }
+
+    #[test]
+    fn nfr_020_run_spec_debug_prints_env_keys_only() {
+        let spec = RunSpec {
+            image: "postgres:16".into(),
+            env: vec![
+                ("POSTGRES_PASSWORD".into(), SECRET.into()),
+                ("PGDATA".into(), "/data".into()),
+            ],
+            ..Default::default()
+        };
+        for dbg in [format!("{spec:?}"), format!("{spec:#?}")] {
+            assert_no_secret(&dbg);
+            assert!(
+                dbg.contains("POSTGRES_PASSWORD") && dbg.contains("PGDATA"),
+                "{dbg}"
+            );
+            assert!(dbg.contains("postgres:16"), "{dbg}");
+            assert!(
+                !dbg.contains("/data"),
+                "env values are never printed: {dbg}"
+            );
+        }
+    }
+
+    #[test]
+    fn nfr_020_exec_request_debug_prints_env_keys_only() {
+        let req = ExecRequest {
+            env: vec![
+                format!("API_TOKEN={SECRET}"),
+                "TERM=xterm-256color".into(),
+                "BARE".into(),
+                format!("WEIRD={SECRET}=tail"),
+            ],
+            ..Default::default()
+        };
+        for dbg in [format!("{req:?}"), format!("{req:#?}")] {
+            assert_no_secret(&dbg);
+            for key in ["API_TOKEN", "TERM", "BARE", "WEIRD"] {
+                assert!(dbg.contains(key), "{key} missing: {dbg}");
+            }
+            assert!(!dbg.contains("xterm-256color"), "{dbg}");
+            assert!(!dbg.contains('='), "{dbg}");
+        }
+    }
+
+    #[test]
+    fn nfr_020_container_details_debug_masks_env_and_raw() {
+        let mut d = crate::fake::fixtures::details_for(crate::fake::fixtures::container(
+            "db",
+            ContainerState::Running,
+        ));
+        d.env.push(EnvVar {
+            key: "SESSION_SECRET".into(),
+            value: SECRET.into(),
+        });
+        d.raw = serde_json::json!({ "Config": { "Env": [format!("SESSION_SECRET={SECRET}")] } });
+        for dbg in [format!("{d:?}"), format!("{d:#?}")] {
+            assert_no_secret(&dbg);
+            assert!(dbg.contains("SESSION_SECRET=***"), "{dbg}");
+            assert!(dbg.contains("<redacted json>"), "{dbg}");
+            assert!(dbg.contains("summary"), "{dbg}");
+        }
+    }
 }

@@ -9,6 +9,12 @@ use crate::model::ResourceKind;
 
 pub type EngineResult<T> = Result<T, EngineError>;
 
+/// Message of the recoverable `EngineError::Protocol` an event stream yields when the engine
+/// dropped events (WSLC `WSLC_E_EVENTS_LOST`, spec 20 §5.4). The stream continues; consumers
+/// must refetch. Build it with [`EngineError::events_lost`], test with
+/// [`EngineError::is_events_lost`].
+pub const EVENTS_LOST_MESSAGE: &str = "events lost";
+
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EngineError {
@@ -74,10 +80,35 @@ impl EngineError {
     pub fn is_unreachable(&self) -> bool {
         matches!(self, Self::Unreachable { .. })
     }
+
+    /// The recoverable "events lost" item of an event stream (spec 20 §5.4).
+    pub fn events_lost() -> Self {
+        Self::Protocol(EVENTS_LOST_MESSAGE.to_owned())
+    }
+
+    /// Whether this is the recoverable "events lost" item of an event stream (spec 20 §5.4):
+    /// the stream continues and the consumer must refetch.
+    pub fn is_events_lost(&self) -> bool {
+        matches!(self, Self::Protocol(m) if m == EVENTS_LOST_MESSAGE)
+    }
 }
 
 impl From<serde_json::Error> for EngineError {
     fn from(e: serde_json::Error) -> Self {
         Self::Protocol(format!("invalid JSON: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_lost_is_recognised_exactly() {
+        assert!(EngineError::events_lost().is_events_lost());
+        assert!(EngineError::protocol(EVENTS_LOST_MESSAGE).is_events_lost());
+        assert!(!EngineError::protocol("events lost: more").is_events_lost());
+        assert!(!EngineError::protocol("boom").is_events_lost());
+        assert!(!EngineError::unreachable(EVENTS_LOST_MESSAGE).is_events_lost());
     }
 }
