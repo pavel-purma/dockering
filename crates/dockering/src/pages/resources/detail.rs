@@ -284,19 +284,7 @@ pub fn route_link(
     label: impl Into<SharedString>,
     route: Route,
 ) -> AnyElement {
-    Button::new(id)
-        .link()
-        .xsmall()
-        .label(label.into())
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(
-                Box::new(Navigate {
-                    route: route.clone(),
-                }),
-                cx,
-            )
-        })
-        .into_any_element()
+    crate::ui::links::resource_link(id, label, route)
 }
 
 /// A focusable list of link rows (Used by / Containers tabs): one Tab stop, `↑/↓` move a

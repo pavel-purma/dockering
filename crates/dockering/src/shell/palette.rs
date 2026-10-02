@@ -93,13 +93,16 @@ pub fn goto_items(store: &Entity<EngineStore>, cx: &App) -> Vec<CommandItem> {
     }
     if let Some(is) = store.images.data() {
         out.extend(is.iter().take(MAX_GOTO).map(|i| {
+            let short = dk_core::format::short_id(&i.id).to_owned();
             let name = i
                 .repo_tags
                 .first()
                 .cloned()
-                .unwrap_or_else(|| dk_core::format::short_id(&i.id).to_owned());
+                .unwrap_or_else(|| format!("{} ({short})", s::NONE_TAG));
             CommandItem::new()
                 .label(s::go_to("image", &name))
+                .icon(IconName::GalleryVerticalEnd)
+                .keywords(i.repo_tags.iter().cloned().chain([short]))
                 .action(nav(Route::ImageDetail {
                     id: i.id.clone(),
                     tab: ImageTab::Overview,
@@ -110,6 +113,7 @@ pub fn goto_items(store: &Entity<EngineStore>, cx: &App) -> Vec<CommandItem> {
         out.extend(vs.iter().take(MAX_GOTO).map(|v| {
             CommandItem::new()
                 .label(s::go_to("volume", &v.name))
+                .icon(IconName::HardDrive)
                 .action(nav(Route::VolumeDetail {
                     name: v.name.clone(),
                     tab: VolumeTab::Overview,
@@ -120,6 +124,7 @@ pub fn goto_items(store: &Entity<EngineStore>, cx: &App) -> Vec<CommandItem> {
         out.extend(ns.iter().take(MAX_GOTO).map(|n| {
             CommandItem::new()
                 .label(s::go_to("network", &n.name))
+                .icon(IconName::Network)
                 .action(nav(Route::NetworkDetail {
                     id: n.id.clone(),
                     tab: NetworkTab::Overview,

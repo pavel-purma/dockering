@@ -895,3 +895,97 @@ fn net_001_hidden_networks_page(cx: &mut TestAppContext) {
     assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Containers);
     h.shutdown();
 }
+
+// ── cross-links (spec 30 §2) and the palette (KBD-020) ──────────────────────────────
+
+#[gpui_kit::test]
+fn kbd_020_palette_go_to_volume_opens_detail(cx: &mut TestAppContext) {
+    use crate::pages::volume_detail::VolumeDetailPage;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "ctrl-shift-p");
+    h.type_text(cx, "Go to volume: scratch");
+    cx.run_until_parked();
+    h.press(cx, "enter");
+    h.wait_until(cx, "volume detail mounted", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::VolumeDetail { name, .. } if name == "scratch")
+    });
+    let d = h
+        .dyn_page::<VolumeDetailPage>(cx)
+        .expect("volume detail page");
+    h.wait_until(cx, "details", |_, cx| d.read(cx).details().data().is_some());
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn spec30_cross_links_resolve_names(cx: &mut TestAppContext) {
+    use crate::pages::network_detail::NetworkDetailPage;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    // Container detail links networks by name; the detail page resolves it.
+    let d = h.goto::<NetworkDetailPage>(cx, crate::ui::links::network_route("myshop_default"));
+    h.wait_until(cx, "details", |_, cx| d.read(cx).details().data().is_some());
+    // Image links use the container's image id.
+    let id = crate::demo::image_id("redis:7");
+    let img = h.goto::<crate::pages::image_detail::ImageDetailPage>(
+        cx,
+        crate::ui::links::image_route(&id),
+    );
+    h.wait_until(cx, "image details", |_, cx| {
+        img.read(cx).details().data().is_some()
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn img_010_used_by_enter_follows_link(cx: &mut TestAppContext) {
+    use crate::pages::image_detail::ImageDetailPage;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let id = crate::demo::image_id("redis:7");
+    let detail = h.goto::<ImageDetailPage>(
+        cx,
+        Route::ImageDetail {
+            id,
+            tab: ImageTab::UsedBy,
+        },
+    );
+    h.wait_until(cx, "details", |_, cx| {
+        detail.read(cx).details().data().is_some()
+    });
+    h.draw(cx);
+    // Tab from the tab bar (primary focus) into the Used by list, Enter follows the link.
+    h.press(cx, "tab");
+    h.press(cx, "enter");
+    h.wait_until(cx, "container detail", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::ContainerDetail { id, .. } if *id == crate::testing::id_of("redis"))
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_008_g_u_n_ignored_in_search_inputs(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = images_page(&h, cx);
+    focus_images_table(&h, &page, cx);
+    h.press(cx, "ctrl-f");
+    h.type_text(cx, "gun");
+    h.draw(cx);
+    assert!(
+        !h.has_dialog(cx),
+        "single letters don't fire in the search input"
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_022_reference_lists_m6_letters(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let rows = crate::keymap::reference_rows(crate::keymap::Os::current());
+    for key in ["U", "G", "N"] {
+        assert!(rows.iter().any(|r| r.keys == key), "{key} listed");
+    }
+    h.shutdown();
+}

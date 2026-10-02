@@ -29,3 +29,5 @@ pub use widgets::{copy_id, focus_ring, port_link, relative_time};
 pub mod form_dialog;
 /// Repeating key/value form rows (KBD-072).
 pub mod kv_rows;
+/// Cross-links to resource detail pages (spec 30 §2).
+pub mod links;
