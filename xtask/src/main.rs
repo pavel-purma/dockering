@@ -1,1 +1,3 @@
-fn main() { eprintln!("xtask: see xtask/src/main.rs"); }
+fn main() {
+    eprintln!("xtask: see xtask/src/main.rs");
+}

@@ -34,7 +34,10 @@ fn main() {
     }
 
     for e in engines {
-        if matches!(e.state, EngineState::Unsupported { .. } | EngineState::Stopped) {
+        if matches!(
+            e.state,
+            EngineState::Unsupported { .. } | EngineState::Stopped
+        ) {
             continue;
         }
         let id = e.config.id.clone();
@@ -42,7 +45,11 @@ fn main() {
         let deadline = Instant::now() + Duration::from_secs(20);
         let connected = loop {
             let all = futures::executor::block_on(hub.engines()).unwrap_or_default();
-            match all.iter().find(|s| s.config.id == id).map(|s| s.state.clone()) {
+            match all
+                .iter()
+                .find(|s| s.config.id == id)
+                .map(|s| s.state.clone())
+            {
                 Some(EngineState::Connected) => break true,
                 Some(EngineState::Failed { error, .. }) => {
                     println!("\n[{id}] failed: {error}");
@@ -62,7 +69,8 @@ fn main() {
         let containers = futures::executor::block_on(hub.call(&id, |e| async move {
             e.list_containers(ContainerQuery::default()).await
         }));
-        let images = futures::executor::block_on(hub.call(&id, |e| async move { e.list_images().await }));
+        let images =
+            futures::executor::block_on(hub.call(&id, |e| async move { e.list_images().await }));
         let volumes =
             futures::executor::block_on(hub.call(&id, |e| async move { e.list_volumes().await }));
         match info {
@@ -93,8 +101,23 @@ fn main() {
         }
         println!(
             "  images: {}   volumes: {}",
-            images.map(|v| v.len().to_string()).unwrap_or_else(|e| e.to_string()),
-            volumes.map(|v| v.len().to_string()).unwrap_or_else(|e| e.to_string())
+            images
+                .map(|v| v.len().to_string())
+                .unwrap_or_else(|e| e.to_string()),
+            volumes
+                .map(|v| v.len().to_string())
+                .unwrap_or_else(|e| e.to_string())
+        );
+    }
+    let after = futures::executor::block_on(hub.engines()).unwrap_or_default();
+    println!(
+        "
+after connecting (ENG-009 de-duplication by daemon id):"
+    );
+    for e in &after {
+        println!(
+            "- {:<28} also reachable via: {:?}",
+            e.config.id, e.also_reachable_via
         );
     }
     hub.shutdown();
