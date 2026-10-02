@@ -9,6 +9,7 @@ use dk_core::{EngineResult, ExecRequest};
 
 /// argv after `wslc.exe` (and the global `--session`): `container exec -i -t … <id> <cmd…>`.
 /// Values were validated by the caller.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn exec_args(id: &str, req: &ExecRequest) -> Vec<String> {
     let mut a: Vec<String> = vec!["container".into(), "exec".into(), "-i".into()];
     if req.tty {

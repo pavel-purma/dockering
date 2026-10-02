@@ -470,9 +470,8 @@ async fn img_004_pull_is_text_then_done() {
 async fn exec_unsupported_off_windows() {
     env();
     let e = engine(None).await;
-    let err = e
+    let r = e
         .exec("dk-cli-fixture", dk_core::ExecRequest::default())
-        .await
-        .expect_err("err");
-    assert_eq!(err, EngineError::Unsupported(Capabilities::EXEC_TTY));
+        .await;
+    assert!(matches!(r, Err(EngineError::Unsupported(c)) if c == Capabilities::EXEC_TTY));
 }
