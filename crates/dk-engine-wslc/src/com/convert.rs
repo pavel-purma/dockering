@@ -603,10 +603,29 @@ mod tests {
         };
         let h = registry_auth_header(&auth);
         assert!(!h.contains("p\""), "must be encoded");
+        // Key order depends on serde_json's `preserve_order` (feature-unified with GPUI), so
+        // compare the decoded JSON rather than the exact bytes.
+        let decoded: Value = serde_json::from_slice(&b64_decode(&h)).expect("json");
         assert_eq!(
-            h,
-            base64_std(br#"{"password":"p","serveraddress":"ghcr.io","username":"u"}"#)
+            decoded,
+            serde_json::json!({"password":"p","serveraddress":"ghcr.io","username":"u"})
         );
+    }
+
+    fn b64_decode(s: &str) -> Vec<u8> {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        let (mut buf, mut bits) = (0u32, 0u32);
+        for c in s.bytes().filter(|c| *c != b'=') {
+            let v = A.iter().position(|a| *a == c).expect("b64") as u32;
+            buf = (buf << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((buf >> bits) as u8);
+            }
+        }
+        out
     }
 
     #[test]
