@@ -25,11 +25,9 @@ pub mod stats;
 pub mod terminal;
 
 use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineError};
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -44,11 +42,13 @@ use crate::assets::Lucide;
 use crate::keymap::ctx;
 use crate::nav::{ContainerTab, ImageTab, Route};
 use crate::pages::containers::ops::{self, Op};
+use crate::pages::resources::detail::{TabSpec, segmented_tabs, tab_bar_frame};
 use crate::state::{AppState, EngineStore};
 use crate::strings as s;
 use crate::ui::breadcrumb::{Crumb, breadcrumb};
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive, should_confirm_stopped_delete};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::status_chip::{container_chip, health_chip};
@@ -492,8 +492,10 @@ impl ContainerDetailPage {
         let external = self
             .detail_state()
             .is_some_and(|s| s.read(cx).external_terminal_available(cx));
-        let b = self.more_bounds;
-        let pos = gpui_kit::point(b.origin.x - gpui_kit::px(180.), b.origin.y + b.size.height);
+        let pos = MenuAnchor::below_or(
+            self.more_bounds,
+            gpui_kit::point(gpui_kit::px(640.), gpui_kit::px(110.)),
+        );
         let restore = self.more_focus.clone();
         self.menu = Some(KeyMenu::open(
             pos,
@@ -751,7 +753,7 @@ impl ContainerDetailPage {
                     window,
                     cx,
                 )
-                .on_prepaint({
+                .on_bounds({
                     let this = cx.entity().downgrade();
                     move |b, _, cx| {
                         this.update(cx, |p, _| p.more_bounds = b).ok();
@@ -861,33 +863,36 @@ impl ContainerDetailPage {
             .iter()
             .position(|t| *t == self.tab)
             .unwrap_or(0);
-        let focused = self.tab_bar_focus.is_focused(window);
         let caps = self.caps(cx);
-        div()
-            .id("detail-tab-bar")
-            .key_context(format!("{} {}", ctx::DETAIL_HEADER, ctx::DETAIL_TABS).as_str())
-            .track_focus(&self.tab_bar_focus)
-            .px_1()
-            .rounded(cx.theme().radius)
-            .map(|el| crate::ui::focus_ring(el, focused, cx))
-            .child(
-                TabBar::new("detail-tabs")
-                    .underline()
-                    .selected_index(selected)
-                    .on_click(cx.listener(|this, ix: &usize, w, cx| {
-                        if let Some(tab) = ContainerTab::ALL.get(*ix).copied() {
-                            this.go_tab(tab, w, cx);
-                            w.focus(&this.tab_bar_focus, cx);
-                        }
-                    }))
-                    .children(ContainerTab::ALL.iter().map(|t| {
-                        // Terminal is capability-gated (ENG-030).
-                        let disabled =
-                            *t == ContainerTab::Terminal && !caps.contains(Capabilities::EXEC_TTY);
-                        Tab::new().label(t.label()).disabled(disabled)
-                    })),
-            )
-            .into_any_element()
+        let tabs = ContainerTab::ALL
+            .iter()
+            .map(|t| {
+                // Terminal is capability-gated (ENG-030).
+                let disabled =
+                    *t == ContainerTab::Terminal && !caps.contains(Capabilities::EXEC_TTY);
+                tab_spec(*t).disabled(disabled)
+            })
+            .collect();
+        let bar = segmented_tabs(
+            "detail-tabs",
+            tabs,
+            selected,
+            cx.listener(|this, ix: &usize, w, cx| {
+                if let Some(tab) = ContainerTab::ALL.get(*ix).copied() {
+                    this.go_tab(tab, w, cx);
+                    w.focus(&this.tab_bar_focus, cx);
+                }
+            }),
+        );
+        tab_bar_frame(
+            "detail-tab-bar",
+            &format!("{} {}", ctx::DETAIL_HEADER, ctx::DETAIL_TABS),
+            &self.tab_bar_focus,
+            bar,
+            window,
+            cx,
+        )
+        .into_any_element()
     }
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -922,6 +927,20 @@ impl ContainerDetailPage {
         }
         .unwrap_or_else(|| crate::ui::skeleton_rows(6, 3))
     }
+}
+
+/// Icon + label of a container detail tab (SHL-025).
+fn tab_spec(t: ContainerTab) -> TabSpec {
+    let icon: gpui_kit::component::Icon = match t {
+        ContainerTab::Overview => IconName::LayoutDashboard.into(),
+        ContainerTab::Logs => Lucide::ScrollText.into(),
+        ContainerTab::Terminal => IconName::SquareTerminal.into(),
+        ContainerTab::Stats => Lucide::Activity.into(),
+        ContainerTab::Mounts => IconName::HardDrive.into(),
+        ContainerTab::Network => IconName::Network.into(),
+        ContainerTab::Inspect => Lucide::Braces.into(),
+    };
+    TabSpec::new(t.label(), icon)
 }
 
 fn detail_error(err: &EngineError, cx: &App) -> AnyElement {

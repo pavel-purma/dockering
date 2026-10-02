@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use dk_core::{EngineId, EngineState};
 use dk_hub::ThemeMode;
+use gpui_kit::component::ThemeStyled as _;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
@@ -40,7 +41,8 @@ use crate::state::{
 };
 use crate::strings as s;
 use crate::theme;
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
@@ -81,6 +83,15 @@ impl ShellPage {
     }
 }
 
+/// One sidebar entry: the main pages, or on Settings routes *Back* plus the sections
+/// (SET-080).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidebarEntry {
+    Page(Page),
+    Back(Route),
+    Section(SettingsSection),
+}
+
 /// Which overlay is open (for the Escape chain, KBD-006).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Overlay {
@@ -94,6 +105,8 @@ pub struct AppShell {
     engines: Entity<EngineListStore>,
     store: Option<Entity<EngineStore>>,
     history: History,
+    /// The last non-Settings route: where Settings' *Back* item returns (SET-080).
+    app_route: Route,
     page: ShellPage,
     sidebar_collapsed: bool,
     regions: Regions,
@@ -104,7 +117,11 @@ pub struct AppShell {
     status_focus: FocusHandle,
     switcher_btn_focus: FocusHandle,
     overflow_focus: FocusHandle,
-    /// Sidebar roving cursor (index into visible pages).
+    /// Painted bounds of the title-bar overflow button (its menu opens below it).
+    overflow_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+    /// Painted bounds of the engine switcher button (the switcher opens below it).
+    switcher_btn_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+    /// Sidebar roving cursor (index into [`AppShell::sidebar_entries`]).
     sidebar_cursor: usize,
     switcher: Option<Entity<SwitcherView>>,
     palette: Option<Entity<CommandState>>,
@@ -196,6 +213,7 @@ impl AppShell {
         let mut this = Self {
             engines,
             store: None,
+            app_route: start.clone(),
             history: History::new(start),
             page: ShellPage::None,
             sidebar_collapsed: ui.sidebar_collapsed,
@@ -207,6 +225,8 @@ impl AppShell {
             status_focus,
             switcher_btn_focus,
             overflow_focus,
+            overflow_bounds: Default::default(),
+            switcher_btn_bounds: Default::default(),
             sidebar_cursor: 0,
             switcher: None,
             palette: None,
@@ -267,6 +287,29 @@ impl AppShell {
     /// Pages listed in the sidebar (SET-001 hides Networks).
     pub fn sidebar_pages(&self, cx: &App) -> Vec<Page> {
         self.visible_pages(cx)
+    }
+    /// What the sidebar lists for the current route (SET-080).
+    pub fn sidebar_entries(&self, cx: &App) -> Vec<SidebarEntry> {
+        if matches!(self.history.current(), Route::Settings { .. }) {
+            std::iter::once(SidebarEntry::Back(self.app_route.clone()))
+                .chain(
+                    SettingsSection::ALL
+                        .iter()
+                        .map(|s| SidebarEntry::Section(*s)),
+                )
+                .collect()
+        } else {
+            self.visible_pages(cx)
+                .into_iter()
+                .map(SidebarEntry::Page)
+                .collect()
+        }
+    }
+    pub fn sidebar_cursor(&self) -> usize {
+        self.sidebar_cursor
+    }
+    pub fn sidebar_focus(&self) -> &FocusHandle {
+        &self.sidebar_focus
     }
     pub fn region_container(&self, r: Region) -> Option<&FocusHandle> {
         self.regions.container(r)
@@ -350,6 +393,7 @@ impl AppShell {
         self.store_subs.clear();
         if had_engine {
             self.history.engine_switched();
+            self.app_route = self.app_route.for_engine_switch();
         }
         if let Some(id) = id {
             let hub = AppState::hub(cx);
@@ -453,6 +497,10 @@ impl AppShell {
     fn mount_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let route = self.history.current().clone();
         let needs_engine = !matches!(route, Route::Settings { .. });
+        if needs_engine {
+            self.app_route = route.clone();
+        }
+        self.sidebar_cursor = self.active_entry(cx);
         if needs_engine && (self.store.is_none() || !self.connected(cx)) {
             self.page = ShellPage::None;
             return;
@@ -528,15 +576,32 @@ impl AppShell {
         if let Some(h) = self.page.primary_focus(cx) {
             self.regions.set_default(Region::Content, h);
         }
-        self.sidebar_cursor = self
-            .visible_pages(cx)
+    }
+
+    /// The sidebar entry of the current route.
+    fn active_entry(&self, cx: &App) -> usize {
+        let route = self.history.current();
+        self.sidebar_entries(cx)
             .iter()
-            .position(|p| Some(*p) == route.page())
-            .unwrap_or(0);
+            .position(|e| match (e, route) {
+                (SidebarEntry::Section(s), Route::Settings { section }) => s == section,
+                (SidebarEntry::Page(p), r) => Some(*p) == r.page(),
+                _ => false,
+            })
+            .unwrap_or(0)
+    }
+
+    /// Where focus goes after a navigation (KBD-007): the page's primary control, or on
+    /// Settings the sidebar's section nav (SET-080, KBD-024).
+    fn primary_focus(&self, cx: &App) -> Option<FocusHandle> {
+        if matches!(self.history.current(), Route::Settings { .. }) {
+            return Some(self.sidebar_focus.clone());
+        }
+        self.page.primary_focus(cx)
     }
 
     fn focus_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.page.primary_focus(cx) {
+        match self.primary_focus(cx) {
             Some(h) => window.focus(&h, cx),
             None => window.focus(&self.content_focus, cx),
         }
@@ -783,11 +848,14 @@ impl AppShell {
         if !show_networks && self.history.current().page() == Some(Page::Networks) {
             self.go(Route::Containers, window, cx);
         }
+        if !show_networks && self.app_route.page() == Some(Page::Networks) {
+            self.app_route = Route::Containers;
+        }
         if let Some(store) = &self.store {
             store.update(cx, |s, cx| s.set_polling_interval(polling, cx));
         }
-        let pages = self.visible_pages(cx);
-        self.sidebar_cursor = self.sidebar_cursor.min(pages.len().saturating_sub(1));
+        let n = self.sidebar_entries(cx).len();
+        self.sidebar_cursor = self.sidebar_cursor.min(n.saturating_sub(1));
         cx.notify();
     }
 
@@ -817,56 +885,73 @@ impl AppShell {
 
     // ── sidebar ────────────────────────────────────────────────────────────────────────
 
-    fn sidebar_move(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let n = self.visible_pages(cx).len() as isize;
-        if n > 0 {
-            self.sidebar_cursor = (self.sidebar_cursor as isize + delta).clamp(0, n - 1) as usize;
-            cx.notify();
+    /// Moves the roving cursor. On Settings, landing on a section shows it in place (like
+    /// tabs: no history entry, SET-080); the main pages wait for `Enter`.
+    fn sidebar_set_cursor(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let entries = self.sidebar_entries(cx);
+        let Some(last) = entries.len().checked_sub(1) else {
+            return;
+        };
+        self.sidebar_cursor = ix.min(last);
+        if let SidebarEntry::Section(section) = entries[self.sidebar_cursor] {
+            self.replace_route(Route::Settings { section }, window, cx);
         }
+        cx.notify();
+    }
+
+    fn sidebar_move(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let ix = (self.sidebar_cursor as isize + delta).max(0) as usize;
+        self.sidebar_set_cursor(ix, window, cx);
     }
 
     fn on_sidebar_prev(
         &mut self,
         _: &crate::actions::sidebar::Prev,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar_move(-1, cx);
+        self.sidebar_move(-1, window, cx);
     }
     fn on_sidebar_next(
         &mut self,
         _: &crate::actions::sidebar::Next,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar_move(1, cx);
+        self.sidebar_move(1, window, cx);
     }
     fn on_sidebar_first(
         &mut self,
         _: &crate::actions::sidebar::First,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar_cursor = 0;
-        cx.notify();
+        self.sidebar_set_cursor(0, window, cx);
     }
     fn on_sidebar_last(
         &mut self,
         _: &crate::actions::sidebar::Last,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sidebar_cursor = self.visible_pages(cx).len().saturating_sub(1);
-        cx.notify();
+        self.sidebar_set_cursor(usize::MAX, window, cx);
     }
+    /// `Enter` / `Space`: open the page, go *Back*, or step into the section's first control.
     fn on_sidebar_activate(
         &mut self,
         _: &crate::actions::sidebar::Activate,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(p) = self.visible_pages(cx).get(self.sidebar_cursor).copied() {
-            self.go(p.route(), window, cx);
+        match self.sidebar_entries(cx).get(self.sidebar_cursor).cloned() {
+            Some(SidebarEntry::Page(p)) => self.go(p.route(), window, cx),
+            Some(SidebarEntry::Back(route)) => self.go(route, window, cx),
+            Some(SidebarEntry::Section(section)) => {
+                self.replace_route(Route::Settings { section }, window, cx);
+                // The content column follows the sidebar in the Tab order.
+                window.focus_next(cx);
+            }
+            None => {}
         }
     }
 
@@ -1007,7 +1092,8 @@ impl AppShell {
 
     fn open_overflow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let restore = self.overflow_focus.clone();
-        let pos = gpui_kit::point(window.viewport_size().width - px(260.), px(36.));
+        let fallback = gpui_kit::point(window.viewport_size().width - px(260.), px(36.));
+        let pos = MenuAnchor::below_or(self.overflow_bounds, fallback);
         self.overflow_menu = Some(KeyMenu::open(
             pos,
             restore,
@@ -1052,7 +1138,7 @@ impl AppShell {
             return;
         }
         // Return focus to the primary list if focus is elsewhere in content.
-        if let Some(h) = self.page.primary_focus(cx)
+        if let Some(h) = self.primary_focus(cx)
             && !h.is_focused(window)
         {
             window.focus(&h, cx);
@@ -1153,7 +1239,13 @@ impl AppShell {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(state_label),
                             )
-                            .child(Icon::new(IconName::ChevronDown).small()),
+                            .child(Icon::new(IconName::ChevronDown).small())
+                            .on_bounds({
+                                let this = cx.entity().downgrade();
+                                move |b, _, cx| {
+                                    this.update(cx, |s, _| s.switcher_btn_bounds = b).ok();
+                                }
+                            }),
                     )
                     .when(insecure, |this| {
                         this.child(
@@ -1210,27 +1302,37 @@ impl AppShell {
                             )
                             .when(!cfg!(target_os = "macos"), |this| {
                                 // SHL-021: Alt focuses the overflow menu button on Windows/Linux.
-                                this.child(crate::ui::widgets::focus_wrap(
-                                    "title-overflow-wrap",
-                                    &self.overflow_focus,
-                                    Button::new("title-overflow")
-                                        .ghost()
-                                        .small()
-                                        .icon(IconName::Menu)
-                                        .tooltip(s::MORE_COMMANDS)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_overflow(window, cx)
-                                        })),
-                                    {
-                                        let this = cx.entity().downgrade();
-                                        move |_, window, cx| {
-                                            this.update(cx, |s, cx| s.open_overflow(window, cx))
+                                this.child(
+                                    crate::ui::widgets::focus_wrap(
+                                        "title-overflow-wrap",
+                                        &self.overflow_focus,
+                                        Button::new("title-overflow")
+                                            .ghost()
+                                            .small()
+                                            .icon(IconName::Menu)
+                                            .tooltip(s::MORE_COMMANDS)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_overflow(window, cx)
+                                            })),
+                                        {
+                                            let this = cx.entity().downgrade();
+                                            move |_, window, cx| {
+                                                this.update(cx, |s, cx| {
+                                                    s.open_overflow(window, cx)
+                                                })
                                                 .ok();
+                                            }
+                                        },
+                                        window,
+                                        cx,
+                                    )
+                                    .on_bounds({
+                                        let this = cx.entity().downgrade();
+                                        move |b, _, cx| {
+                                            this.update(cx, |s, _| s.overflow_bounds = b).ok();
                                         }
-                                    },
-                                    window,
-                                    cx,
-                                ))
+                                    }),
+                                )
                             }),
                     ),
             )
@@ -1243,9 +1345,11 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let route = self.history.current().clone();
-        let current = route.page();
-        let pages = self.visible_pages(cx);
-        let focused = self.sidebar_focus.is_focused(window);
+        // The cursor ring is drawn on the item; the region itself has no ring (a border
+        // around the whole sidebar shifted the layout on focus). Keyboard focus only: a click
+        // on a settings section focuses the sidebar (SET-080) without showing a ring.
+        let focused = self.sidebar_focus.is_focused(window) && window.last_input_was_keyboard();
+        let cursor = self.sidebar_cursor;
         let counts = self.store.as_ref().map(|s| {
             let s = s.read(cx);
             [
@@ -1255,36 +1359,64 @@ impl AppShell {
                 s.count(Collection::Networks),
             ]
         });
-        let items: Vec<NavItem> = pages
-            .iter()
+        let items: Vec<NavItem> = self
+            .sidebar_entries(cx)
+            .into_iter()
             .enumerate()
-            .map(|(ix, p)| {
-                let p = *p;
-                let count = counts.and_then(|c| {
-                    c[match p {
-                        Page::Containers => 0,
-                        Page::Images => 1,
-                        Page::Volumes => 2,
-                        Page::Networks => 3,
-                    }]
-                });
-                let icon = match p {
-                    Page::Containers => IconName::Inspector,
-                    Page::Images => IconName::GalleryVerticalEnd,
-                    Page::Volumes => IconName::HardDrive,
-                    Page::Networks => IconName::Network,
-                };
-                NavItem {
-                    page: p,
-                    icon: Icon::new(icon),
-                    count,
-                    active: Some(p) == current,
-                    // The cursor ring is drawn on the item; the region itself has no ring
-                    // (a border around the whole sidebar shifted the layout on focus).
-                    cursor: focused && ix == self.sidebar_cursor,
+            .map(|(ix, entry)| {
+                let cursor = focused && ix == cursor;
+                match entry {
+                    SidebarEntry::Page(p) => {
+                        let count = counts.and_then(|c| {
+                            c[match p {
+                                Page::Containers => 0,
+                                Page::Images => 1,
+                                Page::Volumes => 2,
+                                Page::Networks => 3,
+                            }]
+                        });
+                        let icon = match p {
+                            Page::Containers => IconName::Inspector,
+                            Page::Images => IconName::GalleryVerticalEnd,
+                            Page::Volumes => IconName::HardDrive,
+                            Page::Networks => IconName::Network,
+                        };
+                        NavItem {
+                            label: p.label().into(),
+                            route: p.route(),
+                            icon: Icon::new(icon),
+                            count,
+                            active: Some(p) == route.page(),
+                            cursor,
+                        }
+                    }
+                    SidebarEntry::Back(target) => NavItem {
+                        label: s::back_to(target.page().unwrap_or(Page::Containers).label()).into(),
+                        route: target,
+                        icon: Icon::new(IconName::ArrowLeft),
+                        count: None,
+                        active: false,
+                        cursor,
+                    },
+                    SidebarEntry::Section(section) => NavItem {
+                        label: section.label().into(),
+                        route: Route::Settings { section },
+                        icon: Icon::new(section.icon()),
+                        count: None,
+                        active: route == Route::Settings { section },
+                        cursor,
+                    },
                 }
             })
             .collect();
+        // Settings: *Back* on its own, then the sections under a heading.
+        let menu = if matches!(route, Route::Settings { .. }) {
+            let mut items = items;
+            let sections = items.split_off(1);
+            NavMenu::new(items).group(s::PAGE_SETTINGS, sections)
+        } else {
+            NavMenu::new(items)
+        };
         div()
             .id("sidebar-region")
             .key_context(ctx::SIDEBAR)
@@ -1299,7 +1431,7 @@ impl AppShell {
                 Sidebar::new("sidebar")
                     .collapsed(self.sidebar_collapsed)
                     .w(px(220.))
-                    .child(NavMenu::new(items)),
+                    .child(menu),
             )
             .into_any_element()
     }
@@ -1395,6 +1527,50 @@ impl AppShell {
         }
     }
 
+    /// The engine switcher as a dropdown under its title-bar button (centred on it, kept
+    /// inside the window), over a click-to-dismiss backdrop like the other overlays.
+    fn switcher_dropdown(&self, child: gpui_kit::AnyElement, cx: &App) -> gpui_kit::AnyElement {
+        const WIDTH: f32 = 404.;
+        let b = self.switcher_btn_bounds;
+        let (position, anchor) = if b.size.width > px(0.) {
+            (
+                gpui_kit::point(b.center().x, b.bottom() + px(4.)),
+                gpui_kit::Anchor::TopCenter,
+            )
+        } else {
+            (gpui_kit::point(px(0.), px(44.)), gpui_kit::Anchor::TopLeft)
+        };
+        gpui_kit::deferred(
+            div()
+                .id("overlay-backdrop")
+                .absolute()
+                .inset_0()
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.dispatch_action(Box::new(crate::actions::palette::Dismiss), cx)
+                })
+                .child(
+                    gpui_kit::anchored()
+                        .anchor(anchor)
+                        .position(position)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
+                            div()
+                                .id("overlay-panel")
+                                .key_context(ctx::PALETTE)
+                                .occlude()
+                                .w(px(WIDTH))
+                                .max_h(px(560.))
+                                .p_2()
+                                .popover_style(cx)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .child(child),
+                        ),
+                ),
+        )
+        .with_priority(2)
+        .into_any_element()
+    }
+
     fn render_overlay(
         &mut self,
         window: &mut Window,
@@ -1434,7 +1610,7 @@ impl AppShell {
             .into_any_element()
         };
         if let Some(sw) = &self.switcher {
-            return Some(panel(sw.clone().into_any_element(), 404., cx));
+            return Some(self.switcher_dropdown(sw.clone().into_any_element(), cx));
         }
         if let Some(state) = &self.palette {
             let ctx = CommandContext {

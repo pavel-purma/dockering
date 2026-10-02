@@ -416,7 +416,7 @@ fn engine_row(
     let test = this.engines.tests.get(id).cloned();
     let testing = matches!(test, Some(TestState::Running));
     let name_input = this.engines.name_inputs.get(id).cloned();
-    let nav = this.nav_focus.clone();
+    let nav = this.focus.clone();
     let _ = window;
 
     let header = h_flex()
@@ -654,7 +654,7 @@ pub(super) fn blocks(
                                 .label(s::RESCAN)
                                 .loading(rescanning)
                                 .tooltip_with_action(s::RESCAN, &Rescan, None)
-                                .on_click(super::dispatch_here(&this.nav_focus, Rescan)),
+                                .on_click(super::dispatch_here(&this.focus, Rescan)),
                         )
                         .child(crate::ui::widgets::focus_wrap(
                             "eng-add-wrap",
@@ -664,7 +664,7 @@ pub(super) fn blocks(
                                 .primary()
                                 .icon(IconName::Plus)
                                 .label(s::ADD_ENGINE)
-                                .on_click(super::dispatch_here(&this.nav_focus, AddEngine)),
+                                .on_click(super::dispatch_here(&this.focus, AddEngine)),
                             |_, w, cx| w.dispatch_action(Box::new(AddEngine), cx),
                             window,
                             cx,

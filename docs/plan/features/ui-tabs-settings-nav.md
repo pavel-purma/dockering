@@ -1,7 +1,7 @@
 # Plan: Segmented detail tabs · Settings in the app sidebar
 
 - **Slug:** `ui-tabs-settings-nav`
-- **Status:** draft
+- **Status:** done
 - **Spec:** [30-ui-shell.md](../../spec/30-ui-shell.md) §1/§4 · [settings.md](../../spec/features/settings.md) · [keyboard.md](../../spec/features/keyboard.md)
 - **Milestone:** post-v1 UI polish
 - **Requirement IDs:** SET-080 (new) · SHL-025 (new) · KBD-005, KBD-024 (clarified)
@@ -91,3 +91,4 @@ None.
 
 ## 10. Revision log
 - 2026-10-02: created
+- 2026-10-02: approved and implemented. Focus rings on the tab bar and the sidebar cursor show only after keyboard input (`Window::last_input_was_keyboard`), because navigation focuses them programmatically.

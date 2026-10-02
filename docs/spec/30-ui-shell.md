@@ -49,7 +49,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 - **SHL-021** Windows/Linux: no menu bar. The same commands are in the title-bar overflow menu (`Alt` focuses it) and in the command palette.
 - **SHL-022** Single instance per user. A second launch focuses the existing window and exits (10 §7).
 - **SHL-023** Linux: a `.desktop` file and Wayland `app_id` = `dev.dockering.Dockering`, so the dock/taskbar icon matches.
-- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Its focus ring follows the control's rounded outline (KBD-003). *(planned, [plan](../plan/features/ui-tabs-settings-nav.md))*
+- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Its focus ring follows the control's rounded outline (KBD-003) and, like the sidebar cursor ring, shows only after keyboard input, so a mouse navigation doesn't ring the tab bar it focuses (KBD-007). Inner tab bars (Stats window, terminal sessions) keep their own style.
 - **SHL-024** UI language is **English only** in v1. All strings go through one module (`strings.rs`) so they can be localised later. OS high-contrast settings: the System theme follows the OS light/dark setting. A dedicated high-contrast theme is post-v1. UI zoom is `Mod+=` / `Mod+-` / `Mod+0` (scales the rem size).
 
 ## 2. Navigation model

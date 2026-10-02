@@ -100,7 +100,7 @@ pub(super) fn blocks(
                                 .outline()
                                 .icon(IconName::FolderOpen)
                                 .label(s::CMD_OPEN_LOGS_FOLDER)
-                                .on_click(super::dispatch_here(&this.nav_focus, OpenLogsFolder)),
+                                .on_click(super::dispatch_here(&this.focus, OpenLogsFolder)),
                         )
                         .into_any_element(),
                     None,
@@ -121,7 +121,7 @@ pub(super) fn blocks(
                 .icon(IconName::Copy)
                 .label(s::COPY_DIAGNOSTICS)
                 .tooltip_with_action(s::COPY_DIAGNOSTICS, &CopyDiagnostics, None)
-                .on_click(super::dispatch_here(&this.nav_focus, CopyDiagnostics))
+                .on_click(super::dispatch_here(&this.focus, CopyDiagnostics))
                 .into_any_element(),
             None,
             cx,
@@ -201,7 +201,7 @@ pub(super) fn blocks(
                         .outline()
                         .icon(IconName::ExternalLink)
                         .label(s::VIEW_LICENSES)
-                        .on_click(super::dispatch_here(&this.nav_focus, ViewLicenses))
+                        .on_click(super::dispatch_here(&this.focus, ViewLicenses))
                         .into_any_element(),
                     None,
                     cx,

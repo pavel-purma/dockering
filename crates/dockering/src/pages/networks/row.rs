@@ -156,11 +156,8 @@ impl ListDelegate for NetworksDelegate {
                         !self.can_delete(r),
                         on_row(&key, RowCommand::Delete),
                     ))
-                    .child(crate::pages::resources::chrome::row_button(
+                    .child(crate::pages::resources::chrome::row_menu_button(
                         ("more", row_ix),
-                        IconName::EllipsisVertical,
-                        s::MORE_ACTIONS,
-                        false,
                         on_row(&key, RowCommand::ContextMenu),
                     ))
                     .into_any_element()

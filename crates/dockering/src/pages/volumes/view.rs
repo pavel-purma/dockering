@@ -12,7 +12,6 @@ use std::time::Duration;
 use dk_core::format::format_size;
 use dk_core::{Capabilities, ContainerSummary, EngineId, VolumeSummary};
 use futures::FutureExt;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
@@ -35,7 +34,8 @@ use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive};
 use crate::ui::list_table::{ListEvent, ListTable};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::{PageView, RoutedPage};
 
@@ -342,12 +342,7 @@ impl VolumesPage {
         cx: &mut Context<Self>,
         build: impl FnOnce(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
-        let b = self.overflow_bounds;
-        let pos = if b.size.width > px(0.) {
-            point(b.origin.x - px(180.), b.origin.y + b.size.height + px(4.))
-        } else {
-            point(px(640.), px(110.))
-        };
+        let pos = MenuAnchor::below_or(self.overflow_bounds, point(px(640.), px(110.)));
         let restore = self.table.focus_handle(cx);
         self.menu = Some(KeyMenu::open(
             pos,
@@ -639,7 +634,7 @@ impl VolumesPage {
                             window,
                             cx,
                         )
-                        .on_prepaint({
+                        .on_bounds({
                             let this = cx.entity().downgrade();
                             move |b, _, cx| {
                                 this.update(cx, |p, _| p.overflow_bounds = b).ok();

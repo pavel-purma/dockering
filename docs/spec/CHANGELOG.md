@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-02 · ui/settings · **implemented** SHL-025 segmented detail tabs (icons via Lucide `LayoutDashboard`/`ScrollText`/`Activity`/`Braces`…, keyboard-only focus ring); SET-080 Settings uses the shell sidebar (`SidebarEntry`: *Back to <Page>* + sections, `NavMenu` groups); the settings page no longer has its own nav. · [plan](../plan/features/ui-tabs-settings-nav.md)
 - 2026-10-02 · ui/settings · **planned** SHL-025 segmented detail tabs with icons; SET-080 Settings uses the app sidebar (same nav component) with a *Back to <Page>* item; KBD-005/024 clarified. · [plan](../plan/features/ui-tabs-settings-nav.md)
 - 2026-10-02 · diagnostics · Missing optional DirectX debug tools emit one warning; graphics initialization failures still propagate as errors (NFR-050). · [spec 10 §8](10-architecture.md#8-logging--diagnostics)
 - 2026-10-02 · ui/containers · **UI polish.** Accent `#1D63ED` → violet `#6E56CF` (SHL-009), which also tints the row cursor and selection. Soft status chips with a leading dot replace the solid green/amber `Tag`s (spec 30 §4). Sidebar: custom nav items with a hover tint and an accent-tinted active page; the focus ring sits on the cursor item, not around the region (no layout shift). Lists: a click anywhere on a row opens it, or toggles a group; names are plain text, not links (CON-033, spec 30 §2). Compose groups start expanded (CON-011). The *Actions* column is pinned to the right edge of every list (CON-002).

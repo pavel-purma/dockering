@@ -13,7 +13,6 @@ use std::cell::Cell as StdCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::description_list::{DescriptionItem, DescriptionList};
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
@@ -27,6 +26,7 @@ use gpui_kit::{
 
 use crate::actions::rows;
 use crate::strings as s;
+use crate::ui::menu::TrackBounds as _;
 use crate::ui::notify;
 
 /// Key context of a rows panel (bindings in `keymap.rs`).
@@ -528,7 +528,7 @@ fn cell_element<V: 'static>(
         .child(content)
         .when(highlight, move |el| {
             // Keep the cursor row in view (KBD-031-style) after keyboard moves.
-            el.on_prepaint(move |bounds, window, _| {
+            el.on_bounds(move |bounds, window, _| {
                 if !reveal.replace(false) {
                     return;
                 }

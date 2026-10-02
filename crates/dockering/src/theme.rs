@@ -79,6 +79,14 @@ pub fn apply(mode: ThemeMode, scale: f32, window: Option<&mut Window>, cx: &mut 
         } else {
             Hsla::black().opacity(0.035)
         };
+        // Column titles: the kit falls back to `muted_foreground`, which is too faint on the
+        // header band; keep them a step below row text but clearly readable.
+        theme.table_head_foreground = theme.foreground.opacity(if dark { 0.78 } else { 0.72 });
+        // Light mode: a grey header band so the table doesn't read as one white sheet. Opaque,
+        // because the header stays put while rows scroll under it.
+        if !dark {
+            theme.table_head = theme.background.blend(Hsla::black().opacity(0.07));
+        }
         theme.font_size = px(BASE_FONT_SIZE * clamp_scale(scale));
         theme.focus_ring = true;
     });

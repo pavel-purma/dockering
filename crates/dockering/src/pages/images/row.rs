@@ -15,7 +15,9 @@ use crate::actions::res::RunRow;
 use crate::actions::{OnRow, RowCommand, image, list};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
-use crate::pages::resources::chrome::{hinted, mono_cell, name_cell, row_button, text_cell};
+use crate::pages::resources::chrome::{
+    hinted, mono_cell, name_cell, row_button, row_menu_button, text_cell,
+};
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::status_chip::{Tone, tone_tag};
@@ -157,11 +159,8 @@ impl ListDelegate for ImagesDelegate {
                         self.read_only,
                         on_row(&key, RowCommand::Delete),
                     ))
-                    .child(row_button(
+                    .child(row_menu_button(
                         ("more", row_ix),
-                        IconName::EllipsisVertical,
-                        s::MORE_ACTIONS,
-                        false,
                         on_row(&key, RowCommand::ContextMenu),
                     ))
                     .into_any_element()

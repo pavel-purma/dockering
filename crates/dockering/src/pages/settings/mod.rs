@@ -1,8 +1,8 @@
 //! Settings page (`Route::Settings { section }`, SET-001…070, ENG-104/105/109/110).
 //!
-//! Layout: a section nav (GPUI Kit `Sidebar`/`SidebarMenu`, one Tab stop with arrow keys,
-//! the page's primary focus) and a scrolling content column of GPUI Kit `GroupBox` groups
-//! with `Switch`, `NumberInput`, `Input`, and `Select` controls.
+//! Layout: the section nav is the app sidebar in Settings mode (SET-080, `shell::app_shell`),
+//! so this page is only the scrolling content column of GPUI Kit `GroupBox` groups with
+//! `Switch`, `NumberInput`, `Input`, and `Select` controls.
 //!
 //! The GPUI Kit `Settings` container isn't used: its virtualised page list drops off-screen
 //! controls from the Tab order (KBD-072/092), its section can't follow the route (deep
@@ -23,9 +23,8 @@ use std::collections::HashMap;
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState, NumberInput};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
-use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme, IconName, IndexPath, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, IndexPath, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
@@ -35,10 +34,7 @@ use gpui_kit::{
 pub use add_engine::AddEngineDialog;
 pub use diagnostics::{copy_diagnostics, view_licenses};
 
-use crate::actions::Navigate;
-use crate::actions::sidebar as nav_actions;
-use crate::keymap::ctx;
-use crate::nav::{Route, SettingsSection};
+use crate::nav::SettingsSection;
 use crate::shell::shortcuts::ShortcutList;
 use crate::state::{AppState, EngineListStore};
 use crate::strings as s;
@@ -52,7 +48,9 @@ type Choice = Vec<&'static str>;
 pub struct SettingsPage {
     section: SettingsSection,
     engine_list: Entity<EngineListStore>,
-    nav_focus: FocusHandle,
+    /// The page root (not a Tab stop). Page-local dispatch (`dispatch_here`) starts here, and
+    /// it is the Content region's default; the section nav lives in the shell sidebar.
+    focus: FocusHandle,
     scroll: ScrollHandle,
     /// One non-tab-stop focus container per content block: the block holding focus is
     /// scrolled into view (keyboard users never tab into an invisible control).
@@ -153,7 +151,7 @@ impl SettingsPage {
         Self {
             section,
             engine_list,
-            nav_focus: cx.focus_handle().tab_stop(true),
+            focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             blocks: Vec::new(),
             last_block: None,
@@ -185,8 +183,8 @@ impl SettingsPage {
     pub fn shortcuts(&self) -> &Entity<ShortcutList> {
         &self.shortcuts
     }
-    pub fn nav_focus(&self) -> &FocusHandle {
-        &self.nav_focus
+    pub fn focus(&self) -> &FocusHandle {
+        &self.focus
     }
     pub fn engines_ui(&self) -> &engines::EnginesUi {
         &self.engines
@@ -350,107 +348,6 @@ impl SettingsPage {
                 state.update(cx, |s, cx| s.set_value(want, window, cx));
             }
         }
-    }
-
-    // ── section nav (one Tab stop, arrow keys; KBD-004) ────────────────────────────────
-
-    fn section_ix(&self) -> usize {
-        SettingsSection::ALL
-            .iter()
-            .position(|s| *s == self.section)
-            .unwrap_or(0)
-    }
-
-    /// Arrow keys switch sections in place (like tabs: no history entry).
-    fn step_section(&mut self, to: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let to = to.min(SettingsSection::ALL.len() - 1);
-        let section = SettingsSection::ALL[to];
-        if section != self.section {
-            self.set_section(section, cx);
-            window.dispatch_action(
-                Box::new(crate::actions::res::ReplaceRoute {
-                    route: Route::Settings { section },
-                }),
-                cx,
-            );
-        }
-    }
-
-    fn on_nav_prev(&mut self, _: &nav_actions::Prev, w: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.section_ix().saturating_sub(1);
-        self.step_section(ix, w, cx);
-    }
-    fn on_nav_next(&mut self, _: &nav_actions::Next, w: &mut Window, cx: &mut Context<Self>) {
-        let ix = self.section_ix() + 1;
-        self.step_section(ix, w, cx);
-    }
-    fn on_nav_first(&mut self, _: &nav_actions::First, w: &mut Window, cx: &mut Context<Self>) {
-        self.step_section(0, w, cx);
-    }
-    fn on_nav_last(&mut self, _: &nav_actions::Last, w: &mut Window, cx: &mut Context<Self>) {
-        self.step_section(usize::MAX, w, cx);
-    }
-    /// `Enter` / `Space` on the nav: into the section's first control.
-    fn on_nav_activate(
-        &mut self,
-        _: &nav_actions::Activate,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        window.focus_next(cx);
-    }
-
-    fn render_nav(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let focused = self.nav_focus.is_focused(window);
-        let items: Vec<SidebarMenuItem> = SettingsSection::ALL
-            .iter()
-            .map(|sec| {
-                let sec = *sec;
-                let icon = match sec {
-                    SettingsSection::General => IconName::Settings2,
-                    SettingsSection::Engines => IconName::Frame,
-                    SettingsSection::Containers => IconName::Inspector,
-                    SettingsSection::Logs => IconName::FileText,
-                    SettingsSection::Terminal => IconName::SquareTerminal,
-                    SettingsSection::Stats => IconName::ChartPie,
-                    SettingsSection::Diagnostics => IconName::Info,
-                    SettingsSection::Keyboard => IconName::ALargeSmall,
-                };
-                SidebarMenuItem::new(sec.label())
-                    .icon(icon)
-                    .active(sec == self.section)
-                    .when(focused && sec == self.section, |this| {
-                        this.label_style(gpui_kit::StyleRefinement::default().underline())
-                    })
-                    .on_click(move |_, window, cx| {
-                        window.dispatch_action(
-                            Box::new(Navigate {
-                                route: Route::Settings { section: sec },
-                            }),
-                            cx,
-                        )
-                    })
-            })
-            .collect();
-        div()
-            .id("settings-nav")
-            .key_context(ctx::SIDEBAR)
-            .track_focus(&self.nav_focus)
-            .h_full()
-            .flex_shrink_0()
-            .on_action(cx.listener(Self::on_nav_prev))
-            .on_action(cx.listener(Self::on_nav_next))
-            .on_action(cx.listener(Self::on_nav_first))
-            .on_action(cx.listener(Self::on_nav_last))
-            .on_action(cx.listener(Self::on_nav_activate))
-            .map(|el| crate::ui::focus_ring(el, focused, cx))
-            .child(
-                Sidebar::new("settings-sidebar")
-                    .collapsible(false)
-                    .w(px(200.))
-                    .child(SidebarMenu::new().children(items)),
-            )
-            .into_any_element()
     }
 
     // ── content ────────────────────────────────────────────────────────────────────────
@@ -702,15 +599,15 @@ impl SettingsPage {
     }
 }
 
-/// Click handler that dispatches `action` from the page's own node (the section nav), so it
+/// Click handler that dispatches `action` from the page's own root node, so it
 /// reaches the page's and the shell's handlers even when focus is elsewhere: GPUI Kit buttons
 /// don't take focus on mouse down, and `Window::dispatch_action` starts at the focused node.
 pub(crate) fn dispatch_here(
-    nav: &FocusHandle,
+    page: &FocusHandle,
     action: impl gpui_kit::Action,
 ) -> impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static {
-    let nav = nav.clone();
-    move |_, window, cx| nav.dispatch_action(&action, window, cx)
+    let page = page.clone();
+    move |_, window, cx| page.dispatch_action(&action, window, cx)
 }
 
 /// A titled GPUI Kit `GroupBox` of setting rows.
@@ -781,13 +678,15 @@ pub fn new(
 
 impl Focusable for SettingsPage {
     fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.nav_focus.clone()
+        self.focus.clone()
     }
 }
 
 impl PageView for SettingsPage {
+    /// The page root; the shell focuses its sidebar section nav instead on navigation
+    /// (SET-080, KBD-024).
     fn primary_focus(&self, _: &App) -> FocusHandle {
-        self.nav_focus.clone()
+        self.focus.clone()
     }
 
     /// `Mod+F` on Settings › Keyboard filters the shortcuts.
@@ -795,22 +694,24 @@ impl PageView for SettingsPage {
         if self.section == SettingsSection::Keyboard {
             let list = self.shortcuts.clone();
             list.update(cx, |l, cx| l.focus_filter(window, cx));
-        } else {
-            window.focus(&self.nav_focus, cx);
         }
     }
 }
 
+/// Width cap of the settings column (header and groups share it, so their edges line up).
+const CONTENT_MAX_W: gpui_kit::Pixels = px(900.);
+
 impl Render for SettingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.engines.sync_name_inputs(&self.engine_list, window, cx);
-        let nav = self.render_nav(window, cx);
         let blocks = self.blocks_for(window, cx);
         while self.blocks.len() < blocks.len() {
             self.blocks.push(cx.focus_handle());
         }
         self.reveal_focused_block(window, cx);
         let header = v_flex()
+            .w_full()
+            .max_w(CONTENT_MAX_W)
             .gap_1()
             .pb_2()
             .child(
@@ -828,10 +729,10 @@ impl Render for SettingsPage {
         let handles = self.blocks.clone();
         h_flex()
             .id("settings-page")
+            .track_focus(&self.focus)
             .size_full()
             .on_action(cx.listener(engines::on_engine_op))
             .on_action(cx.listener(engines::on_rescan))
-            .child(nav)
             .child(
                 v_flex()
                     .id("settings-content")
@@ -842,13 +743,16 @@ impl Render for SettingsPage {
                     .track_scroll(&self.scroll)
                     .p_4()
                     .gap_4()
+                    // The column is capped and centred in the space right of the sidebar.
+                    .items_center()
                     .child(header)
                     .children(blocks.into_iter().zip(handles).enumerate().map(
                         |(ix, (block, handle))| {
                             div()
                                 .id(("settings-block", ix))
                                 .track_focus(&handle)
-                                .max_w(px(900.))
+                                .w_full()
+                                .max_w(CONTENT_MAX_W)
                                 .child(block)
                         },
                     )),

@@ -18,7 +18,7 @@ use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div, px};
 use super::model::{GroupInfo, sort_keys};
 use crate::actions::{OnRow, RowCommand};
 use crate::assets::Lucide;
-use crate::pages::resources::chrome::name_cell;
+use crate::pages::resources::chrome::{name_cell, row_menu_button};
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::status_chip::{Tone, container_chip, health_chip, tone_tag};
@@ -134,12 +134,12 @@ impl ContainersDelegate {
                 RowCommand::Delete,
                 key.clone(),
             ))
-            .child(btn(
-                "more",
-                IconName::EllipsisVertical.into(),
-                s::MORE_ACTIONS,
-                RowCommand::ContextMenu,
-                key,
+            .child(row_menu_button(
+                ("more", row_ix),
+                Box::new(OnRow {
+                    row: key,
+                    action: RowCommand::ContextMenu,
+                }),
             ))
             .into_any_element()
     }

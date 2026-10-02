@@ -8,7 +8,6 @@ use dk_core::grouping::GroupBy;
 use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineId, StatsSample};
 use dk_hub::Feed;
 use futures::StreamExt;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
@@ -35,7 +34,8 @@ use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive, should_confirm_stopped_delete};
 use crate::ui::list_table::{ListEvent, ListTable, RowKind, SortState};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::widgets::{focus_wrap, port_url};
@@ -519,22 +519,13 @@ impl ContainersPage {
     // ── menus (KBD-039, Mod+Shift+O, overflow) ─────────────────────────────────────────
 
     /// Opens menus under their trigger (or under the group-by button for key-only menus).
-    fn menu_anchor(
-        &self,
-        focus: &FocusHandle,
-        _window: &Window,
-        _cx: &App,
-    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+    fn menu_anchor(&self, focus: &FocusHandle, _window: &Window, _cx: &App) -> MenuAnchor {
         let b = if *focus == self.overflow_focus {
             self.overflow_bounds
         } else {
             self.group_bounds
         };
-        if b.size.width > px(0.) {
-            point(b.origin.x, b.origin.y + b.size.height + px(4.))
-        } else {
-            point(px(320.), px(110.))
-        }
+        MenuAnchor::below_or(b, point(px(320.), px(110.)))
     }
 
     fn open_menu(
@@ -1322,7 +1313,7 @@ impl ContainersPage {
                             window,
                             cx,
                         )
-                        .on_prepaint({
+                        .on_bounds({
                             let this = cx.entity().downgrade();
                             move |b, _, cx| {
                                 this.update(cx, |p, _| p.group_bounds = b).ok();
@@ -1350,7 +1341,7 @@ impl ContainersPage {
                             window,
                             cx,
                         )
-                        .on_prepaint({
+                        .on_bounds({
                             let this = cx.entity().downgrade();
                             move |b, _, cx| {
                                 this.update(cx, |p, _| p.overflow_bounds = b).ok();

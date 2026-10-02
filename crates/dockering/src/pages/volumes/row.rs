@@ -16,7 +16,7 @@ use crate::actions::{OnRow, RowCommand, list, volume};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
 use crate::pages::resources::chrome::{
-    dash, hinted, mono_cell, name_cell, row_button, skeleton_cell, text_cell,
+    dash, hinted, mono_cell, name_cell, row_button, row_menu_button, skeleton_cell, text_cell,
 };
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
@@ -156,11 +156,8 @@ impl ListDelegate for VolumesDelegate {
                         self.read_only,
                         on_row(&key, RowCommand::Delete),
                     ))
-                    .child(row_button(
+                    .child(row_menu_button(
                         ("more", row_ix),
-                        IconName::EllipsisVertical,
-                        s::MORE_ACTIONS,
-                        false,
                         on_row(&key, RowCommand::ContextMenu),
                     ))
                     .into_any_element()

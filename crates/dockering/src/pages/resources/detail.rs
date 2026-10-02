@@ -1,8 +1,8 @@
 //! Shared pieces of the Image, Volume and Network detail pages (spec 30 §2, IMG-010,
 //! VOL-010, NET-003):
 //!
-//! - [`DetailTabs`]: a GPUI Kit `TabBar` that is one focusable stop with arrow keys
-//!   (`DetailTabs` key context, KBD-040) and `Ctrl+Tab` handled by the page;
+//! - [`tab_bar`]: a segmented GPUI Kit `TabBar` with icons (SHL-025) that is one focusable
+//!   stop with arrow keys (`DetailTabs` key context, KBD-040), `Ctrl+Tab` handled by the page;
 //! - [`InspectView`]: read-only JSON in the GPUI Kit code editor, with *Copy* and the
 //!   editor's own search (`Mod+F` inside it, KBD-025). Pretty-printing runs on
 //!   `background_spawn` (NFR-003);
@@ -16,7 +16,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::description_list::{DescriptionItem, DescriptionList};
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     Action, AnyElement, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable,
@@ -60,37 +60,89 @@ impl<T> Loaded<T> {
     }
 }
 
-/// The tab bar of a detail page: one Tab stop, `←/→` switch tabs (bound in the
-/// `DetailTabs` context to `detail::PrevTab/NextTab`, which the page handles).
+/// One detail tab: label, icon, disabled.
+pub struct TabSpec {
+    pub label: &'static str,
+    pub icon: Icon,
+    pub disabled: bool,
+}
+
+impl TabSpec {
+    pub fn new(label: &'static str, icon: impl Into<Icon>) -> Self {
+        Self {
+            label,
+            icon: icon.into(),
+            disabled: false,
+        }
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+/// The segmented tab control of a detail page (SHL-025): icon + label per tab, a sliding
+/// selection, and a bar that hugs its content. The bar is unstyled by the caller; wrap it in
+/// [`tab_bar`] (or an equivalent focus wrapper) to make it one Tab stop.
+pub fn segmented_tabs(
+    id: &'static str,
+    tabs: Vec<TabSpec>,
+    selected: usize,
+    on_select: impl Fn(&usize, &mut Window, &mut App) + 'static,
+) -> TabBar {
+    TabBar::new(id)
+        .segmented()
+        .selected_index(selected)
+        .on_click(on_select)
+        .children(tabs.into_iter().map(|t| {
+            Tab::new().aria_label(t.label).disabled(t.disabled).child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(t.icon.small())
+                    .child(t.label),
+            )
+        }))
+}
+
+/// The focus wrapper of a detail tab control: one Tab stop in the `DetailTabs` key context
+/// (`←/→` → `detail::PrevTab/NextTab`, KBD-040). The ring follows the control's rounded
+/// outline instead of boxing the whole row (KBD-003, SHL-025), and shows for keyboard focus
+/// only: navigation focuses the tab bar (KBD-007), so a mouse click would otherwise ring it.
+pub fn tab_bar_frame(
+    id: &'static str,
+    key_context: &str,
+    focus: &FocusHandle,
+    bar: TabBar,
+    window: &Window,
+    cx: &App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let focused = focus.is_focused(window) && window.last_input_was_keyboard();
+    div()
+        .id(id)
+        .key_context(key_context)
+        .track_focus(focus)
+        .self_start()
+        .p(px(2.))
+        .rounded(cx.theme().radius_lg + px(2.))
+        .map(|el| focus_ring(el, focused, cx))
+        .child(bar)
+}
+
+/// The tab bar of a resource detail page: [`segmented_tabs`] in a [`tab_bar_frame`].
 pub fn tab_bar(
     focus: &FocusHandle,
-    labels: &[(&'static str, bool)],
+    tabs: Vec<TabSpec>,
     selected: usize,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
     window: &Window,
     cx: &App,
 ) -> AnyElement {
-    let focused = focus.is_focused(window);
-    div()
-        .id("detail-tabs")
-        .key_context(ctx::DETAIL_TABS)
-        .track_focus(focus)
-        .px_1()
-        .rounded(cx.theme().radius)
-        .map(|el| focus_ring(el, focused, cx))
-        .child(
-            TabBar::new("detail-tab-bar")
-                .underline()
-                .small()
-                .selected_index(selected)
-                .on_click(move |ix, window, cx| on_select(*ix, window, cx))
-                .children(
-                    labels
-                        .iter()
-                        .map(|(label, disabled)| Tab::new().label(*label).disabled(*disabled)),
-                ),
-        )
-        .into_any_element()
+    let bar = segmented_tabs("detail-tab-bar", tabs, selected, move |ix, window, cx| {
+        on_select(*ix, window, cx)
+    });
+    tab_bar_frame("detail-tabs", ctx::DETAIL_TABS, focus, bar, window, cx).into_any_element()
 }
 
 /// Next enabled tab index after `current` in direction `dir` (wraps).

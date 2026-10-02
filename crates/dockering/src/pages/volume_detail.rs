@@ -13,10 +13,11 @@ use gpui_kit::{
 
 use crate::actions::res::ReplaceRoute;
 use crate::actions::{Navigate, detail, list};
+use crate::assets::Lucide;
 use crate::nav::{ContainerTab, Route, VolumeTab};
 use crate::pages::resources::detail::{
-    InspectView, LinkList, Loaded, gone_banner, header, header_action, kv_section, map_value,
-    mono_value, route_link, step_tab, tab_bar, text_value,
+    InspectView, LinkList, Loaded, TabSpec, gone_banner, header, header_action, kv_section,
+    map_value, mono_value, route_link, step_tab, tab_bar, text_value,
 };
 use crate::pages::resources::ops::is_in_use;
 use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
@@ -28,11 +29,11 @@ use crate::ui::page::{PageView, RoutedPage};
 
 pub const TABS: [VolumeTab; 3] = [VolumeTab::Overview, VolumeTab::UsedBy, VolumeTab::Inspect];
 
-fn tab_label(t: VolumeTab) -> &'static str {
+fn tab_spec(t: VolumeTab) -> TabSpec {
     match t {
-        VolumeTab::Overview => s::TAB_OVERVIEW,
-        VolumeTab::UsedBy => s::TAB_USED_BY,
-        VolumeTab::Inspect => s::TAB_INSPECT,
+        VolumeTab::Overview => TabSpec::new(s::TAB_OVERVIEW, IconName::LayoutDashboard),
+        VolumeTab::UsedBy => TabSpec::new(s::TAB_USED_BY, Lucide::Boxes),
+        VolumeTab::Inspect => TabSpec::new(s::TAB_INSPECT, Lucide::Braces),
     }
 }
 
@@ -380,8 +381,7 @@ impl Render for VolumeDetailPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let gone = self.details.is_gone();
         let ro = self.read_only(cx) || gone;
-        let labels: Vec<(&'static str, bool)> =
-            TABS.iter().map(|t| (tab_label(*t), false)).collect();
+        let tabs: Vec<TabSpec> = TABS.iter().map(|t| tab_spec(*t)).collect();
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let this = cx.entity().downgrade();
         let in_use = self.details.data().map(|d| d.used_by.len()).unwrap_or(0);
@@ -435,7 +435,7 @@ impl Render for VolumeDetailPage {
             })
             .child(tab_bar(
                 &self.tabs_focus,
-                &labels,
+                tabs,
                 selected,
                 move |ix, window, cx| {
                     this.update(cx, |p, cx| p.set_tab(TABS[ix], window, cx))

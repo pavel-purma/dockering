@@ -16,7 +16,8 @@ use gpui_kit::{
 
 use crate::actions::{SetFilter, SortByColumn, list};
 use crate::strings as s;
-use crate::ui::list_table::{ColumnSpec, SortState};
+use crate::ui::list_table::{ColumnSpec, RowMenuTrigger, SortState};
+use crate::ui::menu::TrackBounds as _;
 use crate::ui::widgets::{focus_ring, focus_wrap};
 
 /// The page title with a muted summary (`12 images · 1.2 GB`) and a refresh spinner.
@@ -312,6 +313,30 @@ pub fn row_button(
             cx.stop_propagation();
             window.dispatch_action(action.boxed_clone(), cx)
         })
+}
+
+/// The row ⋮ button (`OnRow` → `ContextMenu`). The row menu it opens is anchored under it
+/// ([`RowMenuTrigger`]); `Button` can't report its bounds, so a wrapper measures it.
+pub fn row_menu_button(id: impl Into<gpui_kit::ElementId>, action: Box<dyn Action>) -> AnyElement {
+    let bounds = std::rc::Rc::new(std::cell::Cell::new(gpui_kit::Bounds::default()));
+    let slot = bounds.clone();
+    div()
+        .child(
+            Button::new(id)
+                .ghost()
+                .xsmall()
+                .icon(IconName::EllipsisVertical)
+                .tooltip(s::MORE_ACTIONS)
+                .tab_stop(false)
+                .on_click(move |_, window, cx| {
+                    // Don't let the click open the row too.
+                    cx.stop_propagation();
+                    RowMenuTrigger::set(bounds.get(), cx);
+                    window.dispatch_action(action.boxed_clone(), cx)
+                }),
+        )
+        .on_bounds(move |b, _, _| slot.set(b))
+        .into_any_element()
 }
 
 /// The primary text of a row (its name). The whole row opens the detail (CON-033), so

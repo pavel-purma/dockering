@@ -24,7 +24,6 @@ pub use model::{ListModel, ListNode, ListRow, RowKind, SortState};
 
 use std::ops::Range;
 
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::actions::{SelectDown, SelectPageDown, SelectPageUp, SelectUp};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
@@ -42,7 +41,7 @@ use crate::actions::{OnRow, RowCommand, list};
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::{KeyMenu, MenuAnchor, TrackBounds as _};
 
 /// A column definition.
 #[derive(Debug, Clone)]
@@ -198,6 +197,24 @@ pub struct Adapter<D: ListDelegate> {
     pending_visible: Option<Range<usize>>,
     /// Painted bounds of the cursor row (anchors the keyboard row menu, KBD-036).
     cursor_bounds: std::rc::Rc<std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>>,
+}
+
+/// Bounds of the row ⋮ button that was just clicked: the row menu opens under it instead
+/// of at the cursor row (one menu open at a time, so one slot per window is enough).
+#[derive(Default)]
+pub struct RowMenuTrigger(std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>);
+
+impl gpui_kit::Global for RowMenuTrigger {}
+
+impl RowMenuTrigger {
+    /// Records the ⋮ button under the pointer; call from its click handler.
+    pub fn set(bounds: gpui_kit::Bounds<Pixels>, cx: &mut App) {
+        cx.default_global::<RowMenuTrigger>().0.set(Some(bounds));
+    }
+
+    fn take(cx: &mut App) -> Option<gpui_kit::Bounds<Pixels>> {
+        cx.default_global::<RowMenuTrigger>().0.take()
+    }
 }
 
 impl<D: ListDelegate> Adapter<D> {
@@ -364,7 +381,7 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
             .items_center()
             .overflow_hidden()
             .when(is_cursor, move |this| {
-                this.on_prepaint(move |b, _, _| slot.set(Some(b)))
+                this.on_bounds(move |b, _, _| slot.set(Some(b)))
             })
             .child(
                 self.delegate
@@ -981,14 +998,19 @@ impl<D: ListDelegate> ListTable<D> {
         };
         let table_focus = self.table.focus_handle(cx);
         let table = self.table.clone();
-        // Position: left edge of the table, at the cursor row (36 px rows + header).
-        // Anchor below the cursor row (its first cell's painted bounds), else the table top.
-        let pos = match self.table.read(cx).delegate().cursor_bounds.get() {
-            Some(b) => gpui_kit::point(b.origin.x + px(48.), b.origin.y + b.size.height),
-            None => gpui_kit::point(
-                self.bounds.origin.x + px(56.),
-                self.bounds.origin.y + px(40.),
-            ),
+        // Under the row's ⋮ button when it was clicked; from the keyboard, below the cursor
+        // row's first cell, else the table top.
+        let pos = if let Some(b) = RowMenuTrigger::take(cx) {
+            MenuAnchor::Below(b)
+        } else {
+            match self.table.read(cx).delegate().cursor_bounds.get() {
+                Some(b) => gpui_kit::point(b.origin.x + px(48.), b.origin.y + b.size.height).into(),
+                None => gpui_kit::point(
+                    self.bounds.origin.x + px(56.),
+                    self.bounds.origin.y + px(40.),
+                )
+                .into(),
+            }
         };
         self.key_menu = Some(KeyMenu::open(
             pos,
@@ -1082,7 +1104,7 @@ impl<D: ListDelegate> Render for ListTable<D> {
                         ),
                 )
             })
-            .on_prepaint({
+            .on_bounds({
                 let this = cx.entity().downgrade();
                 move |bounds, _, cx| {
                     this.update(cx, |t, _| t.bounds = bounds).ok();
