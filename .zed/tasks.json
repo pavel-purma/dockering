@@ -1,0 +1,81 @@
+// Dockering tasks for Zed (command palette: `task: spawn`, or alt-shift-t).
+// On Windows every cargo call goes through scripts/dev.ps1, which loads the VS Build Tools x64
+// environment — plain `cargo` fails to link there (spike F-1). The script is started with
+// `pwsh -File`, so a bare `--` reaches cargo verbatim (`pwsh -Command` would drop it).
+// macOS/Linux: run the same commands with plain `cargo` (see the README).
+[
+  // ── run ─────────────────────────────────────────────────────────────────────────────────
+  {
+    "label": "run: Dockering",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "run", "-p", "dockering"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "run: Dockering (demo)",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "run", "-p", "dockering", "--", "--demo"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "run: Dockering (release)",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "run", "--release", "-p", "dockering"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+
+  // ── build (also used by .zed/debug.json) ─────────────────────────────────────────────────
+  {
+    "label": "build: dockering",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "build", "-p", "dockering"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus",
+    "hide": "on_success"
+  },
+  {
+    "label": "build: dockering (release-debug)",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "build", "--profile", "release-debug", "-p", "dockering"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus",
+    "hide": "on_success"
+  },
+  {
+    "label": "build: dk-hub dump example",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "build", "-p", "dk-hub", "--example", "dump"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus",
+    "hide": "on_success"
+  },
+
+  // ── checks ──────────────────────────────────────────────────────────────────────────────
+  {
+    "label": "test: workspace",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "test", "--workspace"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "check: clippy",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "check: blocking calls (NFR-001)",
+    "command": "pwsh",
+    "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$ZED_WORKTREE_ROOT/scripts/dev.ps1", "xtask", "check-blocking"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]

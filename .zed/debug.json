@@ -1,0 +1,51 @@
+// Dockering debug scenarios for Zed (command palette: `debugger: start`, or F4).
+// Adapter: CodeLLDB (built into Zed). It reads the MSVC PDB symbols on Windows — breakpoints,
+// stepping and backtraces work; LLDB has no Rust language plugin there, so inspecting Rust
+// locals is limited (use the VS Code `cppvsdbg` configuration for rich variable views).
+// Each scenario builds first through the matching task in .zed/tasks.json (via scripts/dev.ps1).
+// macOS/Linux: drop the `.exe` suffix from `program`.
+[
+  {
+    "label": "Debug Dockering",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": "build: dockering",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/dockering.exe",
+    "args": [],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" },
+    "sourceLanguages": ["rust"]
+  },
+  {
+    "label": "Debug Dockering (demo)",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": "build: dockering",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/dockering.exe",
+    "args": ["--demo"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" },
+    "sourceLanguages": ["rust"]
+  },
+  {
+    "label": "Debug Dockering (release)",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": "build: dockering (release-debug)",
+    "program": "$ZED_WORKTREE_ROOT/target/release-debug/dockering.exe",
+    "args": [],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "sourceLanguages": ["rust"]
+  },
+  {
+    "label": "Debug dk-hub dump example",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": "build: dk-hub dump example",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/examples/dump.exe",
+    "args": [],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "env": { "RUST_LOG": "debug" },
+    "sourceLanguages": ["rust"]
+  }
+]

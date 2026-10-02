@@ -66,6 +66,19 @@ Windows, so the MSVC environment is loaded automatically):
   Windows uses the C/C++ extension's debugger (`cppvsdbg`); macOS/Linux use CodeLLDB.
 - **Checks:** `test: workspace` (default test task), `check: clippy`, `check: blocking calls (NFR-001)`.
 
+### Zed
+
+`.zed/tasks.json` and `.zed/debug.json` mirror the VS Code setup (Windows commands go through
+`scripts/dev.ps1` via `pwsh -File`):
+
+- **Run:** command palette → `task: spawn` (`alt-shift-t`) → `run: Dockering`, `run: Dockering (demo)`,
+  `run: Dockering (release)`; also `build: …`, `test: workspace`, `check: clippy`, `check: blocking calls (NFR-001)`.
+- **Debug:** `debugger: start` (`F4`) → `Debug Dockering`, `Debug Dockering (demo)`, `Debug Dockering (release)`,
+  `Debug dk-hub dump example`. Uses Zed's built-in CodeLLDB adapter; each scenario builds first.
+  On Windows (MSVC/PDB) breakpoints, stepping and backtraces work, but LLDB can't inspect Rust locals
+  in detail — use the VS Code `cppvsdbg` configuration when you need that. On macOS/Linux, drop the
+  `.exe` suffix from `program` in `.zed/debug.json`.
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
