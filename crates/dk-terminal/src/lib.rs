@@ -18,6 +18,7 @@ mod view;
 
 use bytes::Bytes;
 
+pub use model::TerminalModel;
 pub use view::palette::Palette;
 pub use view::{OUTPUT_COALESCE, RESIZE_DEBOUNCE, TerminalView, encode_paste};
 

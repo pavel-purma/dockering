@@ -538,4 +538,23 @@ mod tests {
         assert!(m.sync_deadline().is_none());
         assert!(m.grid_text().contains("buffered"));
     }
+
+    /// TRM-010 diagnostics: parse cost of a full 200×50 screen of coloured text.
+    #[test]
+    fn trm_010_parse_full_screen_timing() {
+        let mut m = TerminalModel::new(200, 50, 10_000);
+        let mut screen = String::from("\x1b[H\x1b[2J");
+        for row in 0..50 {
+            screen.push_str(&format!("\x1b[3{}m", row % 8));
+            screen.push_str(&"x".repeat(200));
+        }
+        let rounds = 100;
+        let started = std::time::Instant::now();
+        for _ in 0..rounds {
+            m.advance(screen.as_bytes());
+        }
+        let per_screen = started.elapsed() / rounds;
+        eprintln!("[perf] parse 200x50 screen: {per_screen:?}");
+        assert!(per_screen < std::time::Duration::from_millis(30));
+    }
 }

@@ -392,7 +392,8 @@ impl TerminalView {
             }
             return;
         }
-        if self.read_only {
+        // While an IME composition is open, keys belong to the IME (KBD-083).
+        if self.read_only || self.marked_text.is_some() {
             return;
         }
         if let KeyAction::Pty(bytes) = keys::encode(keystroke, self.model.key_modes()) {

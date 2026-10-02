@@ -280,6 +280,21 @@ fn copy_selection_and_scrollback(cx: &mut TestAppContext) {
     }
     h.render(cx);
 
+    // Shift+PgUp (KBD-063) passes through the encoder to the keymap binding.
+    cx.simulate_keystrokes(h.window, "shift-pageup");
+    assert!(
+        h.view
+            .read_with(cx, |view, _| view.model().display_offset())
+            > 0
+    );
+    assert_eq!(h.input(), b"");
+    cx.simulate_keystrokes(h.window, "shift-pagedown");
+    assert_eq!(
+        h.view
+            .read_with(cx, |view, _| view.model().display_offset()),
+        0
+    );
+
     // Page up scrolls into history; typing jumps back to the live screen.
     cx.dispatch_action(h.window, ScrollPageUp);
     let offset = h
@@ -432,4 +447,28 @@ fn unchanged_rows_are_not_reshaped(cx: &mut TestAppContext) {
         .view
         .read_with(cx, |view, _| view.rows_shaped_last_frame());
     assert_eq!(shaped, 1, "only the edited row is reshaped (of {rows})");
+}
+
+#[gpui_kit::test]
+fn ime_composition_owns_keys(cx: &mut TestAppContext) {
+    use gpui_kit::EntityInputHandler as _;
+    let mut h = open(cx);
+    cx.update_window(h.window, |_, window, cx| {
+        h.view.update(cx, |view, cx| {
+            view.replace_and_mark_text_in_range(None, "ka", None, window, cx)
+        });
+    })
+    .expect("window open");
+    // Navigation keys belong to the IME while composing; they aren't encoded for the PTY.
+    cx.simulate_keystrokes(h.window, "left backspace");
+    assert_eq!(h.input(), b"");
+    cx.update_window(h.window, |_, window, cx| {
+        h.view.update(cx, |view, cx| {
+            view.replace_text_in_range(None, "\u{304b}", window, cx)
+        });
+    })
+    .expect("window open");
+    assert_eq!(h.input(), "\u{304b}".as_bytes());
+    cx.simulate_keystrokes(h.window, "enter");
+    assert_eq!(h.input(), b"\r");
 }
