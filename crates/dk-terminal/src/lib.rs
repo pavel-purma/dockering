@@ -8,6 +8,7 @@
 //! PUBLIC API FIXED — implemented by `gpui-ui` (terminal worktree).
 
 pub mod keys;
+pub mod model;
 
 use bytes::Bytes;
 use gpui_kit::{Context, EventEmitter, FocusHandle, Focusable, IntoElement, Render, Window, div};
