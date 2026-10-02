@@ -55,6 +55,12 @@ pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 /// `EngineInfo.transport_note` of the COM transport (diagnostics, ENG-110).
 pub const COM_TRANSPORT_NOTE: &str = "Run via COM is not verified for this WSL version";
 
+/// `EngineError::Protocol` message for `WSLC_E_EVENTS_LOST` (spec 20 §5.4): the hub maps exactly
+/// this message to `Feed::Lagged`, so consumers do a full refetch and keep the subscription.
+// Mirrors `dk_core::EVENTS_LOST_MESSAGE` (added on the dk-core/dk-hub branch); switch to that
+// constant once it is merged.
+pub const EVENTS_LOST: &str = "events lost";
+
 /// Message returned by `run_image` (CreateContainer is not verified live, see the note).
 pub const RUN_NOT_VERIFIED: &str = "Run via COM is not verified for this WSL version";
 
@@ -1418,9 +1424,10 @@ fn events_raw_stream(inner: Arc<Inner>, since_unix: i64) -> EngineStream<Value> 
                 hr::E_ABORT => return, // cancelled / session terminating / caller exit
                 hr::WSLC_E_EVENT_STREAM_FINISHED => return,
                 hr::WSLC_E_EVENTS_LOST => {
-                    // Spec: the consumer refetches everything. The server resets the reader,
-                    // so keep streaming after reporting the gap.
-                    if !send_blocking(&mut tx, Err(EngineError::protocol("events lost"))) {
+                    // Spec 20 §5.4: report the gap as exactly `Protocol("events lost")` (the hub
+                    // turns it into `Feed::Lagged` → full refetch). The server resets the
+                    // reader, so keep streaming afterwards.
+                    if !send_blocking(&mut tx, Err(EngineError::Protocol(EVENTS_LOST.into()))) {
                         return;
                     }
                 }

@@ -1291,3 +1291,52 @@ fn sta_010_disk_usage_on_demand(cx: &mut TestAppContext) {
     );
     h.shutdown();
 }
+
+/// Spec 10 §4.2 / spec 20 §5.4 (WSLC events lost): when the hub reports `Feed::Lagged`, both the
+/// `EngineStore` and the container detail state do a full refetch **and keep the subscription**
+/// (later events still apply). The lag is real: the UI isn't pumped while the engine floods
+/// events past the hub's ring.
+#[gpui_kit::test]
+fn eng_events_lagged_full_refetch_and_subscription_stays(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let _page = open_detail(&h, cx, "scratchpad", ContainerTab::Overview);
+    let id = id_of("scratchpad");
+    // Two subscribers (store + detail) share the engine's one upstream stream.
+    h.wait_until(cx, "subscribed", |_, _| h.engine.open_streams().0 > 0);
+    h.draw(cx);
+    h.engine.clear_calls();
+    // Volume events: by themselves they refetch only volumes (store) and nothing (detail), so a
+    // containers list / inspect refetch can only come from the `Lagged` handling.
+    for i in 0..4000 {
+        h.engine.emit_event(dk_core::fake::fixtures::event(
+            ResourceKind::Volume,
+            "create",
+            &format!("v{i}"),
+        ));
+    }
+    // Let the hub overrun its ring while the UI side reads nothing.
+    std::thread::sleep(std::time::Duration::from_millis(300)); // nfr-001-allow: test harness only
+    h.wait_until(cx, "full refetch after lag", |_, _| {
+        !h.engine.calls_to("list_containers").is_empty()
+            && !h.engine.calls_to("list_networks").is_empty()
+            && !h.engine.calls_to("inspect_container").is_empty()
+    });
+    // Still subscribed: the store is in events mode (not polling) and a later event applies.
+    let mode = cx.read(|cx| h.shell.read(cx).store().map(|s| s.read(cx).live_mode()));
+    assert_eq!(mode, Some(crate::state::LiveMode::Events));
+    let mut cs = crate::demo::containers();
+    if let Some(c) = cs.iter_mut().find(|c| c.id == id) {
+        c.state = ContainerState::Running;
+        c.status_text = "Up 1 second".into();
+    }
+    h.engine.set_containers(cs);
+    h.engine.emit_event(dk_core::fake::fixtures::event(
+        ResourceKind::Container,
+        "start",
+        &id,
+    ));
+    h.wait_until(cx, "event after the lag still refreshes the detail", |_, cx| {
+        detail_running(&h, cx)
+    });
+    h.shutdown();
+}

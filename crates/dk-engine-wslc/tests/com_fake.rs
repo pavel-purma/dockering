@@ -290,6 +290,35 @@ fn events_stream_and_cancel_on_drop() {
     assert_eq!(v["Actor"]["ID"], "2e4fac884218");
 }
 
+/// Spec 20 §5.4 / review finding 3: `WSLC_E_EVENTS_LOST` surfaces as exactly
+/// `Protocol("events lost")` (what the hub maps to `Feed::Lagged`) and the stream continues.
+#[test]
+fn events_lost_reports_gap_and_stream_continues() {
+    let _serial = serial();
+    let (e, state) = engine();
+    {
+        let mut g = state.lock().expect("state");
+        let first = g.events[0].clone();
+        let second = first.replace("\"start\"", "\"die\"");
+        g.events = vec![first, fake::EVENTS_LOST_MARKER.into(), second];
+    }
+    let items = with_timeout(Duration::from_secs(5), async move {
+        let s = e.events(dk_core::EventFilter {
+            since: Some(time::OffsetDateTime::UNIX_EPOCH),
+            ..Default::default()
+        });
+        s.take(3).collect::<Vec<_>>().await
+    });
+    assert_eq!(items.len(), 3, "{items:?}");
+    assert_eq!(items[0].as_ref().map(|e| e.action.as_str()), Ok("start"));
+    assert_eq!(
+        items[1],
+        Err(EngineError::Protocol("events lost".into())),
+        "exact message the hub maps to Feed::Lagged"
+    );
+    assert_eq!(items[2].as_ref().map(|e| e.action.as_str()), Ok("die"));
+}
+
 #[test]
 fn images_volumes_networks_prune() {
     let _serial = serial();

@@ -79,6 +79,10 @@ pub struct FakeState {
 
 pub type Shared = Arc<Mutex<FakeState>>;
 
+/// An entry of [`FakeState::events`] that makes `GetNext` return `WSLC_E_EVENTS_LOST` (the
+/// server dropped events for a slow reader) instead of an event.
+pub const EVENTS_LOST_MARKER: &str = "<events-lost>";
+
 /// Live `BeginContainerOperation` tokens (incremented on hand-out, decremented on release).
 pub static OPEN_OPERATIONS: AtomicI64 = AtomicI64::new(0);
 /// `CoTaskMemAlloc` blocks handed to the client.
@@ -1169,6 +1173,9 @@ impl IWSLCEventStream_Impl for FakeEvents_Impl {
     unsafe fn GetNext(&self, CancelEvent: HANDLE, EventJson: *mut PSTR) -> HRESULT {
         let i = self.next.fetch_add(1, Ordering::SeqCst) as usize;
         let ev = lock(&self.state).events.get(i).cloned();
+        if ev.as_deref() == Some(EVENTS_LOST_MARKER) {
+            return HRESULT(hr::WSLC_E_EVENTS_LOST);
+        }
         if let Some(ev) = ev {
             // SAFETY: out-param per IDL.
             return unsafe { put_str(EventJson, &ev) };
