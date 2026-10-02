@@ -44,6 +44,9 @@ pub const MAX_POINTS: usize = 300;
 pub const MAX_SAMPLES: usize = 3600;
 /// `top()` refresh while visible (STA-008).
 pub const TOP_INTERVAL: Duration = Duration::from_secs(5);
+/// Max stream items applied per `update` / `cx.notify()`: the hub's history replay (up to
+/// `MAX_SAMPLES` at once) lands in a handful of frames instead of one notify per sample.
+pub const APPLY_CHUNK: usize = 256;
 
 /// Time window (KBD-070).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +185,8 @@ pub struct StatsTab {
     disk_task: Option<Task<()>>,
     /// Last rebuild cost (STA-009, diagnostics).
     pub last_build: Duration,
+    /// `cx.notify()` calls caused by stream items (tests: replay batching).
+    stream_notifies: usize,
     _subs: Vec<Subscription>,
 }
 
@@ -208,6 +213,7 @@ impl StatsTab {
             disk_loading: false,
             disk_task: None,
             last_build: Duration::ZERO,
+            stream_notifies: 0,
             _subs: subs,
         };
         this.set_visible(true, cx);
@@ -239,6 +245,10 @@ impl StatsTab {
     }
     pub fn is_streaming(&self) -> bool {
         self.stream.is_some()
+    }
+    /// Notifies caused by stream items (one per applied chunk).
+    pub fn stream_notifies(&self) -> usize {
+        self.stream_notifies
     }
     pub fn top(&self) -> Option<&ProcessList> {
         self.top.as_ref()
@@ -298,26 +308,22 @@ impl StatsTab {
             let st = self.state.read(cx);
             (st.engine().clone(), st.id().to_owned())
         };
-        let mut stream = AppState::hub(cx).stats(&engine, &id);
+        // Whatever is already buffered (the history replay) arrives as chunks of up to
+        // `APPLY_CHUNK` items; each chunk is applied in one `update` with one notify.
+        let mut stream = AppState::hub(cx)
+            .stats(&engine, &id)
+            .ready_chunks(APPLY_CHUNK);
         self.stream = Some(cx.spawn(async move |this, cx| {
-            while let Some(item) = stream.next().await {
+            while let Some(chunk) = stream.next().await {
                 let keep = this
                     .update(cx, |this, cx| {
                         if this.generation != generation {
                             return false;
                         }
-                        match item {
-                            Ok(Feed::Item(s)) => this.push(Entry::Sample(s)),
-                            Ok(Feed::Lagged { dropped }) => this.push(Entry::Gap(dropped)),
-                            Err(e) => {
-                                this.stream_error = Some(e);
-                                cx.notify();
-                                return false;
-                            }
-                        }
-                        // Stats flush per sample (spec 10 §3.3).
+                        let keep = this.apply_chunk(chunk);
+                        this.stream_notifies += 1;
                         cx.notify();
-                        true
+                        keep
                     })
                     .unwrap_or(false);
                 if !keep {
@@ -332,6 +338,22 @@ impl StatsTab {
             })
             .ok();
         }));
+    }
+
+    /// Applies stream items in order; `false` once an error ends the stream (later items in
+    /// the chunk are ignored, like the per-item loop did).
+    fn apply_chunk(&mut self, chunk: Vec<Result<Feed<StatsSample>, EngineError>>) -> bool {
+        for item in chunk {
+            match item {
+                Ok(Feed::Item(s)) => self.push(Entry::Sample(s)),
+                Ok(Feed::Lagged { dropped }) => self.push(Entry::Gap(dropped)),
+                Err(e) => {
+                    self.stream_error = Some(e);
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn push(&mut self, e: Entry) {

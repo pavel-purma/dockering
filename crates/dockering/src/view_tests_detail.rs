@@ -1156,6 +1156,47 @@ fn sta_001_samples_render_and_history_replays(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// STA-003 / spec 10 §3.3: a full history replay (900 samples = the 15 min ring) is applied in
+/// chunks with one notify each, not one notify per sample.
+#[gpui_kit::test]
+fn sta_003_history_replay_is_batched(cx: &mut TestAppContext) {
+    const N: usize = 900;
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    wait_stats_stream(&h, cx, 1);
+    // Leave the tab: our stream is dropped, the hub's upstream lingers 5 s and keeps filling
+    // the history ring.
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "right");
+    assert!(!cx.read(|cx| stats.read(cx).is_streaming()));
+    let redis = id_of("redis");
+    let base = time::OffsetDateTime::now_utc() - time::Duration::seconds(N as i64);
+    for i in 0..N {
+        h.engine.push_stats(
+            &redis,
+            dk_core::fake::fixtures::stats_sample(
+                base + time::Duration::seconds(i as i64),
+                (i % 100) as f64,
+                64 * 1024 * 1024,
+            ),
+        );
+    }
+    // Let the upstream push everything into the ring.
+    std::thread::sleep(std::time::Duration::from_millis(300)); // nfr-001-allow: test harness only
+    let before = cx.read(|cx| stats.read(cx).stream_notifies());
+    h.press(cx, "left");
+    h.wait_until(cx, "history replayed", |_, cx| {
+        stats.read(cx).samples().len() == N
+    });
+    let notifies = cx.read(|cx| stats.read(cx).stream_notifies()) - before;
+    assert!(
+        notifies <= 30,
+        "{N} replayed samples caused {notifies} notifies (expected a few chunks)"
+    );
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn sta_006_stats_only_while_visible(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
