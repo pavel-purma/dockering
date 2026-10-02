@@ -6,7 +6,7 @@ use windows::{
     Win32::{
         Foundation::*,
         Graphics::Gdi::*,
-        System::SystemServices::*,
+        System::{Ole::RevokeDragDrop, SystemServices::*},
         UI::{
             Controls::*,
             HiDpi::*,
@@ -341,6 +341,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
+        // The handle is still valid here, but not once `DefWindowProc` has
+        // finished destroying the window. Releases the drop target's `Rc`.
+        unsafe { RevokeDragDrop(handle).log_err() };
         let callback = { self.state.callbacks.close.take() };
         // Re-enable parent window if this was a modal dialog
         if let Some(parent_hwnd) = self.parent_hwnd {
