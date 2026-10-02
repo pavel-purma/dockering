@@ -56,7 +56,7 @@ jobs:
           command-arguments: advisories bans licenses sources
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about
+          tool: cargo-about@0.9.2 # match the version that generated the committed file
       - name: THIRD_PARTY_LICENSES.html is up to date (REL-002)
         run: |
           cargo about generate --locked about.hbs -o "$RUNNER_TEMP/THIRD_PARTY_LICENSES.html"
