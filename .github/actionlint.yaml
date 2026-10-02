@@ -1,0 +1,4 @@
+# actionlint config: custom labels of the self-hosted WSL runner (spec 50 "Self-hosted runner").
+self-hosted-runner:
+  labels:
+    - wsl
