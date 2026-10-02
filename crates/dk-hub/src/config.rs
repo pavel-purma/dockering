@@ -232,13 +232,19 @@ use std::path::{Path, PathBuf};
 
 use crate::paths::Paths;
 
-/// Temp file next to `path` (same directory → `rename` is atomic).
+/// A fresh temp file name next to `path` (same directory → `rename` is atomic). The random
+/// suffix keeps concurrent saves to the same path (in this or another process) from sharing
+/// a temp file; callers open it with `create_new` so a collision fails instead of clobbering.
 pub(crate) fn temp_path(path: &Path) -> PathBuf {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".into());
-    path.with_file_name(format!(".{name}.{}.tmp", std::process::id()))
+    path.with_file_name(format!(
+        ".{name}.{}.{:016x}.tmp",
+        std::process::id(),
+        rand::random::<u64>()
+    ))
 }
 
 /// Atomic write: temp file in the same directory + fsync + rename; creates parent dirs.
@@ -248,7 +254,10 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
     let tmp = temp_path(path);
     let res = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
@@ -394,5 +403,43 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn temp_paths_are_unique_hidden_siblings() {
+        let p = Path::new("/x/y/config.toml");
+        let a = temp_path(p);
+        let b = temp_path(p);
+        assert_ne!(a, b);
+        assert_eq!(a.parent(), p.parent());
+        let name = a.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with(".config.toml.") && name.ends_with(".tmp"),
+            "{name}"
+        );
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_to_one_path_never_collide() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("state.json");
+        let payloads: Vec<Vec<u8>> = (0..8u8).map(|i| vec![b'a' + i; 4096]).collect();
+        std::thread::scope(|s| {
+            for bytes in &payloads {
+                let p = &p;
+                s.spawn(move || {
+                    for _ in 0..10 {
+                        write_atomic(p, bytes).unwrap();
+                    }
+                });
+            }
+        });
+        let got = std::fs::read(&p).unwrap();
+        assert!(payloads.contains(&got), "torn or mixed content");
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("state.json")]);
     }
 }

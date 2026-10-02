@@ -820,7 +820,11 @@ pub(crate) fn save_file(h: &HubHandle, path: PathBuf, bytes: Bytes) -> HubCall<(
     call
 }
 
+/// Atomic, durable save: unique temp file in the same directory, `sync_all` (data on disk
+/// before it becomes visible under `path`), then rename. The temp file is removed on error.
 async fn write_atomic_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
     let dir = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -828,15 +832,22 @@ async fn write_atomic_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Re
         .unwrap_or_else(|| PathBuf::from("."));
     tokio::fs::create_dir_all(&dir).await?;
     let tmp = config::temp_path(path);
-    if let Err(e) = tokio::fs::write(&tmp, bytes).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
+    let res = async {
+        let mut f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .await?;
+        f.write_all(bytes).await?;
+        f.sync_all().await?;
+        drop(f);
+        tokio::fs::rename(&tmp, path).await
     }
-    if let Err(e) = tokio::fs::rename(&tmp, path).await {
+    .await;
+    if res.is_err() {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(e);
     }
-    Ok(())
+    res
 }
 
 pub(crate) fn launch(h: &HubHandle, argv: Vec<String>) -> HubCall<()> {

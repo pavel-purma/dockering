@@ -1753,3 +1753,31 @@ async fn events_lost_yields_lagged_and_stream_continues() {
     assert!(next(&mut s1, Duration::from_secs(1)).await.is_none());
     hub.shutdown();
 }
+
+#[test]
+fn save_file_concurrent_saves_to_one_path_all_succeed_durably() {
+    // Real runtime + real disk I/O (no Docker): N concurrent saves to the same path must not
+    // share a temp file; each lands whole, the last rename wins, and nothing is left behind.
+    let f = TestFactory::new();
+    let (hub, dir) = start_real(f);
+    let p = dir.path().join("export/logs.txt");
+    let payloads: Vec<Bytes> = (0..16u8)
+        .map(|i| Bytes::from(vec![b'a' + i; 64 * 1024]))
+        .collect();
+    let calls: Vec<_> = payloads
+        .iter()
+        .map(|b| hub.save_file(p.clone(), b.clone()))
+        .collect();
+    let results = block_on_timeout(futures::future::join_all(calls));
+    for r in results {
+        r.unwrap();
+    }
+    let got = Bytes::from(std::fs::read(&p).unwrap());
+    assert!(payloads.contains(&got), "mixed or torn file");
+    let names: Vec<_> = std::fs::read_dir(p.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["logs.txt".to_string()]);
+    hub.shutdown();
+}
