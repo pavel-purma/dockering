@@ -308,3 +308,165 @@ fn kbd_042_alt_up_focuses_row_in_parent_list(cx: &mut TestAppContext) {
     assert_eq!(h.cursor_key(cx), Some(id_of("myshop-db-1")));
     h.shutdown();
 }
+
+// ── Overview / Mounts / Network / Inspect (CDT-010…040, KBD-043/044) ─────────────────────
+
+fn details_with(
+    name: &str,
+    f: impl FnOnce(&mut dk_core::ContainerDetails),
+) -> dk_core::ContainerDetails {
+    let summary = crate::demo::containers()
+        .into_iter()
+        .find(|c| c.name == name)
+        .expect("demo container");
+    let mut d = dk_core::fake::fixtures::details_for(summary);
+    f(&mut d);
+    d
+}
+
+#[gpui_kit::test]
+fn cdt_010_overview_masks_secrets_and_reveal_works(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Overview);
+    let overview = cx.read(|cx| page.read(cx).tabs().overview.clone()).unwrap();
+    // fixtures: PATH (plain) + DB_PASSWORD (sensitive).
+    let shown =
+        |cx: &mut TestAppContext, key: &str| cx.read(|cx| overview.read(cx).env_display(key, cx));
+    assert_eq!(shown(cx, "PATH").as_deref(), Some("/usr/bin"));
+    assert_eq!(
+        shown(cx, "DB_PASSWORD").as_deref(),
+        Some(crate::strings::MASKED_VALUE)
+    );
+    // Keyboard: focus the panel, move to the secret row, Space reveals it.
+    let f = cx.read(|cx| overview.read(cx).rows().focus.clone());
+    h.focus(cx, &f);
+    overview.update(cx, |o, _| o.rows_mut().set_cursor("env:DB_PASSWORD"));
+    h.press(cx, "space");
+    assert_eq!(shown(cx, "DB_PASSWORD").as_deref(), Some("secret"));
+    h.press(cx, "space");
+    assert_eq!(
+        shown(cx, "DB_PASSWORD").as_deref(),
+        Some(crate::strings::MASKED_VALUE)
+    );
+    // Mod+C copies the focused value (KBD-044), even while masked (explicit action).
+    h.press(cx, "ctrl-c");
+    let copied = cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied.as_deref(), Some("secret"));
+    // Single letters still work on the non-input panel (KBD-041): C copies the id.
+    h.press(cx, "c");
+    let copied = cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied, Some(id_of("redis")));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_044_rows_arrows_and_enter_follows_image_link(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Overview);
+    let overview = cx.read(|cx| page.read(cx).tabs().overview.clone()).unwrap();
+    let f = cx.read(|cx| overview.read(cx).rows().focus.clone());
+    h.focus(cx, &f);
+    h.press(cx, "end");
+    let last = cx.read(|cx| overview.read(cx).rows().cursor().cloned());
+    assert_eq!(last.as_deref(), Some("res:pids"));
+    h.press(cx, "home down down");
+    h.press(cx, "enter");
+    let image_id = crate::demo::containers()
+        .into_iter()
+        .find(|c| c.name == "redis")
+        .unwrap()
+        .image_id;
+    h.wait_until(cx, "image detail", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::ImageDetail { id, .. } if *id == image_id)
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn cdt_020_mounts_volume_link_opens_volume_detail(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.engine.set_container_details(details_with("redis", |d| {
+        d.mounts = vec![
+            dk_core::MountDetail {
+                kind: dk_core::MountKind::Bind,
+                source: "/home/dev/conf".into(),
+                destination: "/etc/redis".into(),
+                mode: "ro".into(),
+                rw: false,
+                propagation: None,
+                volume_name: None,
+            },
+            dk_core::MountDetail {
+                kind: dk_core::MountKind::Volume,
+                source: "/var/lib/docker/volumes/scratch/_data".into(),
+                destination: "/data".into(),
+                mode: String::new(),
+                rw: true,
+                propagation: None,
+                volume_name: Some("scratch".into()),
+            },
+        ];
+    }));
+    let page = open_detail(&h, cx, "redis", ContainerTab::Mounts);
+    let mounts = cx.read(|cx| page.read(cx).tabs().mounts.clone()).unwrap();
+    h.draw(cx);
+    let keys = cx.read(|cx| mounts.read(cx).rows().keys().to_vec());
+    assert_eq!(keys.len(), 2);
+    let f = cx.read(|cx| mounts.read(cx).rows().focus.clone());
+    h.focus(cx, &f);
+    h.press(cx, "down enter");
+    h.wait_until(cx, "volume detail", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::VolumeDetail { name, .. } if name == "scratch")
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn cdt_030_network_link_and_port_link(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "myshop-web-1", ContainerTab::Network);
+    let net = cx.read(|cx| page.read(cx).tabs().network.clone()).unwrap();
+    h.draw(cx);
+    let keys = cx.read(|cx| net.read(cx).rows().keys().to_vec());
+    assert!(keys.iter().any(|k| k == "port:0"), "{keys:?}");
+    assert!(keys.iter().any(|k| k == "net:bridge"), "{keys:?}");
+    let f = cx.read(|cx| net.read(cx).rows().focus.clone());
+    h.focus(cx, &f);
+    // Row 0 is the port 8080:80 (Mod+C copies its URL), row 1 the bridge network.
+    h.press(cx, "home ctrl-c");
+    let copied = cx.read_from_clipboard().and_then(|c| c.text());
+    assert_eq!(copied.as_deref(), Some("http://localhost:8080"));
+    h.press(cx, "down enter");
+    h.wait_until(cx, "network detail", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::NetworkDetail { id, .. } if id == "bridge")
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn cdt_040_inspect_shows_pretty_json_unmasked(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Inspect);
+    let inspect = cx.read(|cx| page.read(cx).tabs().inspect.clone()).unwrap();
+    h.wait_until(cx, "json formatted", |_, cx| {
+        !inspect.read(cx).view().read(cx).text().is_empty()
+    });
+    let text = cx.read(|cx| inspect.read(cx).view().read(cx).text().to_string());
+    assert!(text.contains("\n  \"Id\""), "pretty-printed: {text}");
+    assert!(text.contains("DB_PASSWORD=secret"), "not masked (CDT-040)");
+    // Mod+F from the page opens the in-editor search (KBD-025).
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "ctrl-f");
+    let open = cx.read(|cx| {
+        inspect
+            .read(cx)
+            .view()
+            .read(cx)
+            .editor()
+            .read(cx)
+            .search_session()
+            .open
+    });
+    assert!(open);
+    h.shutdown();
+}

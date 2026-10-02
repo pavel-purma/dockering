@@ -638,6 +638,7 @@ impl AppShell {
         match &self.page {
             ShellPage::Containers(p) => p.update(cx, |p, cx| p.focus_search(window, cx)),
             ShellPage::Dyn(p) => p.focus_search(window, cx),
+            ShellPage::ContainerDetail(p) => p.update(cx, |p, cx| p.focus_search(window, cx)),
             _ => self.focus_page(window, cx),
         }
     }
@@ -967,6 +968,11 @@ impl AppShell {
         }
         if let ShellPage::Dyn(p) = &self.page
             && p.clear_search_if_focused(window, cx)
+        {
+            return;
+        }
+        if let ShellPage::ContainerDetail(p) = &self.page
+            && p.update(cx, |p, cx| p.clear_search_if_focused(window, cx))
         {
             return;
         }
