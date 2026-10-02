@@ -1376,8 +1376,41 @@ fn eng_events_lagged_full_refetch_and_subscription_stays(cx: &mut TestAppContext
         "start",
         &id,
     ));
-    h.wait_until(cx, "event after the lag still refreshes the detail", |_, cx| {
-        detail_running(&h, cx)
+    h.wait_until(
+        cx,
+        "event after the lag still refreshes the detail",
+        |_, cx| detail_running(&h, cx),
+    );
+    h.shutdown();
+}
+
+/// TRM-009 v1 limitation: with a template configured, the external terminal is offered only
+/// for transports the host `docker exec` reaches; the fake engine reports transport `fake`,
+/// so the menu item / toolbar button stay hidden and the palette action is a no-op.
+#[gpui_kit::test]
+fn trm_009_external_terminal_hidden_for_unsupported_transport(cx: &mut TestAppContext) {
+    let mut setup = Setup::default();
+    setup.config.terminal.external_terminal = "wt.exe {cmd}".into();
+    let h = start(cx, setup);
+    let page = open_detail(&h, cx, "redis", ContainerTab::Overview);
+    h.wait_until(cx, "engine info", |_, cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .is_some_and(|s| s.read(cx).info().is_some())
     });
+    let available = cx.read(|cx| {
+        page.read(cx)
+            .detail_state()
+            .map(|s| s.read(cx).external_terminal_available(cx))
+    });
+    assert_eq!(available, Some(false), "transport `fake` hides TRM-009");
+    let transport = cx.read(|cx| {
+        h.shell
+            .read(cx)
+            .store()
+            .and_then(|s| s.read(cx).info().and_then(|i| i.transport.clone()))
+    });
+    assert_eq!(transport.as_deref(), Some("fake"));
     h.shutdown();
 }

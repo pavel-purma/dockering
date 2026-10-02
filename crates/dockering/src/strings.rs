@@ -916,6 +916,7 @@ pub const TERMINAL_CUSTOM_CMD: &str = "Command, e.g. /bin/sh -l";
 pub const TERMINAL_CONNECTING: &str = "Connecting…";
 pub const TERMINAL_EXTERNAL: &str = "Open in external terminal";
 pub const TERMINAL_EXTERNAL_FAILED: &str = "Couldn't open the external terminal";
+pub const TERMINAL_EXTERNAL_UNAVAILABLE: &str = "External terminal isn't available for this engine. Set a terminal command in Settings, or use the built-in terminal.";
 pub const TERMINAL_OPEN_FAILED: &str = "Couldn't open a terminal";
 pub const SHELL_AUTO: &str = "Auto";
 pub const SHELL_CUSTOM: &str = "Custom";

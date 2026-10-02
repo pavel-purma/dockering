@@ -260,6 +260,10 @@ impl TerminalTab {
         self.state.read(cx).capabilities(cx)
     }
 
+    fn external_available(&self, cx: &App) -> bool {
+        self.state.read(cx).external_terminal_available(cx)
+    }
+
     fn running(&self, cx: &App) -> bool {
         self.state.read(cx).is_running(cx)
     }
@@ -562,8 +566,14 @@ impl TerminalTab {
     }
 
     /// TRM-009 (optional): launch the configured terminal app with `docker exec -it <id> sh`.
-    /// Limitation: only Docker-CLI-reachable engines can use it; the template decides.
+    /// v1 limitation: only for engines whose transport the host Docker CLI reaches
+    /// ([`HOST_DOCKER_EXEC_TRANSPORTS`]); otherwise the action is not offered and is a no-op.
     fn on_external(&mut self, _: &OpenExternal, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.external_available(cx) {
+            // Reachable from the command palette even where the button/menu item is hidden.
+            notify::info(window, cx, s::TERMINAL_EXTERNAL_UNAVAILABLE);
+            return;
+        }
         let template = AppState::config(cx).terminal.external_terminal.clone();
         let Some(argv) = external_argv(&template, &self.container) else {
             return;
@@ -626,11 +636,7 @@ impl TerminalTab {
     fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let sub_focused = self.sub_tabs_focus.is_focused(window);
         let shell_focused = self.shell_focus.is_focused(window);
-        let external = !AppState::config(cx)
-            .terminal
-            .external_terminal
-            .trim()
-            .is_empty();
+        let external = self.external_available(cx);
         let active = self.active;
         let tabs =
             TabBar::new("terminal-sessions")
@@ -759,22 +765,81 @@ impl TerminalTab {
     }
 }
 
-/// `external_terminal` template → argv: split on whitespace, `{cmd}` replaced by the exec
-/// argv (`docker exec -it <id> sh`); without `{cmd}` the exec argv is appended (TRM-009).
+/// Engine transports (`EngineInfo.transport`) where `docker exec` run on the host reaches the
+/// engine: the Docker CLI talks to the same pipe / socket / TCP endpoint.
+///
+/// TRM-009 is optional (MAY); v1 limitation: the external terminal is only offered for these.
+/// WSL bridge engines (`bridge`, needs `wsl -d <distro> docker exec`), WSLC (`com` / `cli`,
+/// needs `wslc container exec`) and unknown transports hide it. This is decided from the
+/// transport, never from `EngineKind` (ENG-030); a per-engine `exec_command_hint` in
+/// `EngineInfo` would lift the limitation without UI changes.
+pub const HOST_DOCKER_EXEC_TRANSPORTS: &[&str] = &["npipe", "unix", "tcp", "tls"];
+
+/// Whether the external terminal (TRM-009) can be offered for an engine with `info`.
+pub fn external_terminal_supported(info: Option<&dk_core::EngineInfo>) -> bool {
+    info.and_then(|i| i.transport.as_deref())
+        .is_some_and(|t| HOST_DOCKER_EXEC_TRANSPORTS.contains(&t))
+}
+
+/// Splits a command template into words with simple shell-like quoting: whitespace separates
+/// words; `"..."` and `'...'` keep spaces (quotes removed; adjacent text joins the word, e.g.
+/// `--title="My shell"`). No escapes, variables or globbing: the result is an argv, never a
+/// shell string (NFR-022). Each word records whether any part was quoted, so a quoted
+/// `"{cmd}"` stays a literal. `None` on an unterminated quote.
+pub fn split_template(template: &str) -> Option<Vec<(String, bool)>> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut in_word = false;
+    let mut quoted = false;
+    let mut quote: Option<char> = None;
+    for ch in template.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => cur.push(ch),
+            None if ch == '"' || ch == '\'' => {
+                quote = Some(ch);
+                in_word = true;
+                quoted = true;
+            }
+            None if ch.is_whitespace() => {
+                if in_word {
+                    words.push((std::mem::take(&mut cur), quoted));
+                    in_word = false;
+                    quoted = false;
+                }
+            }
+            None => {
+                cur.push(ch);
+                in_word = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if in_word {
+        words.push((cur, quoted));
+    }
+    Some(words)
+}
+
+/// `external_terminal` template → argv (TRM-009). The template is split with
+/// [`split_template`]; an unquoted `{cmd}` word is replaced by the exec argv
+/// (`docker exec -it <id> sh`); without one the exec argv is appended.
 pub fn external_argv(template: &str, container: &str) -> Option<Vec<String>> {
     let exec = ["docker", "exec", "-it", container, "sh"].map(str::to_owned);
-    let parts: Vec<&str> = template.split_whitespace().collect();
+    let parts = split_template(template)?;
     if parts.is_empty() || dk_core::validate::validate_id_or_name(container).is_err() {
         return None;
     }
     let mut out = Vec::new();
     let mut placed = false;
-    for p in parts {
-        if p == "{cmd}" {
+    for (p, quoted) in parts {
+        if p == "{cmd}" && !quoted {
             out.extend(exec.iter().cloned());
             placed = true;
         } else {
-            out.push(p.to_owned());
+            out.push(p);
         }
     }
     if !placed {
@@ -901,5 +966,131 @@ mod tests {
         );
         assert_eq!(external_argv("  ", id), None);
         assert_eq!(external_argv("wt.exe {cmd}", "bad; rm -rf /"), None);
+    }
+
+    fn words(t: &str) -> Option<Vec<String>> {
+        split_template(t).map(|w| w.into_iter().map(|(s, _)| s).collect())
+    }
+
+    #[test]
+    fn trm_009_template_quoting() {
+        // Double and single quotes keep spaces; quotes are removed; no expansion.
+        assert_eq!(
+            words(r#""C:\Program Files\Alacritty\alacritty.exe" -e {cmd}"#),
+            Some(vec![
+                r"C:\Program Files\Alacritty\alacritty.exe".to_owned(),
+                "-e".into(),
+                "{cmd}".into()
+            ])
+        );
+        assert_eq!(
+            words("wt.exe --title 'My shell $HOME' {cmd}"),
+            Some(vec![
+                "wt.exe".to_owned(),
+                "--title".into(),
+                "My shell $HOME".into(),
+                "{cmd}".into()
+            ])
+        );
+        // Quotes join adjacent text into one word; an empty quoted word is kept.
+        assert_eq!(
+            words(r#"term --title="a b"x '' {cmd}"#),
+            Some(vec![
+                "term".to_owned(),
+                "--title=a bx".into(),
+                String::new(),
+                "{cmd}".into()
+            ])
+        );
+        // The other quote character is literal inside quotes.
+        assert_eq!(
+            words(r#"say "it's" 'a "b"'"#),
+            Some(vec!["say".to_owned(), "it's".into(), r#"a "b""#.into()])
+        );
+        assert_eq!(words("  a\tb  "), Some(vec!["a".to_owned(), "b".into()]));
+        assert_eq!(words(r#"term "unterminated"#), None);
+        assert_eq!(words("   "), Some(vec![]));
+    }
+
+    #[test]
+    fn trm_009_external_argv_with_quotes() {
+        let id = "a1b2c3d4e5f6";
+        assert_eq!(
+            external_argv(
+                r#""C:\Program Files\WezTerm\wezterm.exe" start -- {cmd}"#,
+                id
+            ),
+            Some(
+                [
+                    r"C:\Program Files\WezTerm\wezterm.exe",
+                    "start",
+                    "--",
+                    "docker",
+                    "exec",
+                    "-it",
+                    id,
+                    "sh"
+                ]
+                .map(str::to_owned)
+                .to_vec()
+            )
+        );
+        // A quoted "{cmd}" is a literal argument; the exec argv is then appended.
+        assert_eq!(
+            external_argv(r#"echo "{cmd}""#, id),
+            Some(
+                ["echo", "{cmd}", "docker", "exec", "-it", id, "sh"]
+                    .map(str::to_owned)
+                    .to_vec()
+            )
+        );
+        // Shell metacharacters are plain argv text, never interpreted.
+        assert_eq!(
+            external_argv("wt.exe ; rm -rf / {cmd}", id).map(|v| v[1].clone()),
+            Some(";".to_owned())
+        );
+        assert_eq!(external_argv(r#"wt.exe "{cmd}"#, id), None, "unterminated");
+    }
+
+    fn info_with(transport: Option<&str>) -> dk_core::EngineInfo {
+        dk_core::EngineInfo {
+            name: "e".into(),
+            kind: dk_core::EngineKind::Docker,
+            transport: transport.map(str::to_owned),
+            transport_note: None,
+            server_version: String::new(),
+            api_version: None,
+            os: "linux".into(),
+            arch: "amd64".into(),
+            kernel: None,
+            cpus: None,
+            mem_total: None,
+            containers: Default::default(),
+            images: 0,
+            storage_driver: None,
+            root_dir: None,
+            daemon_id: None,
+            list_stats_limit: 20,
+            capabilities: dk_core::Capabilities::all(),
+        }
+    }
+
+    #[test]
+    fn trm_009_offered_only_where_host_docker_exec_works() {
+        for t in ["npipe", "unix", "tcp", "tls"] {
+            assert!(
+                external_terminal_supported(Some(&info_with(Some(t)))),
+                "{t} should offer the external terminal"
+            );
+        }
+        // WSL bridge, WSLC COM / CLI, unknown and missing transports: hidden (v1 limitation).
+        for t in ["bridge", "com", "cli", "fake", "xpc", ""] {
+            assert!(
+                !external_terminal_supported(Some(&info_with(Some(t)))),
+                "{t} must hide the external terminal"
+            );
+        }
+        assert!(!external_terminal_supported(Some(&info_with(None))));
+        assert!(!external_terminal_supported(None), "no info yet");
     }
 }
