@@ -345,11 +345,7 @@ async fn connect_tcp(id: &EngineId, port: u16) -> EngineResult<Arc<dyn Engine>> 
 /// The single conversion point from the Docker backend to `dyn Engine`.
 #[cfg(windows)]
 fn into_engine(engine: dk_engine_docker::DockerEngine) -> EngineResult<Arc<dyn Engine>> {
-    // MERGE-FIXUP: replace with Ok(Arc::new(engine))
-    // (needs `impl dk_core::Engine for DockerEngine` from the Docker backend branch).
-    // Real code: `Ok(Arc::new(engine) as Arc<dyn Engine>)`
-    let _unconverted = engine;
-    Err(EngineError::unreachable("docker backend not merged"))
+    Ok(Arc::new(engine))
 }
 
 #[cfg(not(windows))]
