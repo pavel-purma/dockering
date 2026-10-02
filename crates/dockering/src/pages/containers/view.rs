@@ -116,13 +116,18 @@ impl ContainersPage {
         });
         let group_key_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(s::GROUP_LABEL_KEY));
-        let subs = vec![
+        let mut subs = vec![
             cx.subscribe_in(&table, window, Self::on_list_event),
             cx.subscribe_in(&search, window, Self::on_search_event),
             cx.subscribe_in(&group_key_input, window, Self::on_group_key_event),
             cx.subscribe_in(&store, window, Self::on_store_event),
             cx.observe(&store, |_, _, cx| cx.notify()),
         ];
+        // SHL-007: one app-wide ticker refreshes relative times; repaint the table cells.
+        if let Some(ticker) = crate::state::Ticker::global(cx) {
+            let t = table.clone();
+            subs.push(cx.observe(&ticker, move |_, _, cx| t.update(cx, |_, cx| cx.notify())));
+        }
         let filter_focus = cx.focus_handle().tab_stop(true);
         let group_focus = cx.focus_handle().tab_stop(true);
         let overflow_focus = cx.focus_handle().tab_stop(true);

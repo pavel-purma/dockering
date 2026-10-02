@@ -808,3 +808,59 @@ fn kbd_020_palette_closes_after_non_navigation_command(cx: &mut TestAppContext) 
     assert!(table_focused, "focus returned to the invoker (KBD-007)");
     h.shutdown();
 }
+
+#[gpui_kit::test]
+fn kbd_017_028_theme_toggle_and_sidebar(cx: &mut TestAppContext) {
+    use gpui_kit::component::ActiveTheme;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    let dark_before = cx.read(|cx| cx.theme().is_dark());
+    h.press(cx, "ctrl-shift-l");
+    let dark_after = cx.read(|cx| cx.theme().is_dark());
+    assert_ne!(dark_before, dark_after, "Mod+Shift+L toggles the theme");
+    let saved = cx.read(|cx| crate::state::AppState::config(cx).general.theme);
+    assert_eq!(saved, crate::theme::toggled(dark_before));
+    h.press(cx, "ctrl-b");
+    assert!(h.read(cx, |s, _, _| s.sidebar_collapsed()));
+    h.press(cx, "ctrl-b");
+    assert!(!h.read(cx, |s, _, _| s.sidebar_collapsed()));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn shl_024_zoom_in_out_reset_persists(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    let scale =
+        |cx: &mut TestAppContext| cx.read(|cx| crate::state::AppState::config(cx).general.ui_scale);
+    h.press(cx, "ctrl-=");
+    assert!((scale(cx) - 1.1).abs() < 1e-4, "{}", scale(cx));
+    h.press(cx, "ctrl--");
+    h.press(cx, "ctrl--");
+    assert!((scale(cx) - 0.9).abs() < 1e-4);
+    h.press(cx, "ctrl-0");
+    assert!((scale(cx) - 1.0).abs() < 1e-4);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_026_f5_refetches_everything(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.engine.clear_calls();
+    h.press(cx, "f5");
+    h.wait_until(cx, "all four lists refetched", |_, _| {
+        [
+            "list_containers",
+            "list_images",
+            "list_volumes",
+            "list_networks",
+        ]
+        .iter()
+        .all(|op| !h.engine.calls_to(op).is_empty())
+    });
+    h.shutdown();
+}
