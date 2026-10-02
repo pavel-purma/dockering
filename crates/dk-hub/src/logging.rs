@@ -89,7 +89,10 @@ pub fn install_panic_hook(paths: &Paths) {
             .unwrap_or("<unnamed>")
             .to_owned();
         tracing::error!(panic = %msg, %location, %thread, "panic");
-        if let Err(e) = write_crash_file(&dir, &msg, &location, &thread) {
+        // Panics on hub threads are caught and mapped to errors (NFR-030): not a crash.
+        if !thread.starts_with("dk-hub-")
+            && let Err(e) = write_crash_file(&dir, &msg, &location, &thread)
+        {
             tracing::error!(error = %e, "couldn't write crash file");
         }
         previous(info);
