@@ -7,6 +7,9 @@
 //! `unsafe` is allowed in this module tree only; every block carries a `// SAFETY:` note.
 
 pub mod abi;
+pub mod convert;
+#[cfg(windows)]
+pub mod engine;
 pub mod ffi;
 #[cfg(windows)]
 pub mod pool;
@@ -14,6 +17,9 @@ pub mod pool;
 pub mod stream;
 #[cfg(windows)]
 pub mod win32;
+
+#[cfg(windows)]
+pub use engine::{SelfCheck, WslcComEngine};
 
 /// See [`crate::init_process_com_security`].
 pub fn init_process_com_security() -> bool {

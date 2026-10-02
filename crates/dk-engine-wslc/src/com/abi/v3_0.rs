@@ -10,7 +10,13 @@
 //! **Never** call through these declarations unless `abi::select()` returned this module for
 //! the WSL version read from `wslservice.exe` (ADR-0003, spec 20 §5.3).
 
-#![allow(non_snake_case, non_camel_case_types, clippy::upper_case_acronyms)]
+#![allow(
+    non_snake_case,
+    non_camel_case_types,
+    clippy::upper_case_acronyms,
+    // IDL signatures are fixed by the ABI (e.g. CreateRootNamespaceProcess has 7 params).
+    clippy::too_many_arguments
+)]
 
 use std::ffi::c_void;
 
@@ -426,25 +432,25 @@ pub struct WSLCSessionListEntry {
 
 #[windows::core::interface("5038842F-53DB-4F30-A6D0-A41B02C94AC1")]
 pub unsafe trait IProgressCallback: IUnknown {
-    fn OnProgress(&self, Status: PCSTR, Id: PCSTR, Current: u64, Total: u64) -> HRESULT;
+    pub fn OnProgress(&self, Status: PCSTR, Id: PCSTR, Current: u64, Total: u64) -> HRESULT;
 }
 
 #[windows::core::interface("8153ED5D-8ABB-408B-ADBE-C0F3B13E07C3")]
 pub unsafe trait IWarningCallback: IUnknown {
-    fn OnWarning(&self, Message: PCWSTR) -> HRESULT;
+    pub fn OnWarning(&self, Message: PCWSTR) -> HRESULT;
 }
 
 // ───────────────────────────── IWSLCProcess ─────────────────────────────
 
 #[windows::core::interface("1AD163CD-393D-4B33-83A2-8A3F3F23E608")]
 pub unsafe trait IWSLCProcess: IUnknown {
-    fn Signal(&self, Signal: i32) -> HRESULT;
-    fn GetExitEvent(&self, EventHandle: *mut HANDLE) -> HRESULT;
-    fn GetStdHandle(&self, Fd: i32, Handle: *mut WSLCHandle) -> HRESULT;
-    fn GetFlags(&self, Flags: *mut i32) -> HRESULT;
-    fn GetPid(&self, Pid: *mut i32) -> HRESULT;
-    fn GetState(&self, State: *mut i32, Code: *mut i32) -> HRESULT;
-    fn ResizeTty(&self, Rows: u32, Columns: u32) -> HRESULT;
+    pub fn Signal(&self, Signal: i32) -> HRESULT;
+    pub fn GetExitEvent(&self, EventHandle: *mut HANDLE) -> HRESULT;
+    pub fn GetStdHandle(&self, Fd: i32, Handle: *mut WSLCHandle) -> HRESULT;
+    pub fn GetFlags(&self, Flags: *mut i32) -> HRESULT;
+    pub fn GetPid(&self, Pid: *mut i32) -> HRESULT;
+    pub fn GetState(&self, State: *mut i32, Code: *mut i32) -> HRESULT;
+    pub fn ResizeTty(&self, Rows: u32, Columns: u32) -> HRESULT;
 }
 
 // ───────────────────────────── IWSLCContainer ─────────────────────────────
@@ -452,7 +458,7 @@ pub unsafe trait IWSLCProcess: IUnknown {
 #[windows::core::interface("7577FE8D-DE85-471E-B870-11669986F332")]
 pub unsafe trait IWSLCContainer: IUnknown {
     /* 0*/
-    fn Attach(
+    pub fn Attach(
         &self,
         DetachKeys: PCSTR,
         StdIn: *mut WSLCHandle,
@@ -460,33 +466,33 @@ pub unsafe trait IWSLCContainer: IUnknown {
         StdErr: *mut WSLCHandle,
     ) -> HRESULT;
     /* 1*/
-    fn Stop(&self, Signal: i32, TimeoutSeconds: i32) -> HRESULT;
+    pub fn Stop(&self, Signal: i32, TimeoutSeconds: i32) -> HRESULT;
     /* 2*/
-    fn Start(
+    pub fn Start(
         &self,
         Flags: i32,
         StartOptions: *const WSLCProcessStartOptions,
         WarningCallback: *mut c_void,
     ) -> HRESULT;
     /* 3*/
-    fn Delete(&self, Flags: i32) -> HRESULT;
+    pub fn Delete(&self, Flags: i32) -> HRESULT;
     /* 4*/
-    fn Export(&self, TarHandle: WSLCHandle) -> HRESULT;
+    pub fn Export(&self, TarHandle: WSLCHandle) -> HRESULT;
     /* 5*/
-    fn GetState(&self, State: *mut i32) -> HRESULT;
+    pub fn GetState(&self, State: *mut i32) -> HRESULT;
     /* 6*/
-    fn GetInitProcess(&self, Process: *mut Option<IWSLCProcess>) -> HRESULT;
+    pub fn GetInitProcess(&self, Process: *mut Option<IWSLCProcess>) -> HRESULT;
     /* 7*/
-    fn Exec(
+    pub fn Exec(
         &self,
         Options: *const WSLCProcessOptions,
         StartOptions: *const WSLCProcessStartOptions,
         Process: *mut Option<IWSLCProcess>,
     ) -> HRESULT;
     /* 8*/
-    fn Inspect(&self, Size: BOOL, Output: *mut PSTR) -> HRESULT;
+    pub fn Inspect(&self, Size: BOOL, Output: *mut PSTR) -> HRESULT;
     /* 9*/
-    fn Logs(
+    pub fn Logs(
         &self,
         Flags: i32,
         Stdout: *mut WSLCHandle,
@@ -496,32 +502,47 @@ pub unsafe trait IWSLCContainer: IUnknown {
         Tail: u64,
     ) -> HRESULT;
     /*10*/
-    fn GetId(&self, Id: *mut u8) -> HRESULT;
+    pub fn GetId(&self, Id: *mut u8) -> HRESULT;
     /*11*/
-    fn GetName(&self, Name: *mut PSTR) -> HRESULT;
+    pub fn GetName(&self, Name: *mut PSTR) -> HRESULT;
     /*12*/
-    fn GetLabels(&self, Labels: *mut *mut KeyValuePairInformation, Count: *mut u32) -> HRESULT;
+    pub fn GetLabels(&self, Labels: *mut *mut KeyValuePairInformation, Count: *mut u32) -> HRESULT;
     /*13*/
-    fn Kill(&self, Signal: i32) -> HRESULT;
+    pub fn Kill(&self, Signal: i32) -> HRESULT;
     /*14*/
-    fn Stats(&self, Output: *mut PSTR) -> HRESULT;
+    pub fn Stats(&self, Output: *mut PSTR) -> HRESULT;
     /*15*/
-    fn ConnectToNetwork(&self, Options: *const WSLCNetworkConnectionOptions) -> HRESULT;
+    pub fn ConnectToNetwork(&self, Options: *const WSLCNetworkConnectionOptions) -> HRESULT;
     /*16*/
-    fn DisconnectFromNetwork(&self, NetworkName: PCSTR) -> HRESULT;
+    pub fn DisconnectFromNetwork(&self, NetworkName: PCSTR) -> HRESULT;
     /*17*/
-    fn UploadArchive(&self, TarHandle: WSLCHandle, DestPath: PCSTR, ContentSize: u64) -> HRESULT;
+    pub fn UploadArchive(
+        &self,
+        TarHandle: WSLCHandle,
+        DestPath: PCSTR,
+        ContentSize: u64,
+    ) -> HRESULT;
     /*18*/
-    fn DownloadArchive(&self, SrcPath: PCSTR, FollowLink: BOOL, OutHandle: WSLCHandle) -> HRESULT;
+    pub fn DownloadArchive(
+        &self,
+        SrcPath: PCSTR,
+        FollowLink: BOOL,
+        OutHandle: WSLCHandle,
+    ) -> HRESULT;
     /*19*/
-    fn Restart(&self, Signal: i32, TimeoutSeconds: i32, WarningCallback: *mut c_void) -> HRESULT;
+    pub fn Restart(
+        &self,
+        Signal: i32,
+        TimeoutSeconds: i32,
+        WarningCallback: *mut c_void,
+    ) -> HRESULT;
 }
 
 // ───────────────────────────── IWSLCEventStream ─────────────────────────────
 
 #[windows::core::interface("7EC66D3B-D098-4D48-B69E-69166F6C4745")]
 pub unsafe trait IWSLCEventStream: IUnknown {
-    fn GetNext(&self, CancelEvent: HANDLE, EventJson: *mut PSTR) -> HRESULT;
+    pub fn GetNext(&self, CancelEvent: HANDLE, EventJson: *mut PSTR) -> HRESULT;
 }
 
 // ───────────────────────────── IWSLCSession ─────────────────────────────
@@ -529,17 +550,17 @@ pub unsafe trait IWSLCEventStream: IUnknown {
 #[windows::core::interface("EF0661E4-6364-40EA-B433-E2FDF11F3519")]
 pub unsafe trait IWSLCSession: IUnknown {
     /* 0*/
-    fn GetId(&self, Id: *mut u32) -> HRESULT;
+    pub fn GetId(&self, Id: *mut u32) -> HRESULT;
     /* 1*/
-    fn GetDisplayName(&self, DisplayName: *mut PWSTR) -> HRESULT;
+    pub fn GetDisplayName(&self, DisplayName: *mut PWSTR) -> HRESULT;
     /* 2*/
-    fn GetState(&self, State: *mut i32) -> HRESULT;
+    pub fn GetState(&self, State: *mut i32) -> HRESULT;
     /* 3*/
-    fn GetTerminationEvent(&self, Event: *mut HANDLE) -> HRESULT;
+    pub fn GetTerminationEvent(&self, Event: *mut HANDLE) -> HRESULT;
     /* 4*/
-    fn GetTerminationReason(&self, Reason: *mut i32, Details: *mut PWSTR) -> HRESULT;
+    pub fn GetTerminationReason(&self, Reason: *mut i32, Details: *mut PWSTR) -> HRESULT;
     /* 5*/
-    fn GetEvents(
+    pub fn GetEvents(
         &self,
         SinceTime: i64,
         UntilTime: i64,
@@ -548,7 +569,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         Stream: *mut Option<IWSLCEventStream>,
     ) -> HRESULT;
     /* 6*/
-    fn PullImage(
+    pub fn PullImage(
         &self,
         Image: PCSTR,
         RegistryAuthenticationInformation: PCSTR,
@@ -557,14 +578,14 @@ pub unsafe trait IWSLCSession: IUnknown {
         WarningCallback: *mut c_void,
     ) -> HRESULT;
     /* 7*/
-    fn BuildImage(
+    pub fn BuildImage(
         &self,
         Options: *const c_void,
         ProgressCallback: *mut c_void,
         CancelEvent: HANDLE,
     ) -> HRESULT;
     /* 8*/
-    fn LoadImage(
+    pub fn LoadImage(
         &self,
         ImageHandle: WSLCHandle,
         ContentLength: u64,
@@ -572,7 +593,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         LoadCallback: *mut c_void,
     ) -> HRESULT;
     /* 9*/
-    fn ImportImage(
+    pub fn ImportImage(
         &self,
         ImageHandle: WSLCHandle,
         ImageName: PCSTR,
@@ -581,7 +602,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         ImageId: *mut PSTR,
     ) -> HRESULT;
     /*10*/
-    fn SaveImage(
+    pub fn SaveImage(
         &self,
         OutputHandle: WSLCHandle,
         ImageNameOrID: PCSTR,
@@ -589,7 +610,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         CancelEvent: HANDLE,
     ) -> HRESULT;
     /*11*/
-    fn SaveImages(
+    pub fn SaveImages(
         &self,
         OutputHandle: WSLCHandle,
         ImageNames: *const WSLCStringArray,
@@ -597,25 +618,25 @@ pub unsafe trait IWSLCSession: IUnknown {
         CancelEvent: HANDLE,
     ) -> HRESULT;
     /*12*/
-    fn ListImages(
+    pub fn ListImages(
         &self,
         Options: *const WSLCListImagesOptions,
         Images: *mut *mut WSLCImageInformation,
         Count: *mut u32,
     ) -> HRESULT;
     /*13*/
-    fn DeleteImage(
+    pub fn DeleteImage(
         &self,
         Options: *const WSLCDeleteImageOptions,
         DeletedImages: *mut *mut WSLCDeletedImageInformation,
         Count: *mut u32,
     ) -> HRESULT;
     /*14*/
-    fn TagImage(&self, Options: *const WSLCTagImageOptions) -> HRESULT;
+    pub fn TagImage(&self, Options: *const WSLCTagImageOptions) -> HRESULT;
     /*15*/
-    fn InspectImage(&self, ImageNameOrId: PCSTR, Output: *mut PSTR) -> HRESULT;
+    pub fn InspectImage(&self, ImageNameOrId: PCSTR, Output: *mut PSTR) -> HRESULT;
     /*16*/
-    fn PruneImages(
+    pub fn PruneImages(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
@@ -624,16 +645,16 @@ pub unsafe trait IWSLCSession: IUnknown {
         SpaceReclaimed: *mut u64,
     ) -> HRESULT;
     /*17*/
-    fn CreateContainer(
+    pub fn CreateContainer(
         &self,
         Options: *const WSLCContainerOptions,
         WarningCallback: *mut c_void,
         Container: *mut Option<IWSLCContainer>,
     ) -> HRESULT;
     /*18*/
-    fn OpenContainer(&self, Id: PCSTR, Container: *mut Option<IWSLCContainer>) -> HRESULT;
+    pub fn OpenContainer(&self, Id: PCSTR, Container: *mut Option<IWSLCContainer>) -> HRESULT;
     /*19*/
-    fn ListContainers(
+    pub fn ListContainers(
         &self,
         Options: *const WSLCListContainersOptions,
         Containers: *mut *mut WSLCContainerEntry,
@@ -642,14 +663,14 @@ pub unsafe trait IWSLCSession: IUnknown {
         PortsCount: *mut u32,
     ) -> HRESULT;
     /*20*/
-    fn PruneContainers(
+    pub fn PruneContainers(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
         Result: *mut WSLCPruneContainersResults,
     ) -> HRESULT;
     /*21*/
-    fn CreateRootNamespaceProcess(
+    pub fn CreateRootNamespaceProcess(
         &self,
         Executable: PCSTR,
         Options: *const WSLCProcessOptions,
@@ -660,11 +681,11 @@ pub unsafe trait IWSLCSession: IUnknown {
         Errno: *mut i32,
     ) -> HRESULT;
     /*22*/
-    fn FormatVirtualDisk(&self, Path: PCWSTR) -> HRESULT;
+    pub fn FormatVirtualDisk(&self, Path: PCWSTR) -> HRESULT;
     /*23*/
-    fn Terminate(&self) -> HRESULT;
+    pub fn Terminate(&self) -> HRESULT;
     /*24*/
-    fn MountWindowsFolder(
+    pub fn MountWindowsFolder(
         &self,
         WindowsPath: PCWSTR,
         LinuxPath: PCSTR,
@@ -672,15 +693,15 @@ pub unsafe trait IWSLCSession: IUnknown {
         AcquireVmLease: BOOL,
     ) -> HRESULT;
     /*25*/
-    fn UnmountWindowsFolder(&self, LinuxPath: PCSTR, AcquireVmLease: BOOL) -> HRESULT;
+    pub fn UnmountWindowsFolder(&self, LinuxPath: PCSTR, AcquireVmLease: BOOL) -> HRESULT;
     /*26*/
-    fn MapVmPort(&self, Family: i32, WindowsPort: u16, LinuxPort: u16) -> HRESULT;
+    pub fn MapVmPort(&self, Family: i32, WindowsPort: u16, LinuxPort: u16) -> HRESULT;
     /*27*/
-    fn UnmapVmPort(&self, Family: i32, WindowsPort: u16, LinuxPort: u16) -> HRESULT;
+    pub fn UnmapVmPort(&self, Family: i32, WindowsPort: u16, LinuxPort: u16) -> HRESULT;
     /*28*/
-    fn GetProcessHandle(&self, ProcessHandle: *mut HANDLE) -> HRESULT;
+    pub fn GetProcessHandle(&self, ProcessHandle: *mut HANDLE) -> HRESULT;
     /*29*/
-    fn Initialize(
+    pub fn Initialize(
         &self,
         Settings: *const c_void,
         VmFactory: *mut c_void,
@@ -688,24 +709,24 @@ pub unsafe trait IWSLCSession: IUnknown {
         WarningCallback: *mut c_void,
     ) -> HRESULT;
     /*30*/
-    fn CreateVolume(
+    pub fn CreateVolume(
         &self,
         Options: *const WSLCVolumeOptions,
         VolumeInfo: *mut WSLCVolumeInformation,
     ) -> HRESULT;
     /*31*/
-    fn DeleteVolume(&self, Name: PCSTR) -> HRESULT;
+    pub fn DeleteVolume(&self, Name: PCSTR) -> HRESULT;
     /*32*/
-    fn ListVolumes(
+    pub fn ListVolumes(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
         Output: *mut PSTR,
     ) -> HRESULT;
     /*33*/
-    fn InspectVolume(&self, Name: PCSTR, Output: *mut PSTR) -> HRESULT;
+    pub fn InspectVolume(&self, Name: PCSTR, Output: *mut PSTR) -> HRESULT;
     /*34*/
-    fn Authenticate(
+    pub fn Authenticate(
         &self,
         ServerAddress: PCSTR,
         Username: PCSTR,
@@ -713,7 +734,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         IdentityToken: *mut PSTR,
     ) -> HRESULT;
     /*35*/
-    fn PushImage(
+    pub fn PushImage(
         &self,
         Image: PCSTR,
         RegistryAuthenticationInformation: PCSTR,
@@ -722,7 +743,7 @@ pub unsafe trait IWSLCSession: IUnknown {
         WarningCallback: *mut c_void,
     ) -> HRESULT;
     /*36*/
-    fn PruneVolumes(
+    pub fn PruneVolumes(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
@@ -732,20 +753,20 @@ pub unsafe trait IWSLCSession: IUnknown {
         SpaceReclaimed: *mut u64,
     ) -> HRESULT;
     /*37*/
-    fn CreateNetwork(&self, Options: *const c_void, WarningCallback: *mut c_void) -> HRESULT;
+    pub fn CreateNetwork(&self, Options: *const c_void, WarningCallback: *mut c_void) -> HRESULT;
     /*38*/
-    fn DeleteNetwork(&self, Name: PCSTR) -> HRESULT;
+    pub fn DeleteNetwork(&self, Name: PCSTR) -> HRESULT;
     /*39*/
-    fn ListNetworks(
+    pub fn ListNetworks(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
         Output: *mut PSTR,
     ) -> HRESULT;
     /*40*/
-    fn InspectNetwork(&self, Name: PCSTR, Output: *mut PSTR) -> HRESULT;
+    pub fn InspectNetwork(&self, Name: PCSTR, Output: *mut PSTR) -> HRESULT;
     /*41*/
-    fn PruneNetworks(
+    pub fn PruneNetworks(
         &self,
         Filters: *const WSLCFilter,
         FiltersCount: u32,
@@ -753,17 +774,17 @@ pub unsafe trait IWSLCSession: IUnknown {
         NetworksCount: *mut u32,
     ) -> HRESULT;
     /*42*/
-    fn RegisterCrashDumpCallback(
+    pub fn RegisterCrashDumpCallback(
         &self,
         Callback: *mut c_void,
         Subscription: *mut *mut c_void,
     ) -> HRESULT;
     /*43*/
-    fn TriggerIdleTermination(&self, WasAlreadyIdle: *mut BOOL) -> HRESULT;
+    pub fn TriggerIdleTermination(&self, WasAlreadyIdle: *mut BOOL) -> HRESULT;
     /*44*/
-    fn BeginContainerOperation(&self, Operation: *mut Option<IUnknown>) -> HRESULT;
+    pub fn BeginContainerOperation(&self, Operation: *mut Option<IUnknown>) -> HRESULT;
     /*45*/
-    fn SetNetworkFaultsForTest(&self, FailCreateInspect: BOOL) -> HRESULT;
+    pub fn SetNetworkFaultsForTest(&self, FailCreateInspect: BOOL) -> HRESULT;
 }
 
 // ───────────────────────────── IWSLCSessionManager ─────────────────────────────
@@ -771,9 +792,9 @@ pub unsafe trait IWSLCSession: IUnknown {
 #[windows::core::interface("82A7ABC8-6B50-43FC-AB96-15FBBE7E8760")]
 pub unsafe trait IWSLCSessionManager: IUnknown {
     /*0*/
-    fn GetVersion(&self, Version: *mut WSLCVersion) -> HRESULT;
+    pub fn GetVersion(&self, Version: *mut WSLCVersion) -> HRESULT;
     /*1*/
-    fn CreateSession(
+    pub fn CreateSession(
         &self,
         Settings: *const c_void,
         Flags: i32,
@@ -781,7 +802,7 @@ pub unsafe trait IWSLCSessionManager: IUnknown {
         Session: *mut Option<IWSLCSession>,
     ) -> HRESULT;
     /*2*/
-    fn EnterSession(
+    pub fn EnterSession(
         &self,
         DisplayName: PCWSTR,
         StoragePath: PCWSTR,
@@ -789,16 +810,19 @@ pub unsafe trait IWSLCSessionManager: IUnknown {
         Session: *mut Option<IWSLCSession>,
     ) -> HRESULT;
     /*3*/
-    fn ListSessions(
+    pub fn ListSessions(
         &self,
         Sessions: *mut *mut WSLCSessionListEntry,
         SessionsCount: *mut u32,
     ) -> HRESULT;
     /*4*/
-    fn OpenSession(&self, Id: u32, Session: *mut Option<IWSLCSession>) -> HRESULT;
+    pub fn OpenSession(&self, Id: u32, Session: *mut Option<IWSLCSession>) -> HRESULT;
     /*5*/
-    fn OpenSessionByName(&self, DisplayName: PCWSTR, Session: *mut Option<IWSLCSession>)
-    -> HRESULT;
+    pub fn OpenSessionByName(
+        &self,
+        DisplayName: PCWSTR,
+        Session: *mut Option<IWSLCSession>,
+    ) -> HRESULT;
 }
 
 /// Number of methods (excluding `IUnknown`) per interface, from the IDL. Tested against the

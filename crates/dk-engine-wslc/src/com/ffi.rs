@@ -188,8 +188,8 @@ mod win {
 
     use windows::Win32::Networking::WinSock::{WSADATA, WSAStartup};
     use windows::Win32::System::Com::{
-        COINIT_MULTITHREADED, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket,
-        CoTaskMemAlloc, CoTaskMemFree, CoUninitialize, EOAC_STATIC_CLOAKING,
+        COINIT_MULTITHREADED, CoIncrementMTAUsage, CoInitializeEx, CoInitializeSecurity,
+        CoSetProxyBlanket, CoTaskMemAlloc, CoTaskMemFree, CoUninitialize, EOAC_STATIC_CLOAKING,
         RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
     };
     use windows::Win32::System::Rpc::{RPC_C_AUTHN_DEFAULT, RPC_C_AUTHZ_DEFAULT};
@@ -438,13 +438,13 @@ mod win {
 
     /// [`set_proxy_blanket`], ignoring "not a proxy" (in-proc objects) and logging others.
     pub fn blanket<I: Interface>(i: &I) {
-        if let Err(e) = set_proxy_blanket(i) {
-            if e.code().0 != super::hr::E_NOINTERFACE {
-                tracing::debug!(
-                    hr = format!("0x{:08X}", e.code().0 as u32),
-                    "CoSetProxyBlanket failed"
-                );
-            }
+        if let Err(e) = set_proxy_blanket(i)
+            && e.code().0 != super::hr::E_NOINTERFACE
+        {
+            tracing::debug!(
+                hr = format!("0x{:08X}", e.code().0 as u32),
+                "CoSetProxyBlanket failed"
+            );
         }
     }
 
@@ -492,6 +492,17 @@ mod win {
         let joined = std::thread::Builder::new()
             .name("dk-com-security".into())
             .spawn(|| {
+                // Keep the process MTA alive for the process lifetime (cookie never released):
+                // if COM fully uninitialises (last apartment gone), the process security set
+                // below is discarded and later activations get the default IDENTIFY level,
+                // which makes `OpenSessionByName` fail with 0x80070542 (verified live).
+                // SAFETY: process-lifetime MTA usage; the cookie is intentionally leaked.
+                if let Err(e) = unsafe { CoIncrementMTAUsage() } {
+                    tracing::warn!(
+                        hr = format!("0x{:08X}", e.code().0 as u32),
+                        "CoIncrementMTAUsage failed"
+                    );
+                }
                 let mta = MtaGuard::enter();
                 if !mta.ok() {
                     return Err(windows::core::Error::from_hresult(windows::core::HRESULT(

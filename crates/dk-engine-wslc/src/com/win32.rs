@@ -223,7 +223,7 @@ impl Event {
         let h = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }?;
         OwnedHandle::new(h)
             .map(Self)
-            .ok_or_else(|| windows::core::Error::from_win32())
+            .ok_or_else(windows::core::Error::from_win32)
     }
     pub fn set(&self) {
         // SAFETY: valid event handle owned by `self`.
@@ -232,6 +232,12 @@ impl Event {
     pub fn reset(&self) {
         // SAFETY: valid event handle owned by `self`.
         let _ = unsafe { ResetEvent(self.0.raw()) };
+    }
+    /// Waits up to `d` for the event; `true` if it was (or became) signalled.
+    pub fn wait_timeout(&self, d: std::time::Duration) -> bool {
+        let ms = u32::try_from(d.as_millis()).unwrap_or(u32::MAX - 1);
+        // SAFETY: bounded wait on a valid handle owned by `self`.
+        unsafe { WaitForSingleObject(self.0.raw(), ms) == WAIT_OBJECT_0 }
     }
     pub fn is_set(&self) -> bool {
         // SAFETY: zero-timeout wait on a valid handle.
