@@ -224,3 +224,175 @@ pub struct WindowBounds {
     pub height: f32,
     pub maximized: bool,
 }
+
+// ── persistence (sync; startup load + saves from a blocking thread) ─────────────────────────
+
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+
+use crate::paths::Paths;
+
+/// Temp file next to `path` (same directory → `rename` is atomic).
+pub(crate) fn temp_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".into());
+    path.with_file_name(format!(".{name}.{}.tmp", std::process::id()))
+}
+
+/// Atomic write: temp file in the same directory + fsync + rename; creates parent dirs.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = temp_path(path);
+    let res = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
+}
+
+pub(crate) fn save_config(paths: &Paths, c: &Config) -> std::io::Result<()> {
+    let text = toml::to_string_pretty(c).map_err(std::io::Error::other)?;
+    write_atomic(&paths.config_file(), text.as_bytes())
+}
+
+pub(crate) fn save_ui_state(paths: &Paths, s: &UiState) -> std::io::Result<()> {
+    let text = serde_json::to_vec_pretty(s).map_err(std::io::Error::other)?;
+    write_atomic(&paths.state_file(), &text)
+}
+
+/// Moves a corrupt file aside to `<file>.bak` (replacing an older backup).
+fn back_up(path: &Path, err: &dyn std::fmt::Display) {
+    let mut bak = path.as_os_str().to_owned();
+    bak.push(".bak");
+    let bak = PathBuf::from(bak);
+    tracing::warn!(file = %path.display(), error = %err, backup = %bak.display(),
+        "corrupt settings file; using defaults");
+    let _ = std::fs::remove_file(&bak);
+    if let Err(e) = std::fs::rename(path, &bak) {
+        tracing::warn!(file = %path.display(), error = %e, "couldn't back up corrupt file");
+    }
+}
+
+fn load_file<T: Default>(path: &Path, parse: impl FnOnce(&str) -> Result<T, String>) -> T {
+    let text = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return T::default(),
+        Err(e) => {
+            tracing::warn!(file = %path.display(), error = %e, "couldn't read settings file");
+            return T::default();
+        }
+    };
+    let parsed = String::from_utf8(text)
+        .map_err(|e| e.to_string())
+        .and_then(|t| parse(&t));
+    match parsed {
+        Ok(v) => v,
+        Err(e) => {
+            back_up(path, &e);
+            T::default()
+        }
+    }
+}
+
+/// See `crate::load_config`.
+pub(crate) fn load(paths: &Paths) -> (Config, UiState) {
+    let config: Config = load_file(&paths.config_file(), |t| {
+        toml::from_str(t).map_err(|e| e.to_string())
+    });
+    let mut state: UiState = load_file(&paths.state_file(), |t| {
+        serde_json::from_str(t).map_err(|e| e.to_string())
+    });
+    if state.version == 0 {
+        state.version = CONFIG_VERSION;
+    }
+    (config, state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dk_core::{EngineEndpoint, EngineOrigin};
+
+    #[test]
+    fn config_roundtrip_and_corrupt_file_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+
+        // Missing → defaults.
+        let (c, s) = load(&paths);
+        assert_eq!(c, Config::default());
+        assert_eq!(s.version, CONFIG_VERSION);
+
+        // Round-trip.
+        let mut c = Config::default();
+        c.general.theme = ThemeMode::Dark;
+        c.stats.history_minutes = 5;
+        c.engines.entries.push(EngineConfig {
+            id: EngineId::new("remote"),
+            name: "Remote".into(),
+            endpoint: EngineEndpoint::Tcp {
+                host: "10.0.0.2".into(),
+                port: 2376,
+                tls: None,
+            },
+            origin: EngineOrigin::Manual,
+            enabled: true,
+            hidden: false,
+        });
+        let s = UiState {
+            last_engine: Some(EngineId::new("remote")),
+            sidebar_collapsed: true,
+            ..Default::default()
+        };
+        save_config(&paths, &c).unwrap();
+        save_ui_state(&paths, &s).unwrap();
+        let (c2, s2) = load(&paths);
+        assert_eq!(c2, c);
+        assert_eq!(s2.last_engine, s.last_engine);
+        assert!(s2.sidebar_collapsed);
+
+        // Forward-compatible defaults for missing sections/fields.
+        std::fs::write(paths.config_file(), "[general]\ntheme = \"light\"\n").unwrap();
+        let (c3, _) = load(&paths);
+        assert_eq!(c3.general.theme, ThemeMode::Light);
+        assert_eq!(c3.stats, StatsSettings::default());
+
+        // Corrupt → `.bak` + defaults.
+        std::fs::write(paths.config_file(), "this is = = not toml [").unwrap();
+        std::fs::write(paths.state_file(), "{ nope").unwrap();
+        let (c4, s4) = load(&paths);
+        assert_eq!(c4, Config::default());
+        assert_eq!(s4.last_engine, None);
+        assert!(!paths.config_file().exists());
+        let bak = paths.config_dir.join("config.toml.bak");
+        assert_eq!(
+            std::fs::read_to_string(bak).unwrap(),
+            "this is = = not toml ["
+        );
+        assert!(paths.data_dir.join("state.json.bak").exists());
+    }
+
+    #[test]
+    fn atomic_write_creates_dirs_and_leaves_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a/b/c.txt");
+        write_atomic(&p, b"one").unwrap();
+        write_atomic(&p, b"two").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "two");
+        let names: Vec<_> = std::fs::read_dir(p.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1);
+    }
+}
