@@ -1640,6 +1640,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "dk-core",
+ "dk-engine-wslc",
  "futures",
  "insta",
  "portable-pty",

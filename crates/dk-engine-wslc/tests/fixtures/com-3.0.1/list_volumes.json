@@ -1,0 +1,9 @@
+[
+  {
+    "Driver": "guest",
+    "Labels": {},
+    "Mountpoint": "/var/lib/docker/volumes/dk-com-test-dc689ff8/_data",
+    "Name": "dk-com-test-dc689ff8",
+    "Scope": "local"
+  }
+]
