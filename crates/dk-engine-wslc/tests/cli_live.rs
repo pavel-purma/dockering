@@ -57,7 +57,7 @@ async fn live_connect_info_and_sessions() {
 }
 
 #[tokio::test]
-#[ignore = "live: needs WSLC + dk_core::grouping bodies (merge)"]
+#[ignore = "live: needs WSLC"]
 async fn live_lists() {
     let e = engine().await;
     let c = e
@@ -95,7 +95,7 @@ async fn live_events_open() {
 }
 
 #[tokio::test]
-#[ignore = "live: needs WSLC, a running container and dk_core::grouping bodies (merge)"]
+#[ignore = "live: needs WSLC"]
 async fn live_running_container_logs_stats_exec() {
     let e = engine().await;
     let Some(c) = running(&e).await.into_iter().next() else {
@@ -164,7 +164,7 @@ async fn live_running_container_logs_stats_exec() {
 }
 
 #[tokio::test]
-#[ignore = "live: needs WSLC, a running container and dk_core::grouping bodies (merge)"]
+#[ignore = "live: needs WSLC"]
 async fn live_exec_interactive_shell_resize_and_exit_code() {
     let e = engine().await;
     let Some(c) = running(&e).await.into_iter().next() else {
@@ -210,7 +210,7 @@ async fn live_exec_interactive_shell_resize_and_exit_code() {
 }
 
 #[tokio::test]
-#[ignore = "live: needs WSLC + dk_core::docker_json bodies (merge)"]
+#[ignore = "live: needs WSLC"]
 async fn live_inspect_first_of_each() {
     let e = engine().await;
     if let Some(c) = e

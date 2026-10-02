@@ -1,6 +1,6 @@
 //! CLI transport against the fake `wslc.exe` (spec 21 §7): read-only ops and error mapping
 //! on recorded wslc 3.0.1 fixtures. Ops that go through `dk_core::docker_json` or
-//! `dk_core::grouping` bodies (implemented on other branches) are `#[ignore]`d until merged.
+//! Read-only ops against the fake `wslc.exe` replaying recorded fixtures.
 
 use std::sync::Once;
 use std::time::Duration;
@@ -113,7 +113,6 @@ async fn eng_024_info() {
 }
 
 #[tokio::test]
-#[ignore = "needs dk_core::grouping::compose_info_from_labels (merge)"]
 async fn con_010_list_containers() {
     env();
     let e = engine(None).await;
@@ -143,7 +142,6 @@ async fn con_010_list_containers() {
 }
 
 #[tokio::test]
-#[ignore = "needs docker_json (merge)"]
 async fn cdt_inspect_container() {
     env();
     let d = engine(None)
@@ -301,7 +299,6 @@ async fn vol_list_volumes_enriched_by_inspect() {
 }
 
 #[tokio::test]
-#[ignore = "needs dk_core::grouping::compose_info_from_labels (merge)"]
 async fn net_list_networks_enriched_by_inspect() {
     env();
     let nets = engine(None).await.list_networks().await.expect("networks");

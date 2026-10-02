@@ -1,0 +1,4 @@
+# Recorded engine output must stay byte-exact (no CRLF conversion on Windows checkouts).
+crates/*/tests/fixtures/** -text
+crates/*/fixtures/** -text
+*.snap -text
