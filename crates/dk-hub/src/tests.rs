@@ -1484,3 +1484,178 @@ async fn eng_020_call_cancelled_when_engine_disabled_or_deactivated() {
     assert!(matches!(r, Err(EngineError::Unreachable { .. })), "{r:?}");
     hub.shutdown();
 }
+
+/// A terminal whose `write` never resolves (wedged PTY / transport). `close()` or `exit()`
+/// resolves `wait()`.
+struct StuckTerminal {
+    exit_tx: Mutex<Option<futures::channel::oneshot::Sender<Option<i64>>>>,
+    exit_rx: Mutex<Option<futures::channel::oneshot::Receiver<Option<i64>>>>,
+    writes: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl StuckTerminal {
+    fn new() -> (Self, Arc<std::sync::atomic::AtomicUsize>) {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let writes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let t = Self {
+            exit_tx: Mutex::new(Some(tx)),
+            exit_rx: Mutex::new(Some(rx)),
+            writes: writes.clone(),
+        };
+        (t, writes)
+    }
+    fn finish(&self, code: i64) {
+        if let Some(tx) = lock(&self.exit_tx).take() {
+            let _ = tx.send(Some(code));
+        }
+    }
+}
+
+#[async_trait]
+impl TerminalSession for StuckTerminal {
+    fn output(&mut self) -> EngineStream<Bytes> {
+        Box::pin(futures::stream::pending())
+    }
+    async fn write(&self, _data: Bytes) -> EngineResult<()> {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        futures::future::pending().await
+    }
+    async fn resize(&self, _cols: u16, _rows: u16) -> EngineResult<()> {
+        futures::future::pending().await
+    }
+    async fn wait(&self) -> EngineResult<Option<i64>> {
+        let rx = lock(&self.exit_rx).take();
+        match rx {
+            Some(rx) => Ok(rx.await.unwrap_or(None)),
+            None => Ok(None),
+        }
+    }
+    async fn close(&self) -> EngineResult<()> {
+        self.finish(130);
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn trm_008_stuck_write_does_not_block_close_or_engine_switch() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), 20);
+    f.add(FakeEngine::new("b"), 30);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    // Same wiring as `open_terminal` after a successful exec.
+    let open = |session: StuckTerminal| {
+        let conn = hub.inner.conn(&id).unwrap();
+        crate::terminal::start_actor(&hub.inner, &id, Box::new(session), conn.token)
+    };
+
+    // 1. `Close` while a write is stuck: the actor closes the session and resolves `exit`.
+    let (session, writes) = StuckTerminal::new();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"ls\r")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    // Input queued behind the stuck write (more than the channel holds) and the final
+    // `Close` are still accepted: the actor keeps reading its input while the write hangs.
+    let input = &mut t.input;
+    tokio::time::timeout(Duration::from_secs(1), async move {
+        for _ in 0..100 {
+            input
+                .send(TermCmd::Data(Bytes::from_static(b"x")))
+                .await
+                .unwrap();
+        }
+        input.send(TermCmd::Close).await.unwrap();
+    })
+    .await
+    .expect("input must not block behind a stuck write");
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("Close must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+    until(Duration::from_secs(1), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+
+    // 2. Process exit while a write is stuck.
+    let (session, writes) = StuckTerminal::new();
+    let exit_tx = lock(&session.exit_tx).take().unwrap();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"x")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    let _ = exit_tx.send(Some(3));
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("process exit must end a stuck session");
+    assert_eq!(code, Ok(Some(3)));
+    // After a natural exit the actor drains trailing output for up to EXIT_GRACE.
+    until(Duration::from_secs(3), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+
+    // 3. Engine switch (TRM-008) while a resize is stuck.
+    let (session, _) = StuckTerminal::new();
+    let mut t = open(session);
+    t.input
+        .send(TermCmd::Resize { cols: 80, rows: 24 })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(hub.inner.terminals.count(&id), 1);
+    hub.set_active(&EngineId::new("b")).await.unwrap();
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("engine switch must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+    until(Duration::from_secs(1), || {
+        hub.inner.terminals.count(&id) == 0
+    })
+    .await;
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn trm_008_stuck_write_does_not_block_hub_shutdown() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), 20);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let (session, writes) = StuckTerminal::new();
+    let conn = hub.inner.conn(&id).unwrap();
+    let mut t = crate::terminal::start_actor(&hub.inner, &id, Box::new(session), conn.token);
+    t.input
+        .send(TermCmd::Data(Bytes::from_static(b"x")))
+        .await
+        .unwrap();
+    until(Duration::from_secs(1), || {
+        writes.load(std::sync::atomic::Ordering::SeqCst) == 1
+    })
+    .await;
+    hub.shutdown();
+    let code = tokio::time::timeout(Duration::from_secs(5), t.exit)
+        .await
+        .expect("hub shutdown must end a stuck session");
+    assert_eq!(code, Ok(Some(130)));
+}

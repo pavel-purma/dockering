@@ -6,7 +6,7 @@
 //! `TerminalRegistry`); `TermCmd::Close`, dropping every input sender, process exit, an
 //! engine switch/removal, or hub shutdown does.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -172,7 +172,63 @@ async fn pump_output(
     }
 }
 
+/// Bytes of input buffered while a write/resize is still in flight. Past this the session is
+/// considered wedged and further input is dropped (logged); `Close` and dropping the senders
+/// are still observed, so the session can always be closed.
+const PENDING_BYTES_MAX: usize = 1 << 20;
+
+/// Input received while an op is in flight, coalesced so the queue stays short: consecutive
+/// `Data` chunks are concatenated and only the latest `Resize` is kept.
+#[derive(Default)]
+struct Pending {
+    cmds: VecDeque<TermCmd>,
+    bytes: usize,
+}
+
+impl Pending {
+    fn pop(&mut self) -> Option<TermCmd> {
+        let cmd = self.cmds.pop_front()?;
+        if let TermCmd::Data(d) = &cmd {
+            self.bytes -= d.len();
+        }
+        Some(cmd)
+    }
+
+    /// Queues a `Data`/`Resize` command. Returns `false` if it was dropped (over budget).
+    fn push(&mut self, cmd: TermCmd) -> bool {
+        match cmd {
+            TermCmd::Data(d) => {
+                if self.bytes + d.len() > PENDING_BYTES_MAX {
+                    return false;
+                }
+                self.bytes += d.len();
+                match self.cmds.back_mut() {
+                    Some(TermCmd::Data(tail)) => {
+                        let mut joined = Vec::with_capacity(tail.len() + d.len());
+                        joined.extend_from_slice(tail);
+                        joined.extend_from_slice(&d);
+                        *tail = Bytes::from(joined);
+                    }
+                    _ => self.cmds.push_back(TermCmd::Data(d)),
+                }
+            }
+            resize @ TermCmd::Resize { .. } => match self.cmds.back_mut() {
+                Some(tail @ TermCmd::Resize { .. }) => *tail = resize,
+                _ => self.cmds.push_back(resize),
+            },
+            // Handled by the caller (ends the actor).
+            TermCmd::Close => {}
+        }
+        true
+    }
+}
+
 /// Executes commands until exit/close/cancel. `true` = the process exited on its own.
+///
+/// A `write`/`resize` that never resolves must not wedge the actor: every op is raced against
+/// process exit, the cancel token (engine switch TRM-008, hub shutdown) and the input channel,
+/// where `TermCmd::Close` or dropping every sender ends the session. Data/resize commands that
+/// arrive meanwhile are buffered (coalesced, see [`Pending`]) and executed afterwards.
 async fn run_actor(
     session: Box<dyn TerminalSession>,
     mut in_rx: mpsc::Receiver<TermCmd>,
@@ -180,34 +236,59 @@ async fn run_actor(
     token: CancellationToken,
 ) -> bool {
     let mut wait = std::pin::pin!(guarded(session.wait()));
-    loop {
-        tokio::select! {
-            biased;
-            r = &mut wait => {
-                let _ = exit_tx.send(r);
-                return true;
-            }
-            _ = token.cancelled() => break,
-            cmd = in_rx.next() => match cmd {
-                Some(TermCmd::Data(d)) => {
-                    let f = guarded(session.write(d));
-                    if let Err(e) = f.await {
-                        tracing::debug!(error = %e, "terminal write failed");
-                    }
+    let mut pending = Pending::default();
+    'actor: loop {
+        let cmd = match pending.pop() {
+            Some(cmd) => cmd,
+            None => tokio::select! {
+                biased;
+                r = &mut wait => {
+                    let _ = exit_tx.send(r);
+                    return true;
                 }
-                Some(TermCmd::Resize { cols, rows }) => {
-                    let f = guarded(session.resize(cols, rows));
-                    if let Err(e) = f.await {
-                        tracing::debug!(error = %e, "terminal resize failed");
-                    }
-                }
-                Some(TermCmd::Close) | None => break,
+                _ = token.cancelled() => break 'actor,
+                cmd = in_rx.next() => match cmd {
+                    Some(cmd) => cmd,
+                    None => break 'actor,
+                },
             },
+        };
+        let (what, op) = match cmd {
+            TermCmd::Data(d) => ("write", session.write(d)),
+            TermCmd::Resize { cols, rows } => ("resize", session.resize(cols, rows)),
+            TermCmd::Close => break 'actor,
+        };
+        let mut op = std::pin::pin!(guarded(op));
+        loop {
+            tokio::select! {
+                biased;
+                r = &mut wait => {
+                    let _ = exit_tx.send(r);
+                    return true;
+                }
+                _ = token.cancelled() => break 'actor,
+                r = &mut op => {
+                    if let Err(e) = r {
+                        tracing::debug!(error = %e, "terminal {what} failed");
+                    }
+                    break;
+                }
+                cmd = in_rx.next() => match cmd {
+                    Some(TermCmd::Close) | None => break 'actor,
+                    Some(cmd) => {
+                        if !pending.push(cmd) {
+                            tracing::warn!("terminal {what} stuck; input dropped");
+                        }
+                    }
+                },
+            }
         }
     }
-    let close = guarded(session.close());
-    if let Err(e) = close.await {
-        tracing::debug!(error = %e, "terminal close failed");
+    // `close` and the exit code are bounded too: a wedged session can't hold up shutdown.
+    match tokio::time::timeout(EXIT_GRACE, guarded(session.close())).await {
+        Ok(Err(e)) => tracing::debug!(error = %e, "terminal close failed"),
+        Err(_) => tracing::debug!("terminal close timed out"),
+        Ok(Ok(())) => {}
     }
     let code = match tokio::time::timeout(EXIT_GRACE, &mut wait).await {
         Ok(r) => r,
@@ -215,4 +296,36 @@ async fn run_actor(
     };
     let _ = exit_tx.send(code);
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trm_008_pending_input_coalesces_and_is_bounded() {
+        let mut p = Pending::default();
+        assert!(p.push(TermCmd::Data(Bytes::from_static(b"ab"))));
+        assert!(p.push(TermCmd::Data(Bytes::from_static(b"c"))));
+        assert!(p.push(TermCmd::Resize { cols: 80, rows: 24 }));
+        assert!(p.push(TermCmd::Resize {
+            cols: 100,
+            rows: 30
+        }));
+        assert!(p.push(TermCmd::Data(Bytes::from_static(b"d"))));
+        assert_eq!(p.cmds.len(), 3);
+        assert_eq!(p.pop(), Some(TermCmd::Data(Bytes::from_static(b"abc"))));
+        assert_eq!(
+            p.pop(),
+            Some(TermCmd::Resize {
+                cols: 100,
+                rows: 30
+            })
+        );
+        assert_eq!(p.bytes, 1);
+        assert!(!p.push(TermCmd::Data(Bytes::from(vec![0u8; PENDING_BYTES_MAX]))));
+        assert_eq!(p.pop(), Some(TermCmd::Data(Bytes::from_static(b"d"))));
+        assert_eq!(p.pop(), None);
+        assert_eq!(p.bytes, 0);
+    }
 }
