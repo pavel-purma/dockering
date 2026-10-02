@@ -1,0 +1,84 @@
+{
+  // Debug configurations for Dockering.
+  // Windows (MSVC build): uses the C/C++ extension's `cppvsdbg` debugger (ms-vscode.cpptools).
+  // macOS / Linux: uses CodeLLDB (vadimcn.vscode-lldb).
+  // Each configuration builds first through the matching task in tasks.json.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Dockering",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "build: dockering",
+      "program": "${workspaceFolder}/target/debug/dockering.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "RUST_LOG", "value": "info,dk_hub=debug,dockering=debug" }],
+      "console": "integratedTerminal",
+      "osx": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/dockering",
+        "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" }
+      },
+      "linux": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/dockering",
+        "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" }
+      }
+    },
+    {
+      "name": "Debug Dockering (demo)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "build: dockering",
+      "program": "${workspaceFolder}/target/debug/dockering.exe",
+      "args": ["--demo"],
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "RUST_LOG", "value": "info,dk_hub=debug,dockering=debug" }],
+      "console": "integratedTerminal",
+      "osx": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/dockering",
+        "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" }
+      },
+      "linux": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/dockering",
+        "env": { "RUST_LOG": "info,dk_hub=debug,dockering=debug" }
+      }
+    },
+    {
+      "name": "Debug Dockering (release)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "build: dockering (release-debug)",
+      "program": "${workspaceFolder}/target/release-debug/dockering.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "osx": { "type": "lldb", "program": "${workspaceFolder}/target/release-debug/dockering" },
+      "linux": { "type": "lldb", "program": "${workspaceFolder}/target/release-debug/dockering" }
+    },
+    {
+      "name": "Debug dk-hub dump example",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "build: dk-hub dump example",
+      "program": "${workspaceFolder}/target/debug/examples/dump.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "RUST_LOG", "value": "debug" }],
+      "console": "integratedTerminal",
+      "osx": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/examples/dump",
+        "env": { "RUST_LOG": "debug" }
+      },
+      "linux": {
+        "type": "lldb",
+        "program": "${workspaceFolder}/target/debug/examples/dump",
+        "env": { "RUST_LOG": "debug" }
+      }
+    }
+  ]
+}

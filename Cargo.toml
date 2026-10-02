@@ -73,3 +73,9 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "unwind"
+
+# Release optimisations with symbols, for debugging/profiling (`.vscode` "Debug Dockering (release)").
+[profile.release-debug]
+inherits = "release"
+strip = "none"
+debug = "line-tables-only"

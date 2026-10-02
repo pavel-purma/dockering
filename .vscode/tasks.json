@@ -1,0 +1,107 @@
+{
+  // Dockering tasks. On Windows every cargo call goes through scripts/dev.ps1, which loads the
+  // VS Build Tools x64 environment (plain `cargo` fails to link there, spike F-1).
+  // The script is run with `pwsh -File` so arguments (including a bare `--`) reach cargo
+  // verbatim; `pwsh -Command` would swallow the `--`.
+  "version": "2.0.0",
+  "windows": {
+    "options": {
+      "shell": {
+        "executable": "pwsh.exe",
+        "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/dev.ps1"]
+      }
+    }
+  },
+  "tasks": [
+    // ── run ───────────────────────────────────────────────────────────────────────────────
+    {
+      "label": "run: Dockering",
+      "detail": "Start the app against the real engines on this machine",
+      "type": "shell",
+      "command": "cargo run -p dockering",
+      "windows": { "command": "run -p dockering" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "run: Dockering (demo)",
+      "detail": "Start the app with the built-in fake engine (no Docker needed)",
+      "type": "shell",
+      "command": "cargo run -p dockering -- --demo",
+      "windows": { "command": "run -p dockering -- --demo" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": "none"
+    },
+    {
+      "label": "run: Dockering (release)",
+      "detail": "Optimised build, for checking performance budgets (NFR-010…013)",
+      "type": "shell",
+      "command": "cargo run --release -p dockering",
+      "windows": { "command": "run --release -p dockering" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": "none"
+    },
+
+    // ── build (used by the debug launch configurations) ───────────────────────────────────
+    {
+      "label": "build: dockering",
+      "type": "shell",
+      "command": "cargo build -p dockering",
+      "windows": { "command": "build -p dockering" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "build: dockering (release-debug)",
+      "detail": "Release optimisations with symbols (profile release-debug)",
+      "type": "shell",
+      "command": "cargo build --profile release-debug -p dockering",
+      "windows": { "command": "build --profile release-debug -p dockering" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "build: dk-hub dump example",
+      "type": "shell",
+      "command": "cargo build -p dk-hub --example dump",
+      "windows": { "command": "build -p dk-hub --example dump" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true },
+      "group": "build"
+    },
+
+    // ── checks ────────────────────────────────────────────────────────────────────────────
+    {
+      "label": "test: workspace",
+      "type": "shell",
+      "command": "cargo test --workspace",
+      "windows": { "command": "test --workspace" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "check: clippy",
+      "type": "shell",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "windows": { "command": "clippy --workspace --all-targets -- -D warnings" },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": "build"
+    },
+    {
+      "label": "check: blocking calls (NFR-001)",
+      "type": "shell",
+      "command": "cargo xtask check-blocking",
+      "windows": { "command": "xtask check-blocking" },
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "clear": true },
+      "group": "build"
+    }
+  ]
+}

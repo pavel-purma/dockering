@@ -55,6 +55,17 @@ After changing dependencies, regenerate the third-party notices with
 `cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html` (`cargo install cargo-about --locked --features cli`).
 CI fails if the file is stale.
 
+### VS Code
+
+`.vscode/` has ready-made tasks and debug configurations (they go through `scripts/dev.ps1` on
+Windows, so the MSVC environment is loaded automatically):
+
+- **Run:** *Terminal → Run Task…* → `run: Dockering`, `run: Dockering (demo)`, or `run: Dockering (release)`.
+- **Debug:** *Run and Debug* (F5) → `Debug Dockering`, `Debug Dockering (demo)`, `Debug Dockering (release)`
+  (release optimisations with symbols, profile `release-debug`), or `Debug dk-hub dump example`.
+  Windows uses the C/C++ extension's debugger (`cppvsdbg`); macOS/Linux use CodeLLDB.
+- **Checks:** `test: workspace` (default test task), `check: clippy`, `check: blocking calls (NFR-001)`.
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
