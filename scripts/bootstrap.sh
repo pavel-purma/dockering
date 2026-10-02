@@ -17,9 +17,12 @@ case "$(uname -s)" in
       echo 'Install the equivalent GPUI Kit Vulkan, Wayland, X11, fontconfig, OpenSSL, and zstd development packages.' >&2
       exit 1
     fi
-    sudo apt-get update
-    sudo apt-get install -y \
-      gcc g++ clang \
+    SUDO=''
+    [[ "$(id -u)" -ne 0 ]] && SUDO=sudo
+    $SUDO apt-get update
+    # pkg-config is used by the -sys crates (fontconfig, wayland, xkbcommon) to locate libraries.
+    $SUDO apt-get install -y --no-install-recommends \
+      gcc g++ clang pkg-config \
       libfontconfig-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev \
       libssl-dev libzstd-dev libvulkan1 mesa-vulkan-drivers
     echo 'Linux build prerequisites installed.'

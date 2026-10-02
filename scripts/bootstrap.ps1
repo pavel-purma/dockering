@@ -35,8 +35,9 @@ if (-not (Test-Path $vswhere)) {
 
     foreach ($installation in $installations) {
         $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
+        # Same check as dev.ps1: ...\VC\Tools\MSVC\<ver>\lib\x64\msvcrt.lib (spike F-1).
         $crt = Get-ChildItem -Path (Join-Path $installation 'VC\Tools\MSVC') -Filter msvcrt.lib -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '[\/]lib[\/]x64[\/]msvcrt\.lib$' } |
+            Where-Object { $_.Directory.Name -eq 'x64' -and $_.Directory.Parent.Name -eq 'lib' } |
             Select-Object -First 1
         if ($crt -and (Test-Path $vcvars)) {
             $validInstall = $installation
@@ -47,7 +48,7 @@ if (-not (Test-Path $vswhere)) {
     }
 
     if (-not $validInstall) {
-        $failures.Add('No VS installation has vcvars64.bat plus the x64 CRT (msvcrt.lib).')
+        $failures.Add("No VS installation has vcvars64.bat plus the x64 CRT (msvcrt.lib).")
     } else {
         $bundledCMake = Join-Path $validInstall 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
         if ((Get-Command cmake -ErrorAction SilentlyContinue) -or (Test-Path $bundledCMake)) {
@@ -68,7 +69,8 @@ if ($sdkLib) {
 }
 
 if ($failures.Count -gt 0) {
-    Write-Error (($failures | ForEach-Object { "- $_" }) -join "`n")
+    # Not Write-Error: with ErrorActionPreference=Stop it would throw before the hints below.
+    [Console]::Error.WriteLine("Missing prerequisites:`n" + (($failures | ForEach-Object { "- $_" }) -join "`n"))
     Write-Host "`nFix automatically: pwsh -NoProfile scripts/bootstrap.ps1 -Install"
     Write-Host 'Or modify Visual Studio Build Tools and select Desktop development with C++ (recommended components included).'
     exit 1
