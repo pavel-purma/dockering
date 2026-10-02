@@ -612,6 +612,10 @@ impl Drop for WindowsWindow {
         // `DestroyWindow` below sends `WM_SHOWWINDOW`; without a callback the
         // resulting visibility report has nothing to notify.
         self.0.state.callbacks.visibility_change.take();
+        // Activation reports are deferred to the executor; one queued while the
+        // window was being destroyed (`WM_ACTIVATE` during `WM_CLOSE`) would
+        // otherwise run against a GPUI window that no longer exists.
+        self.0.state.callbacks.active_status_change.take();
         // clone this `Rc` to prevent early release of the pointer
         let this = self.0.clone();
         self.0
@@ -619,9 +623,13 @@ impl Drop for WindowsWindow {
             .spawn(async move {
                 this.dialog_owner.when_idle().await;
                 let handle = this.hwnd;
+                // Closing from the system (title-bar close, Alt+F4) lets
+                // `DefWindowProc` destroy the window before GPUI drops it.
+                // Drag-and-drop is revoked in `WM_DESTROY` on both paths.
                 unsafe {
-                    RevokeDragDrop(handle).log_err();
-                    DestroyWindow(handle).log_err();
+                    if IsWindow(Some(handle)).as_bool() {
+                        DestroyWindow(handle).log_err();
+                    }
                 }
             })
             .detach();
