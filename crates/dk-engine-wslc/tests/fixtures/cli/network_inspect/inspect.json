@@ -6,21 +6,21 @@
     },
     "ConfigOnly": false,
     "Containers": {},
-    "Created": "2026-10-01T23:27:45.46242942Z",
+    "Created": "2026-10-02T00:13:15.796135125Z",
     "Driver": "bridge",
     "EnableIPv4": true,
     "EnableIPv6": false,
     "IPAM": {
       "Config": [
         {
-          "Gateway": "172.19.0.1",
-          "Subnet": "172.19.0.0/16"
+          "Gateway": "172.22.0.1",
+          "Subnet": "172.22.0.0/16"
         }
       ],
       "Driver": "default",
       "Options": {}
     },
-    "Id": "4909b1b3e9436546727508ba043b5881462af3a01a0455937cc9fa002dd75e12",
+    "Id": "35ac79319feb510d37d3d837dd336a62a4d62e74390bf4f09a28348336202b72",
     "Ingress": false,
     "Internal": false,
     "Labels": {

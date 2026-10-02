@@ -57,6 +57,16 @@ pub struct WslcCliEngine {
     inner: Arc<Inner>,
 }
 
+impl std::fmt::Debug for WslcCliEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WslcCliEngine")
+            .field("id", &self.inner.id)
+            .field("session", &self.inner.session)
+            .field("exe", &self.inner.runner.exe())
+            .finish_non_exhaustive()
+    }
+}
+
 impl WslcCliEngine {
     /// Verify `wslc.exe` works for `session` (None = the caller's default session) and build
     /// the engine. `transport_note` explains why the CLI is used (ENG-110 chip), e.g.
@@ -122,6 +132,7 @@ impl WslcCliEngine {
         parse::version(&out).ok_or_else(|| EngineError::protocol("wslc version: no version"))
     }
 
+    /// `container list` rows without compose metadata (internal: counts, volume "used by").
     async fn container_rows(&self, all: bool) -> EngineResult<Vec<ContainerSummary>> {
         let mut args = vec!["container", "list", "--no-trunc", "--format", "json"];
         if all {
@@ -131,10 +142,6 @@ impl WslcCliEngine {
         Ok(parse::json_list(&out)?
             .iter()
             .map(parse::container_summary)
-            .map(|mut c| {
-                c.compose = compose(&c.labels);
-                c
-            })
             .collect())
     }
 
@@ -448,8 +455,9 @@ impl Engine for WslcCliEngine {
                 })
             });
         }
-        if !q.size {
-            for c in &mut list {
+        for c in &mut list {
+            c.compose = compose(&c.labels);
+            if !q.size {
                 c.size_rw = None;
                 c.size_root_fs = None;
             }

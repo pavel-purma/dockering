@@ -1014,9 +1014,9 @@ mod tests {
             .expect("exited");
         assert_eq!(exited.state, ContainerState::Exited);
         assert_eq!(exited.exit_code, Some(3));
-        assert_eq!(exited.image, "nginx:alpine");
+        assert_eq!(exited.image, "busybox:1.37");
         assert!(
-            exited.command.starts_with("/docker-entrypoint.sh sh -c"),
+            exited.command.starts_with("sh -c 'echo out-line"),
             "{}",
             exited.command
         );
@@ -1099,13 +1099,13 @@ mod tests {
     fn image_list_fixture_and_merge() {
         let rows = json_list(fx!("image_list/list.ndjson")).expect("ndjson");
         let imgs = image_summaries(&rows);
-        assert_eq!(imgs.len(), 1);
+        assert_eq!(imgs.len(), 2);
         let i = &imgs[0];
         assert_eq!(i.repo_tags, ["nginx:alpine"]);
         assert!(i.repo_digests.is_empty());
         assert_eq!(i.size, 62_900_000);
         assert_eq!(i.shared_size, None);
-        assert_eq!(i.containers, Some(3));
+        assert_eq!(i.containers, Some(2));
         assert_eq!(i.created, datetime!(2026-09-22 22:10:17 UTC));
         assert!(!i.dangling);
         let rows = json_list(concat!(
@@ -1181,8 +1181,8 @@ mod tests {
         assert_eq!(
             n.subnets,
             [IpamConfig {
-                subnet: Some("172.19.0.0/16".into()),
-                gateway: Some("172.19.0.1".into()),
+                subnet: Some("172.22.0.0/16".into()),
+                gateway: Some("172.22.0.1".into()),
                 ip_range: None
             }]
         );
