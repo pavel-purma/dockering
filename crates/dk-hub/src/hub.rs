@@ -766,8 +766,12 @@ pub(crate) fn start_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                             .filter(|s| s.id == id)
                             .map(|s| s.retry.clone())
                     };
-                    if let Some(retry) = sup {
-                        retry.notify_one();
+                    match sup {
+                        // Already supervised: wake it so it connects now.
+                        Some(retry) => retry.notify_one(),
+                        // "Start & connect" (ENG-106): make it the active engine, exactly
+                        // like `set_active` (emits ActiveChanged, supervisor connects).
+                        None => inner.activate(&id, None, false)?,
                     }
                     Ok(())
                 }

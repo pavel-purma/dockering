@@ -1659,3 +1659,54 @@ async fn trm_008_stuck_write_does_not_block_hub_shutdown() {
         .expect("hub shutdown must end a stuck session");
     assert_eq!(code, Ok(Some(130)));
 }
+
+#[tokio::test(start_paused = true)]
+async fn eng_106_start_and_connect_activates_a_stopped_non_active_distro() {
+    // TestFactory overrides `start` (FakeFactory's default returns an error).
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let mut d = DiscoveredEngine::new(
+        EngineConfig {
+            endpoint: EngineEndpoint::WslDistro {
+                distro: "Ubuntu".into(),
+                mode: WslMode::DialStdio,
+            },
+            ..sock_cfg("wsl-ubuntu")
+        },
+        preference::WSL_DISTRO,
+    );
+    d.initial_state = Some(EngineState::Stopped);
+    f.add_discovered(d, Some(FakeEngine::new("wsl-ubuntu")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let wsl = EngineId::new("wsl-ubuntu");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("a")));
+    assert_eq!(state_of(&hub, "wsl-ubuntu"), Some(EngineState::Stopped));
+    assert!(!f.connects().contains(&"wsl-ubuntu".to_string()));
+    let mut ev = hub.hub_events();
+    let _ = next(&mut ev, Duration::from_secs(1)).await;
+
+    hub.start_wsl_distro(&wsl).await.unwrap();
+    assert_eq!(lock(&f.starts).clone(), vec![wsl.clone()]);
+    assert_eq!(hub.active_engine(), Some(wsl.clone()));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "wsl-ubuntu") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Disconnected));
+    loop {
+        match next(&mut ev, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(HubEvent::ActiveChanged(Some(id))))) => {
+                assert_eq!(id, wsl);
+                break;
+            }
+            Some(Ok(_)) => {}
+            other => panic!("expected ActiveChanged, got {other:?}"),
+        }
+    }
+    assert_eq!(hub.config().ui_state().last_engine, Some(wsl));
+    hub.shutdown();
+}
