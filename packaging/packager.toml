@@ -1,0 +1,81 @@
+# cargo-packager configuration for Dockering (spec 50 "Packaging"; REL-002; SHL-023).
+# Checked against cargo-packager 0.11.8 (serde camelCase; see its schema.json).
+#
+# Use `cargo xtask package` / `cargo xtask dist` rather than calling cargo-packager directly.
+# With `--config`, cargo-packager skips Cargo metadata, so xtask writes
+# `packaging/packager.generated.toml` and injects `version`, `binariesDir`, and (when
+# DOCKERING_MACOS_SIGNING_IDENTITY is set) `macos.signingIdentity`. Don't set those keys here.
+# Relative paths below are resolved from this directory (`packaging/`).
+#
+# Formats are chosen per target by xtask: wix (x86_64 Windows), nsis (aarch64 Windows, because
+# WiX 3 can't target ARM64), dmg (macOS), deb + appimage (Linux). xtask also builds the
+# portable .zip / .tar.gz.
+#
+# Signing: Windows binaries and installers are Authenticode-signed by the release workflow (Azure
+# Trusted Signing). macOS uses cargo-packager's codesign + notarytool support. It reads
+# APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_API_KEY, APPLE_API_ISSUER, and
+# APPLE_API_KEY_PATH from the environment. Secrets are never committed.
+
+name = "dockering"
+productName = "Dockering"
+identifier = "dev.dockering.Dockering"
+publisher = "Dockering contributors"
+description = "Native desktop client for container engines"
+longDescription = "Dockering is a fast, native desktop client for Docker, Docker inside WSL distros, and WSL containers (WSLC)."
+homepage = "https://github.com/pavel-purma/dockering"
+authors = ["Dockering contributors"]
+copyright = "Copyright (c) 2026 Dockering contributors. Licensed under MIT OR Apache-2.0."
+category = "DeveloperTool"
+
+binaries = [{ path = "dockering", main = true }]
+
+icons = [
+  "../assets/app-icon/icon.ico",
+  "../assets/app-icon/icon.icns",
+  "../assets/app-icon/icon-16.png",
+  "../assets/app-icon/icon-24.png",
+  "../assets/app-icon/icon-32.png",
+  "../assets/app-icon/icon-48.png",
+  "../assets/app-icon/icon-64.png",
+  "../assets/app-icon/icon-128.png",
+  "../assets/app-icon/icon-256.png",
+  "../assets/app-icon/icon-512.png",
+  "../assets/app-icon/icon-1024.png",
+]
+
+# REL-002: licence texts and third-party notices ship inside every package.
+resources = [
+  { src = "../THIRD_PARTY_LICENSES.html", target = "THIRD_PARTY_LICENSES.html" },
+  { src = "../LICENSE-MIT", target = "LICENSE-MIT" },
+  { src = "../LICENSE-APACHE", target = "LICENSE-APACHE" },
+]
+
+[macos]
+# GPUI Kit requires macOS 15+ (spec 00).
+minimumSystemVersion = "15.0"
+
+[linux]
+generateDesktopEntry = true
+
+[deb]
+section = "devel"
+# SHL-023: the desktop entry carries StartupWMClass = Wayland app_id.
+desktopTemplate = "linux/dockering.desktop.hbs"
+# Runtime libraries for GPUI (Vulkan + Wayland/X11 + fontconfig). cargo-packager doesn't run
+# dpkg-shlibdeps; keep this list in sync with the build prerequisites in spec 50.
+depends = [
+  "libc6",
+  "libvulkan1",
+  "libwayland-client0",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libx11-xcb1",
+  "libxcb1",
+  "libfontconfig1",
+  "libfreetype6",
+  "libzstd1",
+]
+
+[nsis]
+installMode = "currentUser"
+
