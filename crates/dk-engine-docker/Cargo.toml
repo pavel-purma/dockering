@@ -14,7 +14,7 @@ it = []
 [dependencies]
 dk-core.workspace = true
 bollard.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 tokio-util.workspace = true
 futures.workspace = true
 bytes.workspace = true
@@ -28,6 +28,8 @@ async-trait.workspace = true
 [dev-dependencies]
 dk-core = { workspace = true, features = ["test-support"] }
 insta.workspace = true
+futures = { workspace = true, features = ["executor"] }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
