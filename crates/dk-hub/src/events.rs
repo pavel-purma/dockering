@@ -1,6 +1,7 @@
 //! Shared engine event streams (spec 10 §3.3): one upstream `Engine::events()` per engine,
 //! fanned out to N subscribers through a broadcast ring. Started with the first subscriber,
-//! stopped when the last one leaves. Slow consumers get `Feed::Lagged` and must refetch.
+//! stopped when the last one leaves. Slow consumers get `Feed::Lagged` and must refetch;
+//! so does everyone when the engine reports lost events (spec 20 §5.4).
 
 use std::sync::Arc;
 
@@ -16,8 +17,11 @@ use crate::hub::{HubInner, disconnected, guarded_stream, lock, panic_error};
 /// Ring size of the per-engine event broadcast.
 pub(crate) const EVENTS_CAPACITY: usize = 256;
 
+/// Item of the per-engine broadcast ring: already the subscriber-facing `Feed`.
+type Item = EngineResult<Feed<EngineEvent>>;
+
 pub(crate) struct Shared {
-    tx: broadcast::Sender<EngineResult<EngineEvent>>,
+    tx: broadcast::Sender<Item>,
     subscribers: usize,
     /// Cancels the upstream task.
     token: CancellationToken,
@@ -113,7 +117,7 @@ async fn upstream(
     inner: Arc<HubInner>,
     id: EngineId,
     engine: Arc<dyn dk_core::Engine>,
-    tx: broadcast::Sender<EngineResult<EngineEvent>>,
+    tx: broadcast::Sender<Item>,
     token: CancellationToken,
     conn_token: CancellationToken,
     key: u64,
@@ -139,7 +143,13 @@ async fn upstream(
                 break;
             }
             item = s.next() => match item {
-                Some(Ok(ev)) => { let _ = tx.send(Ok(ev)); }
+                Some(Ok(ev)) => { let _ = tx.send(Ok(Feed::Item(ev))); }
+                // Spec 20 §5.4: the engine dropped events but the stream continues. Each
+                // subscriber gets `Feed::Lagged` (→ full refetch) and keeps reading.
+                Some(Err(e)) if e.is_events_lost() => {
+                    tracing::debug!(engine = %id, "engine reported lost events");
+                    let _ = tx.send(Ok(Feed::Lagged { dropped: 0 }));
+                }
                 Some(Err(e)) => {
                     let _ = tx.send(Err(e));
                     break;
@@ -153,7 +163,7 @@ async fn upstream(
 }
 
 async fn forward(
-    mut rx: broadcast::Receiver<EngineResult<EngineEvent>>,
+    mut rx: broadcast::Receiver<Item>,
     mut tx: mpsc::Sender<EngineResult<Feed<EngineEvent>>>,
     token: CancellationToken,
     _guard: SubscriberGuard,
@@ -163,7 +173,7 @@ async fn forward(
             biased;
             _ = token.cancelled() => return,
             r = rx.recv() => match r {
-                Ok(Ok(ev)) => (Ok(Feed::Item(ev)), false),
+                Ok(Ok(feed)) => (Ok(feed), false),
                 Ok(Err(e)) => (Err(e), true),
                 Err(broadcast::error::RecvError::Lagged(n)) => (Ok(Feed::Lagged { dropped: n }), false),
                 Err(broadcast::error::RecvError::Closed) => return,

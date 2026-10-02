@@ -1710,3 +1710,46 @@ async fn eng_106_start_and_connect_activates_a_stopped_non_active_distro() {
     assert_eq!(hub.config().ui_state().last_engine, Some(wsl));
     hub.shutdown();
 }
+
+#[tokio::test(start_paused = true)]
+async fn events_lost_yields_lagged_and_stream_continues() {
+    let f = TestFactory::new();
+    let fake = FakeEngine::new("a");
+    f.add(fake.clone(), 20);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    let id = EngineId::new("a");
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let mut s1 = hub.events(&id);
+    let mut s2 = hub.events(&id);
+    until(Duration::from_secs(1), || fake.open_streams().0 == 1).await;
+    fake.emit_event(fixtures::event(ResourceKind::Container, "start", "c1"));
+    fake.emit_event_error(EngineError::events_lost());
+    fake.emit_event(fixtures::event(ResourceKind::Container, "die", "c2"));
+    for s in [&mut s1, &mut s2] {
+        match next(s, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(e))) => assert_eq!(e.id, "c1"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            next(s, Duration::from_secs(1)).await,
+            Some(Ok(Feed::Lagged { dropped: 0 }))
+        );
+        match next(s, Duration::from_secs(1)).await {
+            Some(Ok(Feed::Item(e))) => assert_eq!(e.id, "c2"),
+            other => panic!("{other:?}"),
+        }
+    }
+    // Still one live upstream; other errors still end the stream.
+    assert_eq!(fake.open_streams().0, 1);
+    assert_eq!(fake.calls_to("events").len(), 1);
+    fake.fail_event_streams(EngineError::protocol("boom"));
+    assert!(matches!(
+        next(&mut s1, Duration::from_secs(1)).await,
+        Some(Err(EngineError::Protocol(m))) if m == "boom"
+    ));
+    assert!(next(&mut s1, Duration::from_secs(1)).await.is_none());
+    hub.shutdown();
+}
