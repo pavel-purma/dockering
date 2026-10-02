@@ -6,6 +6,7 @@
 //!
 //! `unsafe` is allowed in this module tree only; every block carries a `// SAFETY:` note.
 
+pub mod abi;
 pub mod ffi;
 #[cfg(windows)]
 pub mod win32;
