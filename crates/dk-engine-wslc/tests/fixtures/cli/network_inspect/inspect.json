@@ -1,0 +1,35 @@
+[
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Containers": {},
+    "Created": "2026-10-02T00:13:15.796135125Z",
+    "Driver": "bridge",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "172.22.0.1",
+          "Subnet": "172.22.0.0/16"
+        }
+      ],
+      "Driver": "default",
+      "Options": {}
+    },
+    "Id": "35ac79319feb510d37d3d837dd336a62a4d62e74390bf4f09a28348336202b72",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {
+      "com.docker.compose.project": "dkcli",
+      "com.example.fixture": "dk-cli"
+    },
+    "Name": "dk-cli-net",
+    "Options": {},
+    "Scope": "local",
+    "Status": {}
+  }
+]

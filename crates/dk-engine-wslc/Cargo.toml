@@ -37,3 +37,10 @@ unsafe_code = "allow"
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+
+# Fake `wslc.exe` replaying recorded fixtures for the CLI contract tests (spec 21 §7).
+[[bin]]
+name = "fake-wslc"
+path = "src/bin/fake_wslc.rs"
+test = false
+doc = false

@@ -1,0 +1,53 @@
+{
+  "_comment": "argv (without program and leading --session <s>) joined by spaces -> recorded output. Keys ending in ' *' match a prefix. See src/bin/fake_wslc.rs.",
+  "sessions": ["wslc-cli-user", "wslc-cli-admin-user"],
+  "commands": {
+    "version": { "stdout_file": "version/version.txt" },
+    "version --format json": { "stdout_file": "version/version.json" },
+    "system info --format json": { "stdout_file": "system_info/info.json" },
+    "system session list": { "stdout_file": "session_list/sessions.txt" },
+
+    "container list --quiet": { "stdout_file": "container_list/quiet.txt" },
+    "container list --all --no-trunc --format json": { "stdout_file": "container_list/list.ndjson" },
+    "container list --no-trunc --format json": { "stdout_file": "container_list/running.ndjson" },
+    "container inspect --format json dk-cli-fixture": { "stdout_file": "container_inspect/inspect_single_line.json" },
+    "container inspect --format json dk-cli-exited": { "stdout_file": "container_inspect/inspect_exited.json" },
+    "container inspect --format json deadbeefdeadbeef": { "stdout": "[]\r\n", "stderr_file": "errors/inspect_not_found.stderr", "exit_code": 1 },
+    "container stop --time 1 dk-cli-fixture": { "stdout_file": "actions/stop.stdout" },
+    "container start dk-cli-fixture": { "stdout_file": "actions/start.stdout" },
+    "container stop dk-cli-nosuch": { "stderr_file": "errors/stop_not_found.stderr", "exit_code": 1 },
+    "container remove dk-cli-fixture": { "stderr_file": "errors/remove_running.stderr", "exit_code": 1 },
+    "container kill dk-cli-exited": { "stderr_file": "errors/kill_not_running.stderr", "exit_code": 1 },
+    "container prune --force": { "stdout_file": "prune/containers.stdout" },
+    "container stats dk-cli-fixture --format json": { "stdout_file": "container_stats/stats.json" },
+    "container stats dk-cli-exited --format json": { "stdout_file": "container_stats/stats_stopped.json" },
+    "container stats nosuch --format json": { "stderr_file": "errors/stats_not_found.stderr", "exit_code": 1 },
+    "container logs dk-cli-exited": { "stdout_file": "logs/plain.stdout", "stderr_file": "logs/plain.stderr" },
+    "container logs --timestamps --tail 1000 dk-cli-exited": { "stdout_file": "logs/timestamps.stdout", "stderr_file": "logs/timestamps.stderr" },
+    "container logs --follow --timestamps --tail 1000 dk-cli-exited": { "stdout_file": "logs/timestamps.stdout", "stderr_file": "logs/timestamps.stderr", "hang_ms": 30000 },
+    "container run --detach *": { "stdout_file": "run/run.stdout" },
+
+    "image list --no-trunc --format json": { "stdout_file": "image_list/list.ndjson" },
+    "image list --no-trunc --digests --format json": { "stdout_file": "image_list/list_digests.ndjson" },
+    "image inspect --format json nginx:alpine": { "stdout_file": "image_inspect/inspect.json" },
+    "image inspect --format json nosuch:img": { "stdout": "[]\r\n", "stderr_file": "errors/image_not_found.stderr", "exit_code": 1 },
+    "image pull busybox:1.37": { "stdout_file": "pull/pull.stdout", "line_delay_ms": 5 },
+    "image remove busybox:1.37": { "stdout_file": "image_remove/delete.stdout" },
+    "image tag busybox:1.37 dk-cli-test/busybox:t3": { "stdout_file": "actions/tag.stdout" },
+    "image prune --force": { "stdout_file": "prune/images.stdout" },
+
+    "volume list --format json": { "stdout_file": "volume_list/list.ndjson" },
+    "volume inspect --format json dk-cli-vol": { "stdout_file": "volume_inspect/inspect.json" },
+    "volume inspect --format json nosuchvol": { "stdout": "[]\r\n", "stderr_file": "errors/volume_not_found.stderr", "exit_code": 1 },
+    "volume remove dk-cli-vol": { "stderr_file": "errors/volume_in_use.stderr", "exit_code": 1 },
+    "volume prune --force": { "stdout_file": "prune/volumes.stdout" },
+
+    "network list --no-trunc --format json": { "stdout_file": "network_list/list.ndjson" },
+    "network inspect --format json bridge dk-cli-net host none": { "stdout_file": "network_inspect/batch.json" },
+    "network inspect --format json dk-cli-net": { "stdout_file": "network_inspect/inspect.json" },
+    "network inspect --format json nosuchnet": { "stdout": "[]\r\n", "stderr_file": "errors/network_not_found.stderr", "exit_code": 1 },
+    "network prune --force": { "stdout_file": "prune/networks.stdout" },
+
+    "system events": { "stdout_file": "events/events.txt", "line_delay_ms": 2, "hang_ms": 30000 }
+  }
+}
