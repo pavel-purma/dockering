@@ -13,6 +13,8 @@ pub enum CommandGroup {
     Navigation,
     Engines,
     Containers,
+    /// M6
+    Resources,
     View,
 }
 
@@ -23,6 +25,7 @@ impl CommandGroup {
             CommandGroup::Navigation => "Navigation",
             CommandGroup::Engines => "Engines",
             CommandGroup::Containers => "Containers",
+            CommandGroup::Resources => "Images, volumes & networks",
             CommandGroup::View => "View",
         }
     }
@@ -36,6 +39,21 @@ pub enum When {
     Engine,
     /// Only on the Containers page.
     ContainersPage,
+    // ── M6 ──
+    /// The Images list.
+    ImagesPage,
+    /// The Images list or an image detail page.
+    ImagePages,
+    /// An image detail page.
+    ImageDetail,
+    /// The Volumes list.
+    VolumesPage,
+    /// The Networks list.
+    NetworksPage,
+    /// Any of the Images, Volumes, Networks lists.
+    ResourceLists,
+    /// Any of the Images, Volumes, Networks lists or detail pages.
+    ResourcePages,
 }
 
 /// Context passed to availability checks.
@@ -43,6 +61,9 @@ pub enum When {
 pub struct CommandContext {
     pub has_engine: bool,
     pub on_containers: bool,
+    /// M6: the sidebar page of the current route, and whether it is a detail page.
+    pub page: Option<crate::nav::Page>,
+    pub on_detail: bool,
 }
 
 pub struct CommandSpec {
@@ -269,7 +290,105 @@ pub static COMMANDS: &[CommandSpec] = &[
         ContainersPage,
         &["remove"]
     ),
+    // ── M6: images, volumes, networks ─────────────────────────────────────────────────
+    c!(
+        s::CMD_PULL_IMAGE,
+        image::Pull,
+        Resources,
+        ImagesPage,
+        &["download", "docker pull"]
+    ),
+    c!(
+        s::CMD_RUN_IMAGE,
+        image::Run,
+        Resources,
+        ImagePages,
+        &["start"]
+    ),
+    c!(s::CMD_TAG_IMAGE, res::TagImage, Resources, ImageDetail),
+    c!(s::CMD_COPY_DIGEST, res::CopyDigest, Resources, ImageDetail),
+    c!(
+        s::CMD_PRUNE_DANGLING,
+        res::PruneDangling,
+        Resources,
+        ImagesPage,
+        &["clean"]
+    ),
+    c!(
+        s::CMD_PRUNE_UNUSED_IMAGES,
+        res::PruneUnused,
+        Resources,
+        ImagesPage,
+        &["clean"]
+    ),
+    c!(
+        s::CMD_NEW_VOLUME,
+        volume::Create,
+        Resources,
+        VolumesPage,
+        &["create"]
+    ),
+    c!(
+        s::CMD_PRUNE_VOLUMES,
+        list::Prune,
+        Resources,
+        VolumesPage,
+        &["clean"]
+    ),
+    c!(
+        s::CMD_PRUNE_NETWORKS,
+        list::Prune,
+        Resources,
+        NetworksPage,
+        &["clean"]
+    ),
+    c!(s::CMD_SORT_BY, list::SortMenu, Resources, ResourceLists),
+    c!(
+        s::CMD_FOCUS_FILTER,
+        list::FocusFilter,
+        Resources,
+        ResourceLists
+    ),
+    c!(s::CMD_SELECT_ALL, list::SelectAll, Resources, ResourceLists),
+    c!(
+        s::CMD_BULK_DELETE,
+        list::BulkDelete,
+        Resources,
+        ResourceLists
+    ),
+    c!(s::CMD_QUICK_FIND, list::QuickFind, Resources, ResourceLists),
+    c!(
+        s::CMD_COPY_RESOURCE_ID,
+        list::CopyId,
+        Resources,
+        ResourcePages
+    ),
+    c!(
+        s::CMD_DELETE_RESOURCE,
+        list::Delete,
+        Resources,
+        ResourcePages,
+        &["remove"]
+    ),
 ];
+
+/// M6 availability (`When::ImagesPage` …).
+fn resource_when(when: When, cx: &CommandContext) -> bool {
+    use crate::nav::Page;
+    let page = cx.page;
+    match when {
+        When::ImagesPage => page == Some(Page::Images) && !cx.on_detail,
+        When::ImagePages => page == Some(Page::Images),
+        When::ImageDetail => page == Some(Page::Images) && cx.on_detail,
+        When::VolumesPage => page == Some(Page::Volumes) && !cx.on_detail,
+        When::NetworksPage => page == Some(Page::Networks) && !cx.on_detail,
+        When::ResourceLists => {
+            matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)) && !cx.on_detail
+        }
+        When::ResourcePages => matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)),
+        When::Always | When::Engine | When::ContainersPage => false,
+    }
+}
 
 impl CommandSpec {
     pub fn available(&self, cx: &CommandContext) -> bool {
@@ -277,6 +396,7 @@ impl CommandSpec {
             When::Always => true,
             When::Engine => cx.has_engine,
             When::ContainersPage => cx.has_engine && cx.on_containers,
+            other => cx.has_engine && resource_when(other, cx),
         }
     }
 }
@@ -303,6 +423,9 @@ pub fn plumbing_action(name: &str) -> bool {
         "list::SortByColumn",
         "list::SetFilter",
         "list::SetGroupBy",
+        // M6: tab-switch plumbing and row-cell buttons (the keyed equivalents are bound).
+        "res::ReplaceRoute",
+        "res::RunRow",
     ];
     PLUMBING.contains(&name)
 }
@@ -361,7 +484,8 @@ mod tests {
         let all = CommandContext {
             has_engine: true,
             on_containers: true,
+            ..Default::default()
         };
-        assert_eq!(available(&all).count(), COMMANDS.len());
+        assert!(available(&all).all(|c| !matches!(c.group, CommandGroup::Resources)));
     }
 }

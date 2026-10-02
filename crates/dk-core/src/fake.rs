@@ -244,7 +244,7 @@ impl FakeEngine {
 
     fn new_id(st: &mut State) -> String {
         st.next_id += 1;
-        format!("{:064x}", st.next_id * 0x9e37_79b9_7f4a_7c15)
+        format!("{:064x}", st.next_id.wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }
 }
 

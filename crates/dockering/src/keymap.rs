@@ -862,6 +862,8 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
         "Remove row",
         Dialogs
     ),
+    // ── M6: images / volumes / networks (detail header single letters, KBD-041) ──────────────
+    b!("u", image::Run, D, Os::ALL, s::CMD_RUN_IMAGE, Detail),
 ];
 
 /// Bindings for one OS.

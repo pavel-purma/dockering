@@ -23,3 +23,11 @@ pub mod widgets;
 
 pub use states::{empty_state, error_panel, skeleton_rows};
 pub use widgets::{copy_id, focus_ring, port_link, relative_time};
+
+// ── M6 additions ────────────────────────────────────────────────────────────────────────
+/// Form dialogs (Pull/Run/Tag image, Create volume; KBD-071/072).
+pub mod form_dialog;
+/// Repeating key/value form rows (KBD-072).
+pub mod kv_rows;
+/// Cross-links to resource detail pages (spec 30 §2).
+pub mod links;

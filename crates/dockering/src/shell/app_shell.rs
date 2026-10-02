@@ -50,6 +50,8 @@ pub enum ShellPage {
     ContainerDetail(Entity<pages::container_detail::ContainerDetailPage>),
     Settings(Entity<pages::settings::SettingsPage>),
     Placeholder(Entity<pages::placeholder::PlaceholderPage>),
+    /// M6 pages (Images, Volumes, Networks and their details).
+    Dyn(crate::ui::page::DynPage),
     /// Nothing to show (no engine / disconnected): the shell renders a state screen.
     None,
 }
@@ -61,6 +63,7 @@ impl ShellPage {
             ShellPage::ContainerDetail(e) => Some(e.clone().into()),
             ShellPage::Settings(e) => Some(e.clone().into()),
             ShellPage::Placeholder(e) => Some(e.clone().into()),
+            ShellPage::Dyn(p) => Some(p.view()),
             ShellPage::None => None,
         }
     }
@@ -71,6 +74,7 @@ impl ShellPage {
             ShellPage::ContainerDetail(e) => Some(e.read(cx).primary_focus(cx)),
             ShellPage::Settings(e) => Some(e.read(cx).primary_focus(cx)),
             ShellPage::Placeholder(e) => Some(e.read(cx).primary_focus(cx)),
+            ShellPage::Dyn(p) => Some(p.primary_focus(cx)),
             ShellPage::None => None,
         }
     }
@@ -464,18 +468,30 @@ impl AppShell {
             (Route::ContainerDetail { id, tab }, _) => ShellPage::ContainerDetail(
                 pages::container_detail::new(id.clone(), *tab, self.store.clone(), window, cx),
             ),
-            (Route::Images, _) => ShellPage::Placeholder(pages::images::new(window, cx)),
-            (Route::Volumes, _) => ShellPage::Placeholder(pages::volumes::new(window, cx)),
-            (Route::Networks, _) => ShellPage::Placeholder(pages::networks::new(window, cx)),
-            (Route::ImageDetail { id, .. }, _) => {
-                ShellPage::Placeholder(pages::image_detail::new(id, window, cx))
-            }
-            (Route::VolumeDetail { name, .. }, _) => {
-                ShellPage::Placeholder(pages::volume_detail::new(name, window, cx))
-            }
-            (Route::NetworkDetail { id, .. }, _) => {
-                ShellPage::Placeholder(pages::network_detail::new(id, window, cx))
-            }
+            // M6: resource pages (keep the same entity when it accepts the route, e.g. a tab).
+            (
+                Route::Images
+                | Route::Volumes
+                | Route::Networks
+                | Route::ImageDetail { .. }
+                | Route::VolumeDetail { .. }
+                | Route::NetworkDetail { .. },
+                current,
+            ) => match (&self.store, current) {
+                (Some(store), current) => {
+                    let keep = match current {
+                        ShellPage::Dyn(p) if p.store_id() == Some(store.entity_id()) => {
+                            p.accept_route(&route, window, cx).then(|| p.clone())
+                        }
+                        _ => None,
+                    };
+                    ShellPage::Dyn(match keep {
+                        Some(p) => p,
+                        None => pages::mount_resource_page(&route, store.clone(), window, cx),
+                    })
+                }
+                (None, _) => ShellPage::None,
+            },
             (Route::Settings { section }, _) => {
                 ShellPage::Settings(pages::settings::new(*section, window, cx))
             }
@@ -524,6 +540,16 @@ impl AppShell {
 
     fn go(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
         self.navigate(route, window, cx);
+    }
+
+    /// Replaces the current route without a history entry (detail tabs, M6).
+    pub fn replace_route(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
+        if *self.history.current() == route {
+            return;
+        }
+        self.history.replace(route);
+        self.mount_page(window, cx);
+        cx.notify();
     }
 
     fn on_navigate(&mut self, a: &Navigate, window: &mut Window, cx: &mut Context<Self>) {
@@ -598,6 +624,7 @@ impl AppShell {
     fn on_focus_search(&mut self, _: &FocusSearch, window: &mut Window, cx: &mut Context<Self>) {
         match &self.page {
             ShellPage::Containers(p) => p.update(cx, |p, cx| p.focus_search(window, cx)),
+            ShellPage::Dyn(p) => p.focus_search(window, cx),
             _ => self.focus_page(window, cx),
         }
     }
@@ -924,6 +951,11 @@ impl AppShell {
             if cleared {
                 return;
             }
+        }
+        if let ShellPage::Dyn(p) = &self.page
+            && p.clear_search_if_focused(window, cx)
+        {
+            return;
         }
         // Return focus to the primary list if focus is elsewhere in content.
         if let Some(h) = self.page.primary_focus(cx)
@@ -1309,6 +1341,8 @@ impl AppShell {
             let ctx = CommandContext {
                 has_engine: self.store.is_some() && self.connected(cx),
                 on_containers: matches!(self.page, ShellPage::Containers(_)),
+                page: self.history.current().page(),
+                on_detail: self.history.current().is_detail(),
             };
             let shell = cx.entity().downgrade();
             let el = palette::element(state, ctx, self.store.as_ref(), window, cx)
@@ -1381,6 +1415,12 @@ impl Render for AppShell {
             .size_full()
             .bg(cx.theme().background)
             .on_action(cx.listener(Self::on_navigate))
+            // M6: detail tab switches replace the route (no history entry).
+            .on_action(
+                cx.listener(|this, a: &crate::actions::res::ReplaceRoute, w, cx| {
+                    this.replace_route(a.route.clone(), w, cx)
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &GoContainers, w, cx| this.go(Route::Containers, w, cx)),
             )
