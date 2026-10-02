@@ -599,7 +599,12 @@ impl FormView for AddEngineDialog {
 impl Render for AddEngineDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if std::mem::take(&mut self.focus_first) {
-            self.kind_select.update(cx, |s, cx| s.focus(window, cx));
+            if self.schemas.is_empty() {
+                // Nothing to fill in: the safe control (KBD-071), so Esc/Enter work at once.
+                window.focus(&self.cancel_focus, cx);
+            } else {
+                self.kind_select.update(cx, |s, cx| s.focus(window, cx));
+            }
         }
         let testing = matches!(self.test, Some(DialogTest::Running));
         let can_save = self.can_save(cx);

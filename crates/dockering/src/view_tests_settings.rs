@@ -1081,3 +1081,30 @@ fn shl_011_window_bounds_saved_on_change(cx: &mut TestAppContext) {
     }
     h.shutdown();
 }
+
+/// The demo build has no addable schemas: the dialog still opens from the palette and Esc
+/// still closes it (KBD-071).
+#[gpui_kit::test]
+fn kbd_071_add_engine_from_palette_escape_closes(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    open(&h, cx, SettingsSection::Engines);
+    h.press(cx, "ctrl-shift-p");
+    h.type_text(cx, "Add engine");
+    h.press(cx, "enter");
+    h.wait_until(cx, "dialog open", |window, cx| {
+        use gpui_kit::component::WindowExt;
+        window.has_active_dialog(cx)
+    });
+    h.draw(cx);
+    let focused = cx
+        .update_window(h.any_window(), |_, window, cx| window.focused(cx).is_some())
+        .unwrap();
+    assert!(focused, "something inside the dialog has focus");
+    h.press(cx, "escape");
+    h.wait_until(cx, "dialog closed", |window, cx| {
+        use gpui_kit::component::WindowExt;
+        !window.has_active_dialog(cx)
+    });
+    h.shutdown();
+}
