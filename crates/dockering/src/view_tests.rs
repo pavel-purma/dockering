@@ -716,7 +716,10 @@ fn con_013_delete_all_lists_members_and_needs_force(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn spec10_polling_fallback_without_events_capability(cx: &mut TestAppContext) {
-    let h = start(cx, Setup::default());
+    // 1 s polling keeps the test well inside the harness's 10 s wait, even under load.
+    let mut setup = Setup::default();
+    setup.config.containers.polling_interval_s = 1;
+    let h = start(cx, setup);
     h.engine
         .set_capabilities(dk_core::Capabilities::all() - dk_core::Capabilities::EVENTS);
     h.update(cx, |_, window, cx| {
