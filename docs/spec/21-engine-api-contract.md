@@ -323,6 +323,16 @@ pub trait TerminalSession: Send + 'static {
 | disk_usage | `GET /system/df` | `df` |
 | networks | `GET /networks`, `GET/DELETE /networks/{id}`, `POST /networks/prune` | … |
 
+**Docker mapping notes (verified on Docker Desktop 29.8.1)**
+
+| Topic | Behaviour |
+|---|---|
+| API version | bollard 0.21's maximum is **1.53** (`CLIENT_MAX`, 20 §3), so newer daemons are driven at 1.53. |
+| `disk_usage` | At API ≥ 1.52, `/system/df` returns `ImageUsage` / `ContainerUsage` / `VolumeUsage` / `BuildCacheUsage`, each with `TotalSize`, `Reclaimable`, and `Items`. The older `LayersSize` / `Images` / `Volumes` arrays are gone. The mapper handles both shapes. |
+| `pull_image` reference | Adds `tag=latest` when the reference has neither a tag nor a digest. |
+| `pull_image(ref, None)` | The engine resolves credentials itself from the Docker config (IMG-007). |
+| Registry auth errors | Not always 401: ghcr returns 500 `denied`, and Docker Hub returns `pull access denied`. All of these map to the IMG-007 "Authentication required" message. |
+
 ## 7. Contract tests
 
 `dk-core` ships a reusable test suite, `dk_core::contract::run_suite(engine)`. Each backend runs it in CI:

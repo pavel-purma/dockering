@@ -155,14 +155,14 @@ Tasks when scheduled: spikes S-6/S-7, `dk-engine-apple` crate (XPC transport + C
 
 | ID | Question | Timebox | Blocks |
 |---|---|---|---|
-| S-1 | Can a GPUI element render an `alacritty_terminal` grid at 60 fps with acceptable input latency, including IME/AltGr via `InputHandler`? (grid parsing verified, F-5) | 2 days | M0 → M4 |
-| S-2 | ✅ **Done** (F-10): `wslc` 3.0.1 CLI shapes recorded. Remaining: exit codes and stderr texts for the error mapping | 0.5 day | M8 (fallback) |
-| S-3 | ✅ **Mostly done** (F-6…F-8): session manager, sessions, ListContainers, ListNetworks, Stats, Logs handles, Exec + TTY + ResizeTty, and security init order. Remaining: `GetEvents` stream, `PullImage` with a Rust `IProgressCallback`, `CreateContainer` struct layout | 1.5 days | M8 (primary transport) |
-| S-4 | Bridge request/response and events ✅ (F-4). Remaining: bollard hijacked exec through the bridge (resize, stdin half-close) | 0.5 day | M7 |
-| S-5 | GPUI Kit `DataTable`: is custom row rendering for group rows (indent and chevron) feasible, or do we use `List` with a custom header? | 0.5 day | M0 → M2 |
+| S-1 | ✅ **Done** (2026-10-02): `alacritty_terminal` grid in a GPUI element. A full reshape of a 209×52 grid takes 2.2–2.5 ms per frame; a frame with no changed rows ~0.3 ms. Key → echo 20–32 ms on a debug build (TRM-010). IME/AltGr via `InputHandler`. | 2 days | M0 → M4 |
+| S-2 | ✅ **Done** (F-10, 2026-10-02): `wslc` 3.0.1 CLI shapes, exit codes, and stderr texts recorded as fixtures (spec 20 §5.5) | 0.5 day | M8 (fallback) |
+| S-3 | ✅ **Done except `CreateContainer`** (F-6…F-8, 2026-10-02): session manager, sessions, ListContainers, ListNetworks, Stats, Logs handles, Exec + TTY + ResizeTty, security init order, `GetEvents` stream, and `PullImage` with a Rust `IProgressCallback`, all verified live. Remaining: the `CreateContainer` options layout (`run_image` over COM returns 501 until verified, spec 20 §5.4) | 1.5 days | M8 (primary transport) |
+| S-4 | ◐ **Partially done**: bridge request/response and events (F-4); bridge live tests cover request/response and concurrent connections. Remaining: bollard hijacked exec through the bridge (resize, stdin half-close) is not separately verified | 0.5 day | M7 |
+| S-5 | ✅ **Done**: group rows (indent and chevron) are rendered through the `ListTable` wrapper over GPUI Kit `DataTable` | 0.5 day | M0 → M2 |
 | S-6 | (post-v1) Rust XPC client for `com.apple.container.apiserver`: list, logs fd passing, stats, exec + resize, `containerEvent` | 2 days | M10 |
 | S-7 | (post-v1) Apple image helper XPC vs CLI for image ops | 0.5 day | M10 |
-| S-8 | GPUI focus APIs + overriding the GPUI Kit `DataTable` bindings for roving focus (a table is one Tab stop), and physical-key matching for digits/punctuation (KBD-085) | 1 day | M0 → M2 |
+| S-8 | ✅ **Done** (2026-10-02, [report](spikes/2026-10-s8-focus-keys.md)): focus APIs, `ListTable > DataTable` binding overrides, roving focus. KBD-085: physical keys via the keyboard mapper on Windows (full) and macOS (partial); Linux logical only (known gap) | 1 day | M0 → M2 |
 
 Spike results are recorded as ADRs or spec updates.
 

@@ -2,6 +2,15 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-02 · engines/keyboard/terminal · **Implementation findings against real engines** (WSL 3.0.1, Docker Desktop 29.8.1, Windows 11). No new requirement IDs.
+  - **WSLC CLI (20 §5.5):** rewritten as invocation rules, an error table, and a mapping with notes. Covers: `--session` before the subcommand; no `--`; the `Error code: <SYMBOL>` stderr format, including `ERROR_ELEVATION_REQUIRED` → `Unreachable` with a hint; prune always `--force`; tail 0 → `--since now`; network remove by name; volume drivers `guest`/`vhd`; batch `inspect` enrichment; CLI-string stats paced at ≥ 1 s; text events; CRLF; no pull credentials; ConPTY `ESC[6n` answered. S-2 done.
+  - **WSLC COM (20 §5.3/5.4, 10 §7):** `CoIncrementMTAUsage` before `CoInitializeSecurity`; unknown HRESULT → `Api{500, "0x… text"}`; `EVENTS_LOST` → `Protocol` then continue; events default `since = now`; `info` values; `remove_volume` ignores `force`; RPC pool of 3; `BeginContainerOperation` also held for logs/exec/events; ABI module `v3_0` (3.0.0..=3.0.x); ENG-109 sessions filtered by user SID. **Known limitation:** `run_image` over COM returns 501 until `CreateContainer` is verified.
+  - **WSL distro (20 §4):** probe exit codes 11/12/13; `wsl.exe` UTF-16LE error output; v1 idle behaviour drops the non-active engine (60 s grace period is a follow-up).
+  - **Docker (20 §3, 21 §6):** `/system/df` ≥ 1.52 shape; `CLIENT_MAX` 1.53; non-401 registry auth errors (IMG-007); `pull_image` credential resolution and default `latest` tag.
+  - **Keyboard/terminal:** KBD-085 resolved (Windows full, macOS partial, Linux known gap); `ListTable > DataTable` override technique; terminal keystroke interceptor (KBD-060); TRM-010 measured at 20–32 ms (debug build); S-1 render timings.
+  - **Plan:** spikes S-1, S-2, S-5, and S-8 done; S-3 done except `CreateContainer`; S-4 partially done.
+  - **Status:** engines, containers, container-detail, container-logs, container-terminal, container-stats, images, volumes, networks, settings, and keyboard → `in-progress`.
+
 - 2026-10-02 · all · **Whole-plan review + feasibility spikes.** Spikes F-1…F-12 ran on real Docker, WSL distro, and WSLC 3.0.1 ([report](../plan/spikes/2026-10-feasibility.md)). Fixes:
   - **Hub API:** HubHandle API completed: terminal sessions are hub-side actors with a channel handle, `Feed::Lagged` for events/stats, single owner per resource.
   - **WSLC COM:** ABI module chosen from the `wslservice.exe` version (no COM). COM threading split into an RPC pool plus a thread per stream. `CoInitializeSecurity` and `WSAStartup` run before GPUI.

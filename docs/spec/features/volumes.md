@@ -1,6 +1,6 @@
 # Feature: Volumes
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** VOL
 - **Plan:** [docs/plan/features/volumes.md](../../plan/features/volumes.md) (to be written)
 

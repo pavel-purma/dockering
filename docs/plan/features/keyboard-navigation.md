@@ -60,6 +60,7 @@ pub fn install(cx: &mut App) { cx.bind_keys(DEFAULT_KEYMAP.iter().filter(current
 - Key contexts: `Workspace` (root), `Sidebar`, `Toolbar`, `ListTable`, `DetailHeader`, `DetailTabs`, `Logs`, `Terminal`, `Dialog`, `Palette`. Single-letter bindings are registered **only** in `ListTable` and `DetailHeader`, which is how KBD-008 is satisfied by construction.
 - Buttons, menus, and the palette dispatch actions (`window.dispatch_action`). Click handlers contain no logic.
 - `Kbd::binding_for_action` renders shortcut hints in tooltips and menus (KBD-010).
+- **Physical keys (KBD-085, S-8):** `install` loads digit/punctuation chords twice: logically, and again with `use_key_equivalents = true` through `cx.keyboard_mapper()`. Windows: full. macOS: partial. Linux: logical only (no GPUI mapper; known gap). See the [S-8 report](../spikes/2026-10-s8-focus-keys.md).
 
 ### 6.2 Focus model
 - `FocusRegions` on `AppShell`: an ordered list of `(RegionId, FocusHandle, last_focused: Option<FocusHandle>)`. `NextRegion` / `PrevRegion` cycle through them and restore `last_focused` (KBD-005).
@@ -70,7 +71,8 @@ pub fn install(cx: &mut App) { cx.bind_keys(DEFAULT_KEYMAP.iter().filter(current
 - Focus ring: a shared `.focus_ring(cx)` style helper using the theme `ring` token, applied to custom elements. GPUI Kit components use their built-in focus style, checked in both themes (KBD-003).
 
 ### 6.3 Tables (roving focus)
-- `ListTable` wraps the GPUI Kit `DataTable` (`TableState` with `row_selectable(true)`) and overrides the `Table` context: `tab`/`shift-tab` leave the table, and `left`/`right` collapse/expand group rows (assumption 3, spike S-8).
+- `ListTable` wraps the GPUI Kit `DataTable` (`TableState` with `row_selectable(true)`) and overrides its bindings: `tab`/`shift-tab` leave the table, and `left`/`right` collapse/expand group rows (assumption 3, spike S-8).
+- **Override technique (S-8.4):** bind the same keys with the context predicate **`ListTable > DataTable`**. GPUI ranks bindings by context depth first, then by insertion order (later wins). The predicate matches at the `DataTable` depth like the built-in bindings, and ours are installed after `gpui_kit::init`, so ours win. A plain `ListTable` predicate matches one level shallower and loses. Pinned by `kbd_033_left_right_collapse_group`.
 - The cursor row (TableSelection::Row) is separate from the **checkbox multi-selection** (`HashSet<Id>` in the page state). `Space` toggles membership (KBD-034).
 - Type-ahead buffer with a 1 s reset (KBD-037). It's ignored for bound letters.
 
@@ -79,7 +81,7 @@ pub fn install(cx: &mut App) { cx.bind_keys(DEFAULT_KEYMAP.iter().filter(current
 - The shortcut reference is a `Dialog` with a searchable table generated from `DEFAULT_KEYMAP` for the current OS (KBD-022). Settings → Keyboard reuses the same view (SET-070).
 
 ### 6.5 Terminal
-- `TerminalView` key handler: first check the reserved app chords (KBD-061/062, `Ctrl+Tab`). If one matches, dispatch it. Otherwise encode the key for the PTY. All other keys, including `Tab`, `Esc`, `F6`, and `Alt+digit`, go to the shell.
+- `TerminalView` key handling: a keystroke interceptor, active only while the terminal is focused, encodes PTY-bound keys and stops propagation before keymap dispatch. The reserved app chords (KBD-061/062, `Ctrl+Tab`) pass through to the keymap. All other keys, including `Tab`, `Esc`, `F6`, and `Alt+digit`, go to the shell.
 
 ### 6.6 Errors
 None new. Keyboard actions reuse the same error paths as the equivalent buttons (SHL-003).
@@ -134,3 +136,4 @@ Done (spec 60, DoD item 7).
 
 ## 10. Revision log
 - 2026-10-01: created (shortcut style and rebinding scope decided by the user)
+- 2026-10-02: spike S-8 done; added the `ListTable > DataTable` override technique, the KBD-085 twin-binding approach, and the terminal keystroke interceptor.

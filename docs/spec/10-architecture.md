@@ -280,7 +280,9 @@ file and rename. The schema is versioned (`version = 1`) with forward-compatible
 1. `main()` → install the panic hook (logs and crash file) → init `tracing` → single-instance check (second launch focuses
    the running window via a local socket/pipe, then exits) → load config (sync).
    **Windows only, before anything touches COM or GPUI:** `WSAStartup(2.2)` (WSLC handles are sockets),
-   then on a short-lived MTA thread `CoInitializeEx(MTA)` + `CoInitializeSecurity(IMPERSONATE, EOAC_STATIC_CLOAKING)`.
+   then `CoIncrementMTAUsage` (keeps the process MTA alive), then on a short-lived MTA thread `CoInitializeEx(MTA)` + `CoInitializeSecurity(IMPERSONATE, EOAC_STATIC_CLOAKING)`.
+   Without `CoIncrementMTAUsage`, COM is uninitialised when that thread exits, the security settings are lost, and
+   `OpenSessionByName` later fails with `0x80070542` (spec 20 §5.4).
    Calling it after GPUI starts fails with `RPC_E_TOO_LATE` (spike F-8). If it fails, WSLC uses per-proxy
    `CoSetProxyBlanket` only, and the self-check decides whether COM is usable.
    → `EngineHub::start(config)`.

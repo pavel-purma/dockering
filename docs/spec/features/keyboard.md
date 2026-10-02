@@ -1,6 +1,6 @@
 # Feature: Keyboard navigation & shortcuts
 
-- **Status:** planned
+- **Status:** in-progress
 - **Requirement prefix:** KBD
 - **Plan:** [docs/plan/features/keyboard-navigation.md](../../plan/features/keyboard-navigation.md)
 
@@ -109,7 +109,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-082 | No default binding may conflict within the same context. A unit test enforces this per OS. |
 | KBD-083 | **Layout safety.** On Windows/Linux, default bindings MUST NOT use `Ctrl+Alt+<printable>`, because it equals AltGr on many European layouts (for example Czech, Polish, and German) and would collide with typing. Bindings use logical keys, not physical scancodes, and are verified with at least a US and a Czech layout (KBD-090). |
 | KBD-084 | OS-reserved chords are never bound: Windows `Ctrl+Alt+Del`, `Ctrl+Shift+Esc`, and `Win+*`; macOS `Cmd+Tab`, `Cmd+Space`, `Cmd+H`, and `Cmd+M` (`Cmd+H`/`Cmd+M` keep their system meaning); Linux desktop `Super+*`. |
-| KBD-085 | **Digit and punctuation keys** (`Mod+1…4`, `Mod+/`, `Mod+,`, `Mod+[`/`]`) match the **physical key position** (US-QWERTY equivalent), so they work on layouts where the top row produces non-digits (for example Czech `+ľščť…`). Spike S-8 verifies GPUI support. If GPUI matches only logical keys, these are additionally bound to their layout-specific keystrokes, generated at startup. |
+| KBD-085 | **Digit and punctuation keys** (`Mod+1…4`, `Mod+/`, `Mod+,`, `Mod+[`/`]`, zoom) match the **physical key position** (US-QWERTY equivalent), so they work on layouts where the top row produces non-digits (for example Czech `+ľščť…`). GPUI matches logical keys only (spike S-8, [report](../../plan/spikes/2026-10-s8-focus-keys.md)), so each of these chords gets a second binding loaded with `use_key_equivalents` through the platform keyboard mapper. Support per OS: **Windows** full (US vkey table → the current layout). **macOS** partial (the system key-equivalent table). **Linux** not supported: GPUI has no keyboard mapper there, so only logical matching applies. *Known gap*; the command palette (`Mod+Shift+P`) always works. |
 
 ## Verification
 
