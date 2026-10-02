@@ -870,6 +870,7 @@ impl ContainerDetailPage {
             .id("detail-tab-bar")
             .key_context(format!("{} {}", ctx::DETAIL_HEADER, ctx::DETAIL_TABS).as_str())
             .track_focus(&self.tab_bar_focus)
+            .px_1()
             .rounded(cx.theme().radius)
             .map(|el| crate::ui::focus_ring(el, focused, cx))
             .child(

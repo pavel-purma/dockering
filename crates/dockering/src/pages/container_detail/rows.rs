@@ -521,6 +521,7 @@ fn cell_element<V: 'static>(
         .w_full()
         .min_w_0()
         .px_1()
+        .text_sm()
         .rounded(theme.radius)
         .when(highlight, |el| el.bg(theme.accent))
         .on_mouse_down(MouseButton::Left, select)

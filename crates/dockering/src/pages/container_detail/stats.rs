@@ -425,11 +425,14 @@ impl StatsTab {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
+    /// A chart card. `value` is the current value as text (STA-011); `legend` colours its
+    /// parts like the chart lines (colour is never the only signal: the text names them).
+    #[allow(clippy::too_many_arguments)]
     fn card(
         &self,
         ix: usize,
         title: &'static str,
-        value: String,
+        value: Vec<(String, Option<Hsla>)>,
         chart: AnyElement,
         window: &Window,
         cx: &App,
@@ -460,7 +463,11 @@ impl StatsTab {
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .child(title),
                     )
-                    .child(div().text_sm().child(value)),
+                    .child(h_flex().gap_3().text_sm().children(value.into_iter().map(
+                        |(text, color)| {
+                            div().when_some(color, |el, c| el.text_color(c)).child(text)
+                        },
+                    ))),
             )
             .child(div().flex_1().min_h_0().child(chart))
             .into_any_element()
@@ -560,6 +567,8 @@ fn two_lines(
         .y_tick_count(3)
         .y_tick_format(fmt)
         .tooltip_value(move |_, v| fmt(v).into());
+    // Same axes, labels and gutter as `a` so the two lines align exactly; its labels paint
+    // over `a`'s identically.
     let b = LineChart::new(points.to_vec())
         .id(SharedString::from(format!("{id}-b")))
         .x(|p: &Point| p.label.clone())
@@ -568,7 +577,7 @@ fn two_lines(
         .linear()
         .name(name_b)
         .y_domain(0.0, max)
-        .x_axis(false)
+        .x_tick_count(4)
         .grid(false)
         .y_axis(true)
         .y_tick_count(3)
@@ -602,7 +611,7 @@ impl Render for StatsTab {
         let started = Instant::now();
         let data = chart_data(&samples, self.window, relative, now);
         let theme = cx.theme();
-        let colors = [theme.chart_1, theme.chart_2, theme.chart_3, theme.chart_4];
+        let colors = [theme.chart_1, theme.chart_2, theme.blue, theme.yellow];
         let charts = build_charts(&data, colors);
         self.last_build = started.elapsed();
 
@@ -624,14 +633,22 @@ impl Render for StatsTab {
                 s::stats_mem(&format_size(l.mem_used), limit.as_deref())
             },
         );
-        let net_v = last.as_ref().map_or_else(
-            || s::NONE_VALUE.to_owned(),
-            |l| s::stats_net(&format_rate(l.net_rx_bps), &format_rate(l.net_tx_bps)),
-        );
-        let disk_v = last.as_ref().map_or_else(
-            || s::NONE_VALUE.to_owned(),
-            |l| s::stats_io(&format_rate(l.blk_read_bps), &format_rate(l.blk_write_bps)),
-        );
+        let none = || vec![(s::NONE_VALUE.to_owned(), None)];
+        let (ca, cb) = (Some(colors[2]), Some(colors[3]));
+        let net_v = last.as_ref().map_or_else(none, |l| {
+            vec![
+                (format!("↓ {}", format_rate(l.net_rx_bps)), ca),
+                (format!("↑ {}", format_rate(l.net_tx_bps)), cb),
+            ]
+        });
+        let disk_v = last.as_ref().map_or_else(none, |l| {
+            vec![
+                (format!("R {}", format_rate(l.blk_read_bps)), ca),
+                (format!("W {}", format_rate(l.blk_write_bps)), cb),
+            ]
+        });
+        let cpu_v = vec![(cpu_v, None)];
+        let mem_v = vec![(mem_v, None)];
         let [cpu, mem, net, disk] = charts;
         let cards = v_flex()
             .gap_3()

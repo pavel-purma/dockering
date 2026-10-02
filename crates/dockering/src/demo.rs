@@ -198,9 +198,126 @@ pub fn engine() -> Arc<FakeEngine> {
     e
 }
 
-/// Factories for `HubOptions.factories` in `--demo` mode.
-pub fn factories() -> Vec<Arc<dyn EngineFactory>> {
+/// Factories for `HubOptions.factories` in `--demo` mode, plus the engine (so `main` can
+/// drive the live feed, [`tick`]).
+pub fn factories() -> (Vec<Arc<dyn EngineFactory>>, Arc<FakeEngine>) {
     let factory = FakeFactory::new();
-    factory.add(engine());
-    vec![factory as Arc<dyn EngineFactory>]
+    let e = engine();
+    seed_logs(&e);
+    factory.add(e.clone());
+    (vec![factory as Arc<dyn EngineFactory>], e)
+}
+
+/// Log history for the running demo containers (Logs tab, LOG-001).
+fn seed_logs(e: &FakeEngine) {
+    use dk_core::LogStream::{Stderr, Stdout};
+    let now = time::OffsetDateTime::now_utc();
+    for c in containers().iter().filter(|c| c.state.is_running()) {
+        let lines: Vec<dk_core::LogChunk> = (0..40)
+            .map(|i| {
+                let (stream, text) = demo_log_line(&c.name, i);
+                let stream = if stream { Stderr } else { Stdout };
+                dk_core::LogChunk {
+                    stream,
+                    ts: Some(now - time::Duration::seconds(400 - i as i64 * 10)),
+                    bytes: bytes::Bytes::from(format!(
+                        "{text}
+"
+                    )),
+                }
+            })
+            .collect();
+        e.set_logs(&c.id, lines);
+    }
+}
+
+/// One plausible log line (`stderr`, text) with some ANSI colour (LOG-002).
+fn demo_log_line(name: &str, i: u64) -> (bool, String) {
+    match i % 9 {
+        0 => (
+            false,
+            format!(
+                "[32mINFO[0m  {name}: request GET /api/items 200 in {}ms",
+                3 + i % 40
+            ),
+        ),
+        1 => (
+            false,
+            format!("[36mDEBUG[0m {name}: cache hit ratio {}%", 80 + i % 19),
+        ),
+        2 => (
+            true,
+            format!("[33mWARN[0m  {name}: slow query took {}ms", 200 + i % 300),
+        ),
+        3 => (
+            false,
+            format!("[32mINFO[0m  {name}: worker {} heartbeat", i % 4),
+        ),
+        4 => (
+            true,
+            format!(
+                "[1;31mERROR[0m {name}: upstream timed out (attempt {})",
+                1 + i % 3
+            ),
+        ),
+        5 => (false, format!("{name}: [2mGET /healthz 200[0m")),
+        6 => (
+            false,
+            format!("[32mINFO[0m  {name}: [1mready[0m to accept connections"),
+        ),
+        7 => (
+            false,
+            format!("{name}: processed batch #{i} ({} items)", 10 + i % 90),
+        ),
+        _ => (
+            false,
+            format!(
+                "[35mTRACE[0m {name}: span id={:08x}",
+                i * 2_654_435_761 % 4_294_967_296
+            ),
+        ),
+    }
+}
+
+/// Pushes one live tick (a log line + a stats sample per running container); called about
+/// once a second by `main` in `--demo` mode so Logs and Stats show live data.
+pub fn tick(e: &FakeEngine, n: u64) {
+    let now = time::OffsetDateTime::now_utc();
+    for (k, c) in containers()
+        .iter()
+        .filter(|c| c.state.is_running())
+        .enumerate()
+    {
+        let k = k as u64;
+        let (stderr, text) = demo_log_line(&c.name, n + k * 7);
+        let stream = if stderr {
+            dk_core::LogStream::Stderr
+        } else {
+            dk_core::LogStream::Stdout
+        };
+        e.push_log(
+            &c.id,
+            dk_core::LogChunk {
+                stream,
+                ts: Some(now),
+                bytes: bytes::Bytes::from(format!(
+                    "{text}
+"
+                )),
+            },
+        );
+        let phase = (n as f64 + k as f64 * 3.0) / 8.0;
+        let mut s = fixtures::stats_sample(
+            now,
+            (12.0 + 10.0 * phase.sin() + (n % 5) as f64).max(0.5),
+            ((180.0 + 40.0 * (phase / 2.0).cos()) * 1_000_000.0) as u64,
+        );
+        s.net_rx_bps = 20_000.0 + 15_000.0 * (phase * 1.3).sin().abs();
+        s.net_tx_bps = 6_000.0 + 4_000.0 * (phase * 0.7).cos().abs();
+        s.blk_read_bps = if n.is_multiple_of(7) { 120_000.0 } else { 0.0 };
+        s.blk_write_bps = 30_000.0 + 25_000.0 * (phase * 0.9).sin().abs();
+        s.net_rx_total = 340_000_000 + n * 20_000;
+        s.net_tx_total = 12_000_000 + n * 6_000;
+        e.push_stats(&c.id, s);
+    }
 }

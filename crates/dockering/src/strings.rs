@@ -767,12 +767,6 @@ pub fn stats_mem(used: &str, limit: Option<&str>) -> String {
         None => used.to_owned(),
     }
 }
-pub fn stats_net(rx: &str, tx: &str) -> String {
-    format!("↓ {rx}  ↑ {tx}")
-}
-pub fn stats_io(r: &str, w: &str) -> String {
-    format!("R {r}  W {w}")
-}
 pub fn stats_pids(n: u64) -> String {
     format!("PIDs: {n}")
 }
