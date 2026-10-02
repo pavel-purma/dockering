@@ -50,6 +50,7 @@ impl<'a> ErrCtx<'a> {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CmdOutput {
     pub stdout: String,
+    #[allow(dead_code)] // kept for diagnostics (warnings printed by wslc)
     pub stderr: String,
 }
 
@@ -80,10 +81,6 @@ impl Runner {
 
     pub fn exe(&self) -> &Path {
         &self.exe
-    }
-
-    pub fn session(&self) -> Option<&str> {
-        self.session.as_deref()
     }
 
     /// Full argv after the program name: `[--session <s>] <args…>`. The global

@@ -238,11 +238,9 @@ pub(crate) fn parse_kv_list(s: &str) -> BTreeMap<String, String> {
             b'"' if depth > 0 => in_str = !in_str,
             b'{' | b'[' if !in_str => depth += 1,
             b'}' | b']' if !in_str => depth = (depth - 1).max(0),
-            b',' if depth == 0 && !in_str => {
-                if starts_with_key(s[i + 1..].trim_start()) {
-                    parts.push(&s[start..i]);
-                    start = i + 1;
-                }
+            b',' if depth == 0 && !in_str && starts_with_key(s[i + 1..].trim_start()) => {
+                parts.push(&s[start..i]);
+                start = i + 1;
             }
             _ => {}
         }
@@ -487,15 +485,15 @@ pub(crate) fn image_summaries(rows: &[Value]) -> Vec<ImageSummary> {
             _ => None,
         };
         if let Some(existing) = out.iter_mut().find(|i| i.id == id) {
-            if let Some(rt) = repo_tag {
-                if !existing.repo_tags.contains(&rt) {
-                    existing.repo_tags.push(rt);
-                }
+            if let Some(rt) = repo_tag
+                && !existing.repo_tags.contains(&rt)
+            {
+                existing.repo_tags.push(rt);
             }
-            if let Some(rd) = repo_digest {
-                if !existing.repo_digests.contains(&rd) {
-                    existing.repo_digests.push(rd);
-                }
+            if let Some(rd) = repo_digest
+                && !existing.repo_digests.contains(&rd)
+            {
+                existing.repo_digests.push(rd);
             }
             existing.dangling = existing.repo_tags.is_empty();
             continue;
