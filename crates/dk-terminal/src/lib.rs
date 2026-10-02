@@ -5,10 +5,22 @@
 //! [`TerminalView::feed`] and forwards [`TerminalEvent::Input`] / [`TerminalEvent::Resize`] to
 //! the hub. The view never does I/O itself (NFR-001).
 //!
-//! PUBLIC API FIXED — implemented by `gpui-ui` (terminal worktree).
+//! Modules:
+//! - [`keys`]: keystroke → PTY byte encoding and the reserved app chords (KBD-060…062).
+//! - [`model`]: the `alacritty_terminal::Term` + VT parser, owned on the foreground thread.
+//! - `view`: the `TerminalView` entity and its custom grid element.
+//!
+//! Zed's `terminal`/`terminal_view` crates (GPL) were not used or copied (REL-003).
+
+pub mod keys;
+pub mod model;
+mod view;
 
 use bytes::Bytes;
-use gpui_kit::{Context, EventEmitter, FocusHandle, Focusable, IntoElement, Render, Window, div};
+
+pub use model::TerminalModel;
+pub use view::palette::Palette;
+pub use view::{OUTPUT_COALESCE, RESIZE_DEBOUNCE, TerminalView, encode_paste};
 
 /// Appearance & behaviour (SET-040, TRM-011).
 #[derive(Debug, Clone, PartialEq)]
@@ -48,69 +60,6 @@ pub enum TerminalEvent {
     ReconnectRequested,
 }
 
-/// The terminal view entity. Owns the `alacritty_terminal::Term` on the foreground thread.
-pub struct TerminalView {
-    focus: FocusHandle,
-}
-
-impl TerminalView {
-    pub fn new(config: TerminalConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let _ = (config, window);
-        Self {
-            focus: cx.focus_handle(),
-        }
-    }
-
-    /// Feed PTY output (parsed in place; repaint coalesced at ~4 ms, TRM-010).
-    pub fn feed(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        let _ = (bytes, cx);
-    }
-
-    /// Show "[process exited with code N] — press Enter to reconnect" (TRM-006) and stop
-    /// emitting `Input` until reset.
-    pub fn set_exited(&mut self, code: Option<i64>, cx: &mut Context<Self>) {
-        let _ = (code, cx);
-    }
-
-    /// Clear the screen and exited state for a new session.
-    pub fn reset(&mut self, cx: &mut Context<Self>) {
-        let _ = cx;
-    }
-
-    /// Read-only mode: the container was removed or the engine disconnected (CDT-080, SHL-013).
-    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
-        let _ = (read_only, cx);
-    }
-
-    pub fn set_config(&mut self, config: TerminalConfig, cx: &mut Context<Self>) {
-        let _ = (config, cx);
-    }
-
-    /// Current grid size `(cols, rows)`.
-    pub fn size(&self) -> (u16, u16) {
-        (80, 24)
-    }
-
-    /// Selected text, if any.
-    pub fn selection_text(&self) -> Option<String> {
-        None
-    }
-}
-
-impl EventEmitter<TerminalEvent> for TerminalView {}
-
-impl Focusable for TerminalView {
-    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
-
-impl Render for TerminalView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-    }
-}
-
 /// Actions handled by the terminal or passed to the app (KBD-061/062).
 pub mod actions {
     gpui_kit::actions!(
@@ -132,3 +81,22 @@ pub mod actions {
 
 /// Key context of the terminal view (bindings in the app's `keymap.rs`).
 pub const KEY_CONTEXT: &str = "Terminal";
+
+/// Default key bindings for the terminal's own actions (KBD-062/063, TRM-003). The app's
+/// `keymap.rs` is the single source of truth; it may use these or define its own.
+pub fn default_key_bindings() -> Vec<gpui_kit::KeyBinding> {
+    use actions::{Copy, Paste, ScrollPageDown, ScrollPageUp};
+    use gpui_kit::KeyBinding;
+    let ctx = Some(KEY_CONTEXT);
+    let (copy, paste) = if cfg!(target_os = "macos") {
+        ("cmd-c", "cmd-v")
+    } else {
+        ("ctrl-shift-c", "ctrl-shift-v")
+    };
+    vec![
+        KeyBinding::new(copy, Copy, ctx),
+        KeyBinding::new(paste, Paste, ctx),
+        KeyBinding::new("shift-pageup", ScrollPageUp, ctx),
+        KeyBinding::new("shift-pagedown", ScrollPageDown, ctx),
+    ]
+}
