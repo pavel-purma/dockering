@@ -387,6 +387,30 @@ fn set_020_group_by_default_affects_containers_page(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// The mounted Containers page follows Settings while it lives (no remount needed).
+#[gpui_kit::test]
+fn set_020_mounted_containers_page_follows_settings(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let containers = h.wait_containers(cx);
+    h.update(cx, |_, _, cx| {
+        AppState::update_config(cx, |c| {
+            c.containers.group_by = dk_core::grouping::GroupBy::None;
+            c.containers.show_cpu_mem_columns = true;
+        })
+    });
+    h.wait_until(cx, "flat + stats columns", |_, cx| {
+        let p = containers.read(cx);
+        p.table().read(cx).delegate(cx).show_stats
+            && p.table()
+                .read(cx)
+                .model(cx)
+                .rows()
+                .iter()
+                .all(|r| !r.is_group())
+    });
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn set_020_cpu_columns_toggle_live(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());

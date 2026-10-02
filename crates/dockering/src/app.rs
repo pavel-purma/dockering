@@ -126,6 +126,12 @@ pub fn run(boot: Boot) {
             // Persist bounds on resize/move (debounced by the hub).
             let shell_for_bounds = shell.clone();
             window.observe_window_bounds_for(&shell_for_bounds, cx);
+            // SHL-011: the window is gone by the time `on_app_quit` runs when the last window
+            // closes, so save the final bounds (maximized state included) on close.
+            window.on_window_should_close(cx, |window, cx| {
+                save_window_bounds(window, cx);
+                true
+            });
             shell
         });
         let (window, shell) = match opened {

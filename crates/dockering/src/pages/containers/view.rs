@@ -123,6 +123,15 @@ impl ContainersPage {
             cx.subscribe_in(&store, window, Self::on_store_event),
             cx.observe(&store, |_, _, cx| cx.notify()),
         ];
+        // M9 (SET-020): Settings apply live: group-by default, CPU/memory columns.
+        subs.push(cx.observe_global::<AppState>(|this, cx| {
+            let c = &AppState::config(cx).containers;
+            if c.group_by != this.group_by {
+                this.group_by = c.group_by.clone();
+                this.rebuild(cx);
+            }
+            this.sync_delegate(cx);
+        }));
         // SHL-007: one app-wide ticker refreshes relative times; repaint the table cells.
         if let Some(ticker) = crate::state::Ticker::global(cx) {
             let t = table.clone();
