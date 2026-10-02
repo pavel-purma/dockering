@@ -316,6 +316,13 @@ fn events_lost_reports_gap_and_stream_continues() {
         Err(EngineError::Protocol("events lost".into())),
         "exact message the hub maps to Feed::Lagged"
     );
+    assert!(
+        items[1]
+            .as_ref()
+            .is_err_and(dk_core::EngineError::is_events_lost),
+        "{:?}",
+        items[1]
+    );
     assert_eq!(items[2].as_ref().map(|e| e.action.as_str()), Ok("die"));
 }
 
