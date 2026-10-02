@@ -1,6 +1,6 @@
 # Feature: Container detail
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** CDT
 - **Plan:** [docs/plan/features/container-detail.md](../../plan/features/container-detail.md) (to be written)
 

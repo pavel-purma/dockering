@@ -1,6 +1,6 @@
 # Feature: Networks
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** NET
 - **Plan:** [docs/plan/features/networks.md](../../plan/features/networks.md) (to be written)
 

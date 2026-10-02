@@ -1,6 +1,6 @@
 # Feature: Container logs
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** LOG
 - **Plan:** [docs/plan/features/container-logs.md](../../plan/features/container-logs.md) (to be written)
 

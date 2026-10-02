@@ -1,6 +1,6 @@
 # Feature: Containers list & grouping
 
-- **Status:** planned
+- **Status:** in-progress
 - **Requirement prefix:** CON
 - **Plan:** [docs/plan/features/containers.md](../../plan/features/containers.md) (to be written)
 

@@ -1,6 +1,6 @@
 # Feature: Engine connections & switching
 
-- **Status:** planned
+- **Status:** in-progress
 - **Requirement prefix:** ENG (backend reqs ENG-001…025 live in [20-engine-backends.md](../20-engine-backends.md))
 - **Plan:** [docs/plan/features/engines.md](../../plan/features/engines.md) (to be written)
 

@@ -1,6 +1,6 @@
 # Feature: Container stats & charts
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** STA
 - **Plan:** [docs/plan/features/container-stats.md](../../plan/features/container-stats.md) (to be written)
 

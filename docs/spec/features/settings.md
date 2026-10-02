@@ -1,6 +1,6 @@
 # Feature: Settings
 
-- **Status:** planned
+- **Status:** in-progress <!-- UI in progress -->
 - **Requirement prefix:** SET
 - **Plan:** [docs/plan/features/settings.md](../../plan/features/settings.md) (to be written)
 

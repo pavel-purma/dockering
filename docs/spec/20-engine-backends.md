@@ -64,7 +64,7 @@ greyed out as *unsupported* with the reason. They're never silently dropped.
 ## 3. Docker Engine API backend (`dk-engine-docker`)
 
 - Built on `bollard` 0.21 (`Docker::connect_with_unix`, `connect_with_named_pipe`, `connect_with_http`, `connect_with_ssl`).
-- **API version negotiation**: call `/version` after connecting. Use `min(server.ApiVersion, CLIENT_MAX)` and require `>= 1.41` (Docker 20.10). Older engines show as *unsupported version*.
+- **API version negotiation**: call `/version` after connecting. Use `min(server.ApiVersion, CLIENT_MAX)` (`CLIENT_MAX` = 1.53 with bollard 0.21) and require `>= 1.41` (Docker 20.10). Older engines show as *unsupported version*.
 - **Timeouts**: request/response calls get 30 s. Streams (events, logs, stats, exec attach) have no timeout but are cancellable.
 - **Health**: `GET /_ping` every 10 s while connected, and immediately after a stream error.
 - Podman's Docker-compatible socket is best-effort: the same backend, with capabilities trimmed by version probing.
@@ -81,12 +81,22 @@ distro's Linux VM. Windows processes can't open that socket directly.
 1. Enumerate distros from the registry: `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss\{GUID}` → `DistributionName`, `Version` (2 only), `State`. This avoids parsing `wsl.exe -l -v`, which prints UTF-16LE with locale-dependent headers. Fallback: `wsl.exe --list --verbose`, decoded as UTF-16LE.
 2. Skip `docker-desktop` and `docker-desktop-data`. Docker Desktop is covered by ENG-006.
 3. Check whether the distro is running: `wsl.exe --list --running --quiet`.
-4. For each **running** distro, probe: `wsl.exe -d <distro> --exec sh -c 'test -S /var/run/docker.sock && (command -v docker || command -v socat)'`.
+4. For each **running** distro, probe with **one** spawn: `wsl.exe -d <distro> --exec sh -c '<probe>'`. The script checks the socket, the bridge tool (`docker` or `socat`), and socket access, and reports the result as its exit code:
+
+   | Exit | Result |
+   |---|---|
+   | 0 | `available` |
+   | 11 | `no-docker` (no socket) |
+   | 12 | `socket-no-client` (socket, but neither `docker` nor `socat`) |
+   | 13 | `permission-denied` (socket not readable/writable by the user, §4.3) |
+
 5. **Stopped** distros are not probed, because probing would boot them. They're listed as *"Ubuntu (stopped) — Start & connect"*. Connecting starts the distro.
-6. Results: `available` (socket and bridge tool present), `no-docker` (hidden by default, shown with "Show all WSL distros"), `socket-no-client` (offer the TCP mode or suggest `apt install socat`).
+6. Results: `available` (socket and bridge tool present), `no-docker` (hidden by default, shown with "Show all WSL distros"), `socket-no-client` (offer the TCP mode or suggest `apt install socat`), `permission-denied` (hint in §4.3).
 
 All `wsl.exe` invocations use `CREATE_NO_WINDOW` and a 10 s timeout. stdout is decoded as
-UTF-8 for `--exec` and as UTF-16LE for `--list`.
+UTF-8 for `--exec` and as UTF-16LE for `--list`. `wsl.exe`'s **own** error messages (for example
+`WSL_E_DISTRO_NOT_FOUND`) are UTF-16LE even with `--exec`. The runner detects them (NUL-interleaved
+bytes) and decodes them as UTF-16LE.
 
 ### 4.3 Transport modes
 
@@ -117,7 +127,8 @@ process, and supports TLS certificates.
 
 ### 4.4 Lifecycle
 
-- WSL shuts a distro down after it's idle, but an open bridge child keeps the distro alive. Once the user switches away from that engine and no streams remain, the bridge closes its connections after 60 s.
+- WSL shuts a distro down after it's idle, but an open bridge child keeps the distro alive. **v1:** when the user switches away from a WSL distro engine, the hub drops that engine. That stops the bridge and kills its `wsl.exe` children immediately, so the distro can shut down when idle.
+- *Follow-up:* a 60 s grace period (keep the bridge for quick switches back) is implemented in `PipeBridge::set_active`, but the hub doesn't call it yet.
 - If the distro is terminated externally, the bridge child exits and requests fail with `Unreachable`. The supervisor (§6) reconnects with backoff, and reconnecting boots the distro again. The status shows *"Distro stopped"* with a **Start** button rather than looping forever: after 3 failures the supervisor stops auto-reconnecting for WSL engines.
 
 ## 5. WSLC backend (`dk-engine-wslc`)
@@ -146,11 +157,11 @@ process, and supports TLS certificates.
 1. **Detect without COM.** Read the WSL version from the file version of `%ProgramFiles%\WSL\wslservice.exe`, falling back to `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI\Version` (spike F-9). Check that CLSID `a9b7a1b9-…ce8f` is registered and that `wslc.exe` exists. If the version is below 2.9.3 or nothing is registered, WSLC is absent: show the hint "WSL containers available with `wsl --update`".
 2. A COM failure of `WSLC_E_CONTAINER_DISABLED` (`0x8004060C`) means WSLC is disabled by Group Policy. Show it as *disabled by policy*; never fall back to the CLI.
 3. `ListSessions` enumerates the sessions (COM). CLI fallback: `wslc system session list` (table output only, with columns `ID`, `Creator PID`, `Display Name`, verified on 3.0.1). Sessions named `wslc-cli-<user>` / `wslc-cli-admin-<user>` are the CLI's default sessions for normal and elevated callers.
-4. Create one engine for the **default session** (`OpenSessionByName(NULL)` resolves the caller's default). Create one engine for each other session owned by the user when "Show all WSLC sessions" is on.
+4. Create one engine for the **default session** (`OpenSessionByName(NULL)` resolves the caller's default). Create one engine for each other session owned by the user when "Show all WSLC sessions" is on (ENG-109). "Owned by the user" means the session's creator SID equals the current user's SID; other users' sessions are filtered out.
 
 ### 5.3 Transport selection & version gating (ENG-013)
 
-- `dk-engine-wslc` ships `com/abi/` modules, one per **supported WSL ABI version**: hand-written `#[windows::core::interface]` vtables, generated from `wslc.idl` at a pinned WSL tag. Each module records the WSL version range it was verified against, for example `2.9.3..=2.9.x`.
+- `dk-engine-wslc` ships `com/abi/` modules, one per **supported WSL ABI version**: hand-written `#[windows::core::interface]` vtables, generated from `wslc.idl` at a pinned WSL tag. Each module records the WSL version range it was verified against. v1 ships **`v3_0`** for `3.0.0..=3.0.x` (vendored IDL from 3.0.1, byte-identical to 3.0.0 and 2.9.13; see §5.7).
 - At connect: **select the ABI module from the non-COM version** (§5.2 step 1). Only *after* selection, and only through
   the selected module, run a **self-check**: `GetVersion` must equal the file version, `ListSessions` must return a sane count with NUL-terminated names, and `OpenSessionByName(NULL)` must succeed. If all succeed, use COM.
   The self-check is a confirmation, not a safety mechanism. Safety comes from the version → module mapping, which CI validates (§5.7).
@@ -165,54 +176,80 @@ process, and supports TLS certificates.
 ### 5.4 COM transport (`WslcComTransport`)
 
 **Threading.** COM calls are blocking RPCs. The COM machinery lives in `dk-engine-wslc::com` (not in `dk-hub`):
-- **Short RPCs** (list, inspect, actions, `Stats()` polls) run on a small **RPC pool**: 2–4 OS threads, each `CoInitializeEx(COINIT_MULTITHREADED)`.
+- **Short RPCs** (list, inspect, actions, `Stats()` polls) run on a small **RPC pool** of 3 OS threads, each `CoInitializeEx(COINIT_MULTITHREADED)`.
 - **Long-lived blocking streams** each get a **dedicated thread** (MTA): the events `GetNext` loop, each logs pipe reader, and each exec TTY reader/writer. This way a detail page with events + logs + terminal can't starve the RPC pool. Cancellation: signal the cancel event (`GetNext`) or `CancelIoEx` on the handle, then close it.
 - Handles from `Logs`/`Exec` are **sockets** (`WSLCHandleTypeSocket`), so `WSAStartup` must have run (spike F-7). They're read with `ReadFile`.
-- Process-wide `CoInitializeSecurity(…, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, …, EOAC_STATIC_CLOAKING)` runs in `main()` **before GPUI starts**, mirroring `wslc.exe` (spec 10 §7; after GPUI it fails with `RPC_E_TOO_LATE`, spike F-8). Every obtained proxy gets `CoSetProxyBlanket(… RPC_C_IMP_LEVEL_IMPERSONATE …)`, the equivalent of WSL's `ConfigureForCOMImpersonation`. Async callers await a oneshot; the UI never touches COM.
+- Process-wide `CoInitializeSecurity(…, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, …, EOAC_STATIC_CLOAKING)` runs in `main()` **before GPUI starts**, mirroring `wslc.exe` (spec 10 §7; after GPUI it fails with `RPC_E_TOO_LATE`, spike F-8). It runs on a throwaway MTA thread, so `main()` first calls **`CoIncrementMTAUsage`** to keep the process MTA alive. Without it, COM is uninitialised when that thread exits, the security settings are lost, and `OpenSessionByName` later fails with `0x80070542` (`ERROR_BAD_IMPERSONATION_LEVEL`). Every obtained proxy gets `CoSetProxyBlanket(… RPC_C_IMP_LEVEL_IMPERSONATE …)`, the equivalent of WSL's `ConfigureForCOMImpersonation`. Async callers await a oneshot; the UI never touches COM.
 
-**Lifetime.** One `IWSLCSession` proxy per engine is cached. Each mutation on a container holds a `BeginContainerOperation` token for its duration, so idle VM termination can't disconnect mid-operation. `RPC_E_DISCONNECTED` / `RPC_S_SERVER_UNAVAILABLE` → reopen the session once and retry; otherwise `Unreachable`.
+**Lifetime.** One `IWSLCSession` proxy per engine is cached. A `BeginContainerOperation` token is held for the duration of each container mutation, and for the lifetime of each logs, exec, and events stream, as `wslc.exe` does, so idle VM termination can't disconnect mid-operation. `RPC_E_DISCONNECTED` / `RPC_S_SERVER_UNAVAILABLE` → reopen the session once and retry; otherwise `Unreachable`.
 
 **Memory.** Strings and arrays returned by `[out]` params are freed with `CoTaskMemFree` (via RAII wrappers). `system_handle` outputs (pipes, events) are wrapped in `OwnedHandle`.
 
 | Engine op | COM call | Notes |
 |---|---|---|
-| `info` | `IWSLCSessionManager::GetVersion` + session state | No docker `/info`. CPUs and memory come from session settings where available. |
+| `info` | `IWSLCSessionManager::GetVersion` + session state | No docker `/info`. `api_version = "COM ABI v3_0"` (the ABI module). `cpus` / `mem_total` are `None`. |
 | `list_containers` | `IWSLCSession::ListContainers(opts{all})` → `WSLCContainerEntry[]` + `WSLCContainerPortMapping[]` | Labels, networks, and mounts are strings; parse them (Docker CLI-like `k=v,…`). |
 | `inspect_container` | `OpenContainer(id)` → `IWSLCContainer::Inspect(size) → LPSTR` | Docker-inspect-shaped JSON (`docker_schema`) |
 | start / stop / restart / kill | `IWSLCContainer::Start(flags, NULL, cb)` / `Stop(signal, timeout)` / `Restart` / `Kill(signal)` | `WSLC_STOP_TIMEOUT_DEFAULT` when no timeout is given |
 | pause / unpause | — | `Unsupported(PAUSE)` |
 | `remove_container` / `prune_containers` | `Delete(flags)` / `IWSLCSession::PruneContainers` | |
-| `logs` | `IWSLCContainer::Logs(flags{follow,timestamps}, since, until, tail) → stdout/stderr WSLCHandle` | Pipe handles read on the COM pool, then chunks go to `EngineStream`. Close the handles to cancel. |
+| `logs` | `IWSLCContainer::Logs(flags{follow,timestamps}, since, until, tail) → stdout/stderr WSLCHandle` | Pipe handles read on a dedicated thread, then chunks go to `EngineStream`. Close the handles to cancel. |
 | `stats` | `IWSLCContainer::Stats() → LPSTR` (raw Docker stats JSON with cumulative counters, verified F-7) | Polled every 2 s on the RPC pool; reuses the Docker CPU % / rate normaliser in `dk-core::stats` |
 | `exec` (terminal) | `IWSLCContainer::Exec(WSLCProcessOptions{tty}, StartOptions{TtyRows, TtyColumns}) → IWSLCProcess` → `GetStdHandle` / `ResizeTty` / `GetExitEvent` / `GetState` | **Real TTY with resize, no ConPTY needed** |
-| `events` | `IWSLCSession::GetEvents(since, 0, filters) → IWSLCEventStream::GetNext(cancelEvent)` | Blocking pull loop on a COM-pool thread; the cancel event is signalled on drop. `WSLC_E_EVENTS_LOST` → full refetch. |
+| `events` | `IWSLCSession::GetEvents(since, 0, filters) → IWSLCEventStream::GetNext(cancelEvent)` | Blocking pull loop on a dedicated thread; the cancel event is signalled on drop. With no `since`, pass `since = now`: `0` replays the server's whole buffered history. `WSLC_E_EVENTS_LOST` → the stream yields `Protocol("events lost")` and continues (the server resets the reader); the store does a full refetch. |
 | `list_images` / `inspect_image` | `ListImages(opts)` / `InspectImage(id) → LPSTR` | |
-| `pull_image` | `PullImage(image, auth, FALSE, IProgressCallback, IWarningCallback)` | **We implement `IProgressCallback`** (a COM object in Rust via `#[implement]`); structured per-layer progress |
+| `pull_image` | `PullImage(image, auth, FALSE, IProgressCallback, IWarningCallback)` | **We implement `IProgressCallback`** (a COM object in Rust via `#[implement]`); structured per-layer progress. Verified live (S-3). |
 | `remove_image` / `prune_images` / `tag_image` | `DeleteImage` / `PruneImages` / `TagImage` | |
 | `list_volumes` / `inspect_volume` | `ListVolumes(filters) → LPSTR` / `InspectVolume → LPSTR` | JSON |
-| `create_volume` / `remove_volume` / `prune_volumes` | `CreateVolume` / `DeleteVolume` / `PruneVolumes` | |
+| `create_volume` / `remove_volume` / `prune_volumes` | `CreateVolume` / `DeleteVolume` / `PruneVolumes` | `remove_volume(force)`: `force` is ignored (`DeleteVolume` has no force flag). |
 | `list_networks` / `inspect_network` / `remove_network` / `prune_networks` | `ListNetworks → LPSTR` (`wslc_schema::NetworkListEntry[]`) / `InspectNetwork` / `DeleteNetwork` / `PruneNetworks` | |
-| `run_image` | `CreateContainer(WSLCContainerOptions)` → `IWSLCContainer::Start` | Ports, env, named volumes, labels. ⚠ Verify the struct layout in the M8 spike |
+| `run_image` | `CreateContainer(WSLCContainerOptions)` → `IWSLCContainer::Start` | **Known limitation (v1):** the `WSLCContainerOptions` layout is not verified, so this returns `Api { status: 501, message: "Run via COM is not verified for this WSL version" }` and `EngineInfo.transport_note` says so. *Follow-up:* verify the layout against a live session, then enable. |
 | `top` / `image_history` / `disk_usage` | — | `Unsupported`. VOL-002 shows "—" for sizes (WSLC reports `Size: N/A`) |
 
-**HRESULT mapping**: `WSLC_E_CONTAINER_NOT_FOUND` / `IMAGE_NOT_FOUND` / `VOLUME_NOT_FOUND` / `NETWORK_NOT_FOUND` / `SESSION_NOT_FOUND` → `NotFound`. `WSLC_E_CONTAINER_IS_RUNNING` / `NOT_RUNNING` → `Conflict`. `WSLC_E_CONTAINER_PREFIX_AMBIGUOUS` → `Conflict`. `WSLC_E_VM_NOT_RUNNING`, `RPC_E_DISCONNECTED` → `Unreachable`. `WSLC_E_CONTAINER_DISABLED` → `Unreachable{hint: policy}`. `WSLC_E_REGISTRY_BLOCKED_BY_POLICY` → `Api`. Anything else → `Api { status: hr }` with `IErrorInfo` text when present (the server supports `ISupportErrorInfo`).
+**HRESULT mapping**: `WSLC_E_CONTAINER_NOT_FOUND` / `IMAGE_NOT_FOUND` / `VOLUME_NOT_FOUND` / `NETWORK_NOT_FOUND` / `SESSION_NOT_FOUND` → `NotFound`. `WSLC_E_CONTAINER_IS_RUNNING` / `NOT_RUNNING` → `Conflict`. `WSLC_E_CONTAINER_PREFIX_AMBIGUOUS` → `Conflict`. `WSLC_E_VM_NOT_RUNNING`, `RPC_E_DISCONNECTED` → `Unreachable`. `WSLC_E_CONTAINER_DISABLED` → `Unreachable{hint: policy}`. `WSLC_E_REGISTRY_BLOCKED_BY_POLICY` → `Api`. Anything else → `Api { status: 500, message: "0x<hr> <IErrorInfo text>" }`. The HRESULT goes in the message because `status` is a `u16`; the `IErrorInfo` text is included when present (the server supports `ISupportErrorInfo`).
 
 ### 5.5 CLI fallback transport (`WslcCliTransport`)
 
-Every invocation: `wslc.exe [--session <s>] <cmd…>`, with `CREATE_NO_WINDOW`, `NO_COLOR=1`, an argv vector, captured UTF-8 output, a timeout, and at most 4 concurrent processes (`Semaphore`). A non-zero exit code → `EngineError` mapped from stderr.
+Every invocation: `wslc.exe [--session <s>] <cmd…>`, with `CREATE_NO_WINDOW`, `NO_COLOR=1`, an argv vector, captured UTF-8 output, a timeout, and at most 4 concurrent processes (`Semaphore`). Verified on `wslc` 3.0.1 (S-2; exit codes and stderr texts are recorded as fixtures).
 
-| Engine op | wslc invocation |
+**Invocation rules**
+
+| Rule | Detail |
 |---|---|
-| `info` | `system info --format json` + `version` |
-| `list_containers` / `inspect_container` | `container list --all --no-trunc --format json` (**NDJSON**, one object per line; dates contain localised TZ names such as `SELČ`, so prefer `inspect` timestamps) / `container inspect <id>` (JSON array) |
-| start / stop / restart / kill / remove / prune | `container start|stop|restart|kill|remove|prune …` |
-| `logs` | `container logs [-f] [--timestamps] [--tail N] [--since T] <id>` (long-running child) |
-| `stats` | `container stats <id> --format json`: one-shot, **~1 s per call** (F-10). Detail page only, polled back-to-back. No list columns on the CLI transport |
-| `exec` | `container exec -i -t <id> <cmd>` inside **ConPTY** (`portable-pty`); resize via `MasterPty::resize` |
-| `run_image` | `container run -d [--name] [-p] [-e] [-v] [-l] [--rm] <image> [cmd]` |
-| images | `image list|inspect|pull|remove|prune|tag …` (pull progress is text only) |
-| volumes / networks | `volume …` / `network …` (`list --format json`, `inspect`, `create`, `remove`, `prune`) |
-| `events` | `system events` (long-running child). **No JSON option in 3.0.1**, so parse text lines `<RFC3339 ts> <type> <action> <id> (k=v, …)` (F-10) |
+| Session flag position | `--session <s>` MUST come right after `wslc`, before the subcommand. |
+| No `--` | `wslc` treats `--` as an id. Argument safety relies on per-kind validation (NFR-022) only; additionally, the first exec command word MUST NOT start with `-`. |
+| Line endings | Output is CRLF, except `logs` (LF). Parsers accept both. |
+| Credentials | Not supported: `wslc` has no auth flags, and secrets are never put in argv. `pull_image(_, Some(auth))` ignores `auth`; WSLC uses its own registry store (IMG-007). |
+
+**Errors.** A failed command exits with code 1. stderr is a message line, then `Error code: <SYMBOL>`, then a boilerplate line. Lookup commands such as `inspect` print only the message, with `[]` on stdout.
+
+| `Error code` symbol (or message text) | `EngineError` |
+|---|---|
+| `WSLC_E_CONTAINER_DISABLED`, `WSLC_E_SESSION_NOT_FOUND`, `WSLC_E_VM_NOT_RUNNING`, `RPC_*` | as §5.4 (`Unreachable`, with a hint for policy and session) |
+| `ERROR_ELEVATION_REQUIRED` (e.g. opening the admin session as a normal user) | `Unreachable { hint }`: run elevated or pick the user's own session |
+| `WSLC_E_*_NOT_FOUND`, or a message containing "not found" (lookups) | `NotFound` |
+| `WSLC_E_CONTAINER_IS_RUNNING` / `NOT_RUNNING` / `PREFIX_AMBIGUOUS`, `ERROR_ALREADY_EXISTS`, `ERROR_SHARING_VIOLATION` | `Conflict` |
+| anything else | `Api { status: <exit code>, message: <message line> }` |
+
+**Mapping**
+
+| Engine op | wslc invocation | Notes |
+|---|---|---|
+| `info` | `system info --format json` + `version --format json` | `version` returns only `{"Client":{"Version":…}}`. `system info` gives the kernel, session-manager version, and sessions; no CPU or memory (`None`). |
+| `list_containers` / `inspect_container` | `container list --all --no-trunc --format json` (**NDJSON**) / `container inspect <id>` (JSON array) | List dates contain localised TZ names such as `SELČ`, so prefer `inspect` timestamps. Labels are a `k=v,…` string that includes `com.microsoft.wsl.container.metadata={json}`; the UI hides that label. `inspect` has `Ports` at the **top level** (not under `NetworkSettings`) and no `Config.Tty`. |
+| start / stop / restart / kill / remove | `container start|stop|restart|kill|remove …` | |
+| `prune_*` | `container|image|volume|network prune --force` | Without `-f`, `prune` prompts and silently declines with no stdin, so `--force` is always passed. |
+| `logs` | `container logs [-f] [--timestamps] [--tail N] [--since T] <id>` (long-running child) | `--tail 0` is rejected, so tail 0 becomes `--since now`. No `Config.Tty` → frames are always `Stdout`/`Stderr`. |
+| `stats` | `container stats <id> --format json`: one-shot | Docker **CLI** strings (`CPUPerc`, `MemUsage`, `NetIO`, `BlockIO`, `PIDs`), not Docker API JSON; parsed into `StatsSample`. ~1 s per call for a running container, instant for a stopped one. The poll loop enforces ≥ 1 s between calls. Detail page only; no list columns on the CLI transport. |
+| `exec` | `container exec -i -t <id> <cmd>` inside **ConPTY** (`portable-pty`); resize via `MasterPty::resize` | The pseudo console sends a cursor-position query (`ESC[6n`) and waits for an answer. The transport answers it once and strips it from the output. |
+| `run_image` | `container run -d [--name] [-p] [-e] [-v] [-l] [--rm] <image> [cmd]` | The id is on stdout; pull progress goes to stderr. |
+| images | `image list|inspect|pull|remove|tag …` | Pull progress is text only. `Digest: sha256:…` gives the digest. |
+| `list_volumes` | `volume list --format json` + one batch `volume inspect <n…>` | The list has no creation date, and `Size`/`Links` are `N/A`; created dates come from the batch `inspect`. |
+| `create_volume` | `volume create [--driver d] <n>` | The only drivers are `guest` and `vhd`; `local` is rejected. `local` (the default in the UI) is treated as "default" and not passed. |
+| `remove_volume` | `volume remove <n>` | |
+| `list_networks` | `network list --format json` + one batch `network inspect <n…>` | Enriched with subnets and container count. `CreatedAt` looks like `… +0000 UTC`; booleans are strings (`"true"`). |
+| `remove_network` | `network remove <name>` | `remove` with an **id** fails with "not found" (`inspect` accepts ids), so the transport resolves the name first. |
+| `events` | `system events [--since T] [--until T] [--filter k=v]` (long-running child) | **No JSON option in 3.0.1**: parse text lines `<RFC3339 ts> <type> <action> <id> (k=v, …)` (F-10). The id can be empty. Container and network events were seen; none were seen for images or volumes. |
 
 Parsers are tolerant: unknown fields are ignored, and human-formatted sizes and times are parsed with fallbacks.
 
@@ -232,11 +269,12 @@ Capabilities are recomputed whenever the transport changes.
 - `crates/dk-engine-wslc/idl/<wsl-tag>/{wslc.idl,WSLCShared.idl}` are vendored copies. `xtask wslc-abi-check <tag>` diffs a new WSL tag's IDL against the newest vendored one and reports changed vtables and structs.
 - A scheduled CI job (weekly) runs the check against the latest WSL release tag and opens an issue when the ABI changed. Until a new ABI module ships, users on the new WSL automatically use the CLI fallback, so nothing breaks; it only degrades.
 - Releasing a new ABI module requires running the WSLC contract suite on a real Windows machine with that WSL version (release checklist).
+- **Status (2026-10-02):** vendored IDL `3.0.1` is byte-identical to `3.0.0` and `2.9.13`. ABI module `v3_0` covers `3.0.0..=3.0.x`. `xtask wslc-abi-check` reports `2.9.5` as different (shifted session slots, no event stream). WSL versions outside `3.0.x` have no matching module and use the CLI.
 
 ### 5.8 Spikes
 
-- **S-2 (CLI):** record real `wslc` JSON output for the fallback mapping; confirm `stats` one-shot semantics and the events format.
-- **S-3 (COM, blocking for M8):** in Rust, `CoCreateInstance` the session manager → `OpenSessionByName(NULL)` → `ListContainers`, `Logs` (pipe read), `Exec` + `ResizeTty`, `GetEvents`, and `PullImage` with a Rust-implemented `IProgressCallback`. Confirm that the proxy/stub marshalling works from a non-WSL-signed process, and that impersonation and cloaking settings are correct.
+- **S-2 (CLI):** ✅ done. Real `wslc` 3.0.1 output, exit codes, and stderr texts are recorded as fixtures (§5.5).
+- **S-3 (COM):** ✅ done except `CreateContainer`. Verified live in Rust: session manager → `OpenSessionByName(NULL)` → `ListContainers`, `Logs` (pipe read), `Exec` + `ResizeTty`, `GetEvents`, and `PullImage` with a Rust-implemented `IProgressCallback`, from a non-WSL-signed process. Remaining: the `WSLCContainerOptions` layout for `run_image` (§5.4).
 
 ## 6. Connection supervisor (ENG-020…ENG-025)
 

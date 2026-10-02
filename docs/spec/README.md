@@ -23,17 +23,17 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 
 | Feature | File | Status |
 |---|---|---|
-| Engine connections & switching | [features/engines.md](features/engines.md) | planned |
-| Containers list & grouping | [features/containers.md](features/containers.md) | planned |
-| Container detail | [features/container-detail.md](features/container-detail.md) | planned |
-| Container logs | [features/container-logs.md](features/container-logs.md) | planned |
-| Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | planned |
-| Container stats & charts | [features/container-stats.md](features/container-stats.md) | planned |
-| Images | [features/images.md](features/images.md) | planned |
-| Volumes | [features/volumes.md](features/volumes.md) | planned |
-| Networks | [features/networks.md](features/networks.md) | planned |
-| Settings | [features/settings.md](features/settings.md) | planned |
-| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | planned |
+| Engine connections & switching | [features/engines.md](features/engines.md) | in-progress |
+| Containers list & grouping | [features/containers.md](features/containers.md) | in-progress |
+| Container detail | [features/container-detail.md](features/container-detail.md) | in-progress |
+| Container logs | [features/container-logs.md](features/container-logs.md) | in-progress |
+| Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | in-progress |
+| Container stats & charts | [features/container-stats.md](features/container-stats.md) | in-progress |
+| Images | [features/images.md](features/images.md) | in-progress |
+| Volumes | [features/volumes.md](features/volumes.md) | in-progress |
+| Networks | [features/networks.md](features/networks.md) | in-progress |
+| Settings | [features/settings.md](features/settings.md) | in-progress |
+| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | in-progress |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 
 ## Conventions
