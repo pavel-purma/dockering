@@ -37,6 +37,19 @@ pub(crate) fn exec_args(id: &str, req: &ExecRequest) -> Vec<String> {
     a
 }
 
+/// ConPTY's start-up cursor query (Device Status Report 6).
+const DSR_CPR: &[u8] = b"\x1b[6n";
+
+/// If `chunk` contains the cursor query, the chunk without its first occurrence.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn strip_first_dsr(chunk: &bytes::Bytes) -> Option<bytes::Bytes> {
+    let pos = chunk.windows(DSR_CPR.len()).position(|w| w == DSR_CPR)?;
+    let mut out = Vec::with_capacity(chunk.len() - DSR_CPR.len());
+    out.extend_from_slice(&chunk[..pos]);
+    out.extend_from_slice(&chunk[pos + DSR_CPR.len()..]);
+    Some(out.into())
+}
+
 /// Validate the free-form exec fields that become argv values (NFR-022): no option-looking
 /// values, no NULs. `cmd` elements go after the container id and are passed verbatim (wslc
 /// stops option parsing at the first positional), but must not contain NUL.
@@ -159,9 +172,10 @@ mod imp {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            let chunk = &buf[..n];
+                            let mut chunk = Bytes::copy_from_slice(&buf[..n]);
                             if !answered_dsr && seen < 256 {
-                                if chunk.windows(4).any(|w| w == b"\x1b[6n") {
+                                seen += n;
+                                if let Some(rest) = super::strip_first_dsr(&chunk) {
                                     answered_dsr = true;
                                     if let Ok(mut g) = writer_r.lock()
                                         && let Some(w) = g.as_mut()
@@ -169,10 +183,14 @@ mod imp {
                                         let _ = w.write_all(b"\x1b[1;1R");
                                         let _ = w.flush();
                                     }
+                                    // Answered here: don't let the UI emulator answer it too
+                                    // (its report would reach the shell as input).
+                                    chunk = rest;
                                 }
-                                seen += n;
                             }
-                            let chunk = Bytes::copy_from_slice(chunk);
+                            if chunk.is_empty() {
+                                continue;
+                            }
                             if futures::executor::block_on(futures::SinkExt::send(
                                 &mut tx,
                                 Ok(chunk),
@@ -340,6 +358,14 @@ mod tests {
         let a = exec_args("web", &req);
         assert_eq!(&a[..5], ["container", "exec", "-i", "-t", "web"]);
         assert_eq!(a[5], "/bin/sh");
+    }
+
+    #[test]
+    fn dsr_query_is_stripped_once() {
+        let c = bytes::Bytes::from_static(b"\x1b[?9001h\x1b[6n\x1b[mX\x1b[6n");
+        let r = strip_first_dsr(&c).expect("found");
+        assert_eq!(&r[..], b"\x1b[?9001h\x1b[mX\x1b[6n");
+        assert!(strip_first_dsr(&bytes::Bytes::from_static(b"hi")).is_none());
     }
 
     #[test]
