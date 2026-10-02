@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+# In-process fake WSLC COM server (`com::fake`) for tests (spec 21 §7).
+test-support = []
+
 [dependencies]
 dk-core.workspace = true
 tokio.workspace = true
@@ -21,12 +26,14 @@ tracing.workspace = true
 async-trait.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Rpc", "Win32_Security", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Networking_WinSock", "Win32_System_Registry", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Security_Authorization", "Win32_System_Variant"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Rpc", "Win32_Security", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Networking_WinSock", "Win32_System_Registry", "Win32_System_Diagnostics_Debug", "Win32_System_Diagnostics_ToolHelp", "Win32_Security_Authorization", "Win32_System_Variant", "Win32_System_Pipes"] }
 windows-core = "0.61"
 portable-pty.workspace = true
 
 [dev-dependencies]
 dk-core = { workspace = true, features = ["test-support"] }
+# Self dev-dependency: integration tests get `com::fake` without a feature flag on the CLI.
+dk-engine-wslc = { path = ".", features = ["test-support"] }
 insta.workspace = true
 
 [lints.rust]

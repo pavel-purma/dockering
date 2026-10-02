@@ -10,6 +10,8 @@ pub mod abi;
 pub mod convert;
 #[cfg(windows)]
 pub mod engine;
+#[cfg(all(windows, any(test, feature = "test-support")))]
+pub mod fake;
 pub mod ffi;
 #[cfg(windows)]
 pub mod pool;
