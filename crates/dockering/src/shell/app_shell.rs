@@ -125,15 +125,13 @@ impl AppShell {
         let hub = AppState::hub(cx);
         let engines = cx.new(|cx| EngineListStore::new(hub, cx));
         let ui = AppState::ui_state(cx);
-        let start = ui
-            .last_route
-            .as_deref()
-            .and_then(Route::from_state)
-            .unwrap_or_else(|| match AppState::config(cx).general.start_page {
-                dk_hub::config::StartPage::Images => Route::Images,
-                dk_hub::config::StartPage::Volumes => Route::Volumes,
-                _ => Route::Containers,
-            });
+        // SET-001: the configured start page decides where the app opens (`last_route` is
+        // still recorded in state.json, spec 10 §6).
+        let start = match AppState::config(cx).general.start_page {
+            dk_hub::config::StartPage::Images => Route::Images,
+            dk_hub::config::StartPage::Volumes => Route::Volumes,
+            _ => Route::Containers,
+        };
         let root_focus = cx.focus_handle();
         let title_focus = cx.focus_handle();
         let sidebar_focus = cx.focus_handle().tab_stop(true);
@@ -178,6 +176,10 @@ impl AppShell {
                 if cfg.theme == ThemeMode::System {
                     theme::apply(cfg.theme, cfg.ui_scale, Some(window), cx);
                 }
+            }),
+            // M9: settings apply live (sidebar pages, Networks route).
+            cx.observe_global_in::<AppState>(window, |this, window, cx| {
+                this.on_config_changed(window, cx)
             }),
             cx.on_focus_in(&root_focus, window, |this, window, cx| {
                 this.regions.remember(window, cx);
@@ -260,6 +262,10 @@ impl AppShell {
     }
     pub fn sidebar_collapsed(&self) -> bool {
         self.sidebar_collapsed
+    }
+    /// Pages listed in the sidebar (SET-001 hides Networks).
+    pub fn sidebar_pages(&self, cx: &App) -> Vec<Page> {
+        self.visible_pages(cx)
     }
     pub fn region_container(&self, r: Region) -> Option<&FocusHandle> {
         self.regions.container(r)
@@ -492,9 +498,18 @@ impl AppShell {
                 }
                 (None, _) => ShellPage::None,
             },
-            (Route::Settings { section }, _) => {
-                ShellPage::Settings(pages::settings::new(*section, window, cx))
+            // M9: one Settings entity across sections (route = section; back/forward).
+            (Route::Settings { section }, ShellPage::Settings(p)) => {
+                let section = *section;
+                p.update(cx, |p, cx| p.set_section(section, cx));
+                ShellPage::Settings(p.clone())
             }
+            (Route::Settings { section }, _) => ShellPage::Settings(pages::settings::new(
+                *section,
+                self.engines.clone(),
+                window,
+                cx,
+            )),
         };
         if let Some(h) = self.page.primary_focus(cx) {
             self.regions.set_default(Region::Content, h);
@@ -625,6 +640,7 @@ impl AppShell {
         match &self.page {
             ShellPage::Containers(p) => p.update(cx, |p, cx| p.focus_search(window, cx)),
             ShellPage::Dyn(p) => p.focus_search(window, cx),
+            ShellPage::Settings(p) => p.update(cx, |p, cx| p.focus_search(window, cx)),
             _ => self.focus_page(window, cx),
         }
     }
@@ -700,6 +716,64 @@ impl AppShell {
     fn on_open_logs(&mut self, _: &OpenLogsFolder, _: &mut Window, cx: &mut Context<Self>) {
         let dir = AppState::hub(cx).paths().log_dir.clone();
         cx.open_with_system(&dir);
+    }
+
+    // ── M9: Settings commands (SET-060, ENG-105, REL-002) ─────────────────────────────
+
+    /// *Add engine…* from anywhere (first-run screen ENG-111, palette, Settings › Engines):
+    /// show Settings › Engines, then open the dialog. Focus returns to the Engines section's
+    /// *Add engine…* button when it closes (KBD-071).
+    fn on_add_engine(
+        &mut self,
+        _: &crate::actions::settings::AddEngine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = Route::Settings {
+            section: SettingsSection::Engines,
+        };
+        if *self.history.current() != target {
+            self.go(target, window, cx);
+        }
+        self.focus_page_pending.set(false);
+        if let ShellPage::Settings(p) = &self.page {
+            p.update(cx, |p, cx| p.open_add_engine(window, cx));
+        }
+    }
+
+    fn on_copy_diagnostics(
+        &mut self,
+        _: &crate::actions::settings::CopyDiagnostics,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        pages::settings::copy_diagnostics(window, cx);
+    }
+
+    fn on_view_licenses(
+        &mut self,
+        _: &crate::actions::settings::ViewLicenses,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        pages::settings::view_licenses(window, cx);
+    }
+
+    /// Settings changed (SET-001…060 apply live): sidebar pages, start page; the containers
+    /// page re-reads its defaults on its own.
+    fn on_config_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let config = AppState::config(cx);
+        let show_networks = config.general.show_networks_page;
+        let polling = config.containers.polling_interval_s;
+        if !show_networks && self.history.current().page() == Some(Page::Networks) {
+            self.go(Route::Containers, window, cx);
+        }
+        if let Some(store) = &self.store {
+            store.update(cx, |s, cx| s.set_polling_interval(polling, cx));
+        }
+        let pages = self.visible_pages(cx);
+        self.sidebar_cursor = self.sidebar_cursor.min(pages.len().saturating_sub(1));
+        cx.notify();
     }
 
     fn on_manage_engines(
@@ -1465,6 +1539,9 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_about))
             .on_action(cx.listener(Self::on_open_logs))
             .on_action(cx.listener(Self::on_manage_engines))
+            .on_action(cx.listener(Self::on_add_engine))
+            .on_action(cx.listener(Self::on_copy_diagnostics))
+            .on_action(cx.listener(Self::on_view_licenses))
             .on_action(cx.listener(Self::on_copy_text))
             .on_action(cx.listener(Self::on_open_url))
             .on_action(cx.listener(Self::on_switch_engine))

@@ -284,6 +284,23 @@ impl EngineStore {
         }));
     }
 
+    /// SET-020: the polling fallback interval changed in Settings; restarts the poll loop
+    /// with it when polling is active.
+    pub fn set_polling_interval(&mut self, seconds: u32, cx: &mut Context<Self>) {
+        let interval = Duration::from_secs(seconds.max(1) as u64);
+        if interval == self.polling_interval {
+            return;
+        }
+        self.polling_interval = interval;
+        if self.live_mode == LiveMode::Polling {
+            self.start_polling(cx);
+        }
+    }
+
+    pub fn polling_interval(&self) -> Duration {
+        self.polling_interval
+    }
+
     fn start_polling(&mut self, cx: &mut Context<Self>) {
         self.live_mode = LiveMode::Polling;
         let interval = self.polling_interval;

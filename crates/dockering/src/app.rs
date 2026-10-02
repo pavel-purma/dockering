@@ -42,6 +42,7 @@ pub fn window_options(saved: Option<SavedBounds>, cx: &App) -> WindowOptions {
     let default = Bounds::centered(None, Size::new(px(1280.), px(800.)), cx);
     let bounds = saved
         .filter(|b| b.width >= 400. && b.height >= 300. && b.x.is_finite() && b.y.is_finite())
+        .filter(|b| on_some_display(b, cx))
         .map(|b| {
             let r = Bounds::new(
                 Point::new(px(b.x), px(b.y)),
@@ -66,7 +67,7 @@ pub fn window_options(saved: Option<SavedBounds>, cx: &App) -> WindowOptions {
     }
 }
 
-fn save_window_bounds(window: &Window, cx: &App) {
+pub fn save_window_bounds(window: &Window, cx: &App) {
     let wb = window.window_bounds();
     let (b, maximized) = match wb {
         WindowBounds::Windowed(b) => (b, false),
@@ -80,6 +81,24 @@ fn save_window_bounds(window: &Window, cx: &App) {
         maximized,
     };
     AppState::update_ui_state(cx, move |s| s.window = Some(saved));
+}
+
+/// SHL-011: restored bounds must overlap a connected display by at least 100×50 px (a
+/// window saved on an unplugged monitor opens centered instead). No displays known (tests,
+/// headless): accept.
+fn on_some_display(b: &SavedBounds, cx: &App) -> bool {
+    let displays = cx.displays();
+    if displays.is_empty() {
+        return true;
+    }
+    displays.iter().any(|d| {
+        let r = d.bounds();
+        let (x0, y0) = (r.origin.x.as_f32(), r.origin.y.as_f32());
+        let (x1, y1) = (x0 + r.size.width.as_f32(), y0 + r.size.height.as_f32());
+        let w = (b.x + b.width).min(x1) - b.x.max(x0);
+        let h = (b.y + b.height).min(y1) - b.y.max(y0);
+        w >= 100. && h >= 50.
+    })
 }
 
 /// Runs the GPUI application until quit.
