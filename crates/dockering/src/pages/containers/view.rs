@@ -8,6 +8,7 @@ use dk_core::grouping::GroupBy;
 use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineId, StatsSample};
 use dk_hub::Feed;
 use futures::StreamExt;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
@@ -37,7 +38,7 @@ use crate::ui::list_table::{ListEvent, ListTable, RowKind, SortState};
 use crate::ui::menu::KeyMenu;
 use crate::ui::notify;
 use crate::ui::page::PageView;
-use crate::ui::widgets::port_url;
+use crate::ui::widgets::{focus_wrap, port_url};
 
 /// Search debounce (SHL-006).
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -72,6 +73,8 @@ pub struct ContainersPage {
     filter_focus: FocusHandle,
     group_focus: FocusHandle,
     overflow_focus: FocusHandle,
+    group_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+    overflow_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
     label_prompt: bool,
     _subs: Vec<Subscription>,
 }
@@ -146,6 +149,8 @@ impl ContainersPage {
             filter_focus,
             group_focus,
             overflow_focus,
+            group_bounds: Default::default(),
+            overflow_bounds: Default::default(),
             label_prompt: false,
             _subs: subs,
         };
@@ -469,16 +474,23 @@ impl ContainersPage {
 
     // ── menus (KBD-039, Mod+Shift+O, overflow) ─────────────────────────────────────────
 
+    /// Opens menus under their trigger (or under the group-by button for key-only menus).
     fn menu_anchor(
         &self,
         focus: &FocusHandle,
-        window: &Window,
-        cx: &App,
+        _window: &Window,
+        _cx: &App,
     ) -> gpui_kit::Point<gpui_kit::Pixels> {
-        let _ = (focus, cx);
-        let b = window.bounds();
-        let _ = b;
-        point(px(320.), px(110.))
+        let b = if *focus == self.overflow_focus {
+            self.overflow_bounds
+        } else {
+            self.group_bounds
+        };
+        if b.size.width > px(0.) {
+            point(b.origin.x, b.origin.y + b.size.height + px(4.))
+        } else {
+            point(px(320.), px(110.))
+        }
     }
 
     fn open_menu(
@@ -1250,27 +1262,56 @@ impl ContainersPage {
                             )),
                     )
                     .child(
-                        Button::new("group-by")
-                            .small()
-                            .outline()
-                            .track_focus(&self.group_focus)
-                            .label(format!("{}: {group_label}", s::GROUP_BY))
-                            .dropdown_caret(true)
-                            .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(list::GroupBy), cx)
-                            }),
+                        focus_wrap(
+                            "group-by-wrap",
+                            &self.group_focus,
+                            Button::new("group-by")
+                                .small()
+                                .outline()
+                                .label(format!("{}: {group_label}", s::GROUP_BY))
+                                .dropdown_caret(true)
+                                .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(list::GroupBy), cx)
+                                }),
+                            |_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx),
+                            window,
+                            cx,
+                        )
+                        .on_prepaint({
+                            let this = cx.entity().downgrade();
+                            move |b, _, cx| {
+                                this.update(cx, |p, _| p.group_bounds = b).ok();
+                            }
+                        }),
                     )
                     .child(
-                        Button::new("containers-overflow")
-                            .small()
-                            .ghost()
-                            .icon(IconName::EllipsisVertical)
-                            .track_focus(&self.overflow_focus)
-                            .tooltip(s::MORE_ACTIONS)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.on_overflow(window, cx)),
-                            ),
+                        focus_wrap(
+                            "overflow-wrap",
+                            &self.overflow_focus,
+                            Button::new("containers-overflow")
+                                .small()
+                                .ghost()
+                                .icon(IconName::EllipsisVertical)
+                                .tooltip(s::MORE_ACTIONS)
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.on_overflow(window, cx)),
+                                ),
+                            {
+                                let this = cx.entity().downgrade();
+                                move |_, window, cx| {
+                                    this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
+                                }
+                            },
+                            window,
+                            cx,
+                        )
+                        .on_prepaint({
+                            let this = cx.entity().downgrade();
+                            move |b, _, cx| {
+                                this.update(cx, |p, _| p.overflow_bounds = b).ok();
+                            }
+                        }),
                     ),
             )
             .when(self.label_prompt, |this| {

@@ -47,6 +47,8 @@ gpui_kit::actions!(
         RetryEngine,
         /// Boot a stopped WSL distro and connect (ENG-106).
         StartEngine,
+        /// Lone `Alt` on Windows/Linux: focus the title-bar overflow menu (SHL-021).
+        FocusMenuBar,
     ]
 );
 

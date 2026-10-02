@@ -878,6 +878,17 @@ impl AppShell {
         self.close_overlays(window, cx);
     }
 
+    fn on_focus_menu_bar(&mut self, _: &FocusMenuBar, window: &mut Window, cx: &mut Context<Self>) {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        if self.overflow_focus.is_focused(window) {
+            self.open_overflow(window, cx);
+        } else {
+            window.focus(&self.overflow_focus, cx);
+        }
+    }
+
     fn open_overflow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let restore = self.overflow_focus.clone();
         let pos = gpui_kit::point(window.viewport_size().width - px(260.), px(36.));
@@ -1055,17 +1066,27 @@ impl AppShell {
                             .on_click(|_, w, cx| w.dispatch_action(Box::new(OpenSettings), cx)),
                     )
                     .when(!cfg!(target_os = "macos"), |this| {
-                        this.child(
+                        // SHL-021: Alt focuses the overflow menu button on Windows/Linux.
+                        this.child(crate::ui::widgets::focus_wrap(
+                            "title-overflow-wrap",
+                            &self.overflow_focus,
                             Button::new("title-overflow")
                                 .ghost()
                                 .small()
                                 .icon(IconName::Menu)
-                                .track_focus(&self.overflow_focus)
                                 .tooltip(s::MORE_COMMANDS)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_overflow(window, cx)
                                 })),
-                        )
+                            {
+                                let this = cx.entity().downgrade();
+                                move |_, window, cx| {
+                                    this.update(cx, |s, cx| s.open_overflow(window, cx)).ok();
+                                }
+                            },
+                            window,
+                            cx,
+                        ))
                     }),
             )
             .into_any_element()
@@ -1415,6 +1436,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_shortcuts))
             .on_action(cx.listener(Self::on_palette_dismiss))
             .on_action(cx.listener(Self::on_run_command))
+            .on_action(cx.listener(Self::on_focus_menu_bar))
             .on_action(cx.listener(Self::on_escape_root))
             .on_action(cx.listener(Self::on_list_escape))
             .on_action(cx.listener(|_, _: &list::GroupBy, _, _| {}))

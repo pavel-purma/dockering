@@ -24,6 +24,7 @@ use gpui_kit::{
 use crate::actions::dialog::ConfirmDestructive;
 use crate::keymap::ctx;
 use crate::strings as s;
+use crate::ui::widgets::focus_wrap;
 
 /// Max items listed before "…and N more".
 pub const MAX_LISTED: usize = 12;
@@ -273,31 +274,4 @@ pub fn should_confirm_stopped_delete(cx: &App) -> bool {
     crate::state::AppState::config(cx)
         .general
         .confirm_delete_stopped
-}
-
-/// A focusable wrapper with a visible ring around a GPUI Kit button, so we own the focus
-/// handle (initial focus on Cancel; KBD-003/071). Enter/Space on the wrapper activate it.
-fn focus_wrap(
-    id: &'static str,
-    handle: &FocusHandle,
-    button: Button,
-    on_activate: impl Fn(&gpui_kit::KeyDownEvent, &mut Window, &mut App) + 'static,
-    window: &Window,
-    cx: &App,
-) -> impl IntoElement {
-    let focused = handle.is_focused(window);
-    div()
-        .id(id)
-        .track_focus(&handle.clone().tab_stop(true))
-        .rounded(cx.theme().radius)
-        .map(|el| crate::ui::focus_ring(el, focused, cx))
-        .on_key_down(move |e: &gpui_kit::KeyDownEvent, window, cx| {
-            if matches!(e.keystroke.key.as_str(), "enter" | "space")
-                && !e.keystroke.modifiers.modified()
-            {
-                cx.stop_propagation();
-                on_activate(e, window, cx);
-            }
-        })
-        .child(button)
 }

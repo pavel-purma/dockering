@@ -92,6 +92,36 @@ pub fn relative_time(t: OffsetDateTime, cx: &App) -> String {
     format_relative(t, Ticker::now_in(cx))
 }
 
+/// A focusable wrapper with a visible ring around a GPUI Kit `Button`, so the caller owns
+/// the focus handle (S-8.5: the component `Button` keeps its own keyed handle). Use it when
+/// focus must be set programmatically (initial dialog focus, F6 region defaults, menu
+/// restore targets). Enter/Space on the wrapper run `on_activate`; the inner button is
+/// removed from the Tab order. Records its bounds into `bounds` for anchoring popups.
+pub fn focus_wrap(
+    id: &'static str,
+    handle: &gpui_kit::FocusHandle,
+    button: Button,
+    on_activate: impl Fn(&gpui_kit::KeyDownEvent, &mut gpui_kit::Window, &mut App) + 'static,
+    window: &gpui_kit::Window,
+    cx: &App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let focused = handle.is_focused(window);
+    div()
+        .id(id)
+        .track_focus(&handle.clone().tab_stop(true))
+        .rounded(cx.theme().radius)
+        .map(|el| focus_ring(el, focused, cx))
+        .on_key_down(move |e: &gpui_kit::KeyDownEvent, window, cx| {
+            if matches!(e.keystroke.key.as_str(), "enter" | "space")
+                && !e.keystroke.modifiers.modified()
+            {
+                cx.stop_propagation();
+                on_activate(e, window, cx);
+            }
+        })
+        .child(button.tab_stop(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -292,6 +292,15 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
         s::CMD_ZOOM_RESET,
         Global
     ),
+    // SHL-021: a lone Alt focuses the overflow menu (not inside inputs or the terminal).
+    b!(
+        "alt",
+        FocusMenuBar,
+        Some("Workspace && !Input && !Terminal"),
+        Os::NOT_MAC,
+        s::MORE_COMMANDS,
+        Global
+    ),
     // KBD-018: macOS quits/closes with Cmd; Windows/Linux use Alt+F4 (system) and the palette.
     b!("cmd-q", Quit, W, Os::MACOS, s::CMD_QUIT, Global),
     b!("cmd-w", CloseWindow, W, Os::MACOS, s::CMD_QUIT, Global),

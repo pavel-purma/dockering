@@ -295,6 +295,8 @@ pub fn plumbing_action(name: &str) -> bool {
         "dk::CopyText",
         "dk::OpenUrl",
         "dk::CloseWindow",
+        // Windows/Linux only (bound to a lone Alt there); macOS has the native menu bar.
+        "dk::FocusMenuBar",
         "dk::Hide",
         "dk::HideOthers",
         "list::OnRow",
