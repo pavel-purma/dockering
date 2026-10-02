@@ -487,6 +487,14 @@ fn gradient(color: Hsla) -> gpui_kit::Background {
 pub fn build_charts(data: &ChartData, colors: [Hsla; 4]) -> [AnyElement; 4] {
     let [c1, c2, c3, c4] = colors;
     let mem_max = data.mem_limit.map(|l| l as f64);
+    // CPU: at least 0–1 % so an idle container still gets readable ticks; one decimal
+    // while the scale is small (STA-005).
+    let cpu_max = nice_max(data.cpu.iter().map(|p| p.a), 1.0);
+    let cpu_fmt = if cpu_max <= 5.0 {
+        |v: f64| format!("{v:.1}%")
+    } else {
+        |v: f64| format!("{v:.0}%")
+    };
     let cpu = AreaChart::new(data.cpu.clone())
         .id("stats-cpu")
         .x(|p: &Point| p.label.clone())
@@ -494,11 +502,12 @@ pub fn build_charts(data: &ChartData, colors: [Hsla; 4]) -> [AnyElement; 4] {
         .stroke(c1)
         .fill(gradient(c1))
         .linear()
+        .y_domain(0.0, cpu_max)
         .x_tick_count(4)
         .y_axis(true)
         .y_tick_count(3)
-        .y_tick_format(|v| format!("{v:.0}%"))
-        .tooltip_value(|_, _, v| format!("{v:.1}%").into())
+        .y_tick_format(cpu_fmt)
+        .tooltip_value(|_, _, v| format!("{v:.2}%").into())
         .into_any_element();
     let mut mem = AreaChart::new(data.mem.clone())
         .id("stats-mem")
@@ -512,11 +521,12 @@ pub fn build_charts(data: &ChartData, colors: [Hsla; 4]) -> [AnyElement; 4] {
         .y_tick_count(3)
         .y_tick_format(|v| format_size(v.max(0.0) as u64))
         .tooltip_value(|_, _, v| format_size(v.max(0.0) as u64).into());
-    if let Some(max) = mem_max
-        && data.mem.iter().all(|p| p.a <= max)
-    {
-        mem = mem.y_domain(0.0, max);
-    }
+    // Pinned to the limit only when one is set explicitly (otherwise the "limit" is the
+    // host's RAM and the line would hug the axis); auto-scaled from 0 otherwise.
+    mem = match mem_max {
+        Some(max) if data.mem.iter().all(|p| p.a <= max) => mem.y_domain(0.0, max),
+        _ => mem.y_domain(0.0, nice_max(data.mem.iter().map(|p| p.a), 1024.0 * 1024.0)),
+    };
     let rate = |v: f64| format_rate(v.max(0.0));
     let net = two_lines(
         "stats-net",
@@ -549,11 +559,9 @@ fn two_lines(
     name_a: &'static str,
     name_b: &'static str,
 ) -> AnyElement {
-    // Both lines share one y scale: pin the domain to the max of both.
-    let max = points
-        .iter()
-        .fold(0.0f64, |m, p| m.max(p.a).max(p.b))
-        .max(1.0);
+    // Both lines share one y scale: pin the domain to the max of both (≥ 1 kB/s so idle
+    // charts get distinct tick labels).
+    let max = nice_max(points.iter().flat_map(|p| [p.a, p.b]), 1024.0);
     let a = LineChart::new(points.to_vec())
         .id(SharedString::from(format!("{id}-a")))
         .x(|p: &Point| p.label.clone())
@@ -591,6 +599,25 @@ fn two_lines(
         .into_any_element()
 }
 
+/// A rounded-up axis maximum: the data max with 10 % headroom, at least `floor`.
+fn nice_max(values: impl Iterator<Item = f64>, floor: f64) -> f64 {
+    let max = values.fold(0.0f64, f64::max);
+    let target = (max * 1.1).max(floor);
+    // Round up to 1 / 2 / 5 × 10^n.
+    let mag = 10f64.powf(target.log10().floor());
+    let n = target / mag;
+    let step = if n <= 1.0 {
+        1.0
+    } else if n <= 2.0 {
+        2.0
+    } else if n <= 5.0 {
+        5.0
+    } else {
+        10.0
+    };
+    step * mag
+}
+
 impl Focusable for StatsTab {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.window_focus.clone()
@@ -609,7 +636,17 @@ impl Render for StatsTab {
             .map(|s| s.at)
             .unwrap_or_else(OffsetDateTime::now_utc);
         let started = Instant::now();
-        let data = chart_data(&samples, self.window, relative, now);
+        let mut data = chart_data(&samples, self.window, relative, now);
+        let explicit_limit = self
+            .state
+            .read(cx)
+            .details
+            .data()
+            .and_then(|d| d.resources.memory)
+            .is_some_and(|m| m > 0);
+        if !explicit_limit {
+            data.mem_limit = None;
+        }
         let theme = cx.theme();
         let colors = [theme.chart_1, theme.chart_2, theme.blue, theme.yellow];
         let charts = build_charts(&data, colors);
@@ -870,6 +907,14 @@ mod tests {
         );
         assert_eq!(d.net.len(), d.cpu.len());
         assert_eq!(d.mem_limit, Some(2 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn sta_005_nice_axis_max() {
+        assert_eq!(nice_max([0.05, 0.1].into_iter(), 1.0), 1.0);
+        assert_eq!(nice_max([3.4].into_iter(), 1.0), 5.0);
+        assert_eq!(nice_max([47.0].into_iter(), 1.0), 100.0);
+        assert_eq!(nice_max(std::iter::empty(), 1024.0), 2000.0);
     }
 
     #[test]
