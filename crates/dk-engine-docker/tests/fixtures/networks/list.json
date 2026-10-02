@@ -1,0 +1,35 @@
+[
+  {
+    "Attachable": true,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-10-02T00:17:33.441240914Z",
+    "Driver": "bridge",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "172.18.0.1",
+          "Subnet": "172.18.0.0/16"
+        }
+      ],
+      "Driver": "default"
+    },
+    "Id": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {
+      "com.docker.compose.network": "default",
+      "com.docker.compose.project": "dk-fx"
+    },
+    "Name": "dk-fx-net",
+    "Options": {
+      "com.docker.network.enable_ipv4": "true",
+      "com.docker.network.enable_ipv6": "false"
+    },
+    "Scope": "local"
+  }
+]

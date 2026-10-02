@@ -1,0 +1,214 @@
+[
+  {
+    "Command": "sh -c 'echo bye; exit 3'",
+    "Created": 1790900254,
+    "Health": {
+      "FailingStreak": 0,
+      "Status": "none"
+    },
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Id": "5b0d0954e17087c031b79f5af0662104c0b018ff043ca5961cd1a03db4512af3",
+    "Image": "alpine:3.20",
+    "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ImageManifestDescriptor": {
+      "annotations": {
+        "com.docker.official-images.bashbrew.arch": "amd64",
+        "org.opencontainers.image.base.name": "scratch",
+        "org.opencontainers.image.created": "2026-04-16T23:53:23Z",
+        "org.opencontainers.image.revision": "0db70ae354ee747109ce0b9a0cfbcd3c907bc822",
+        "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#0db70ae354ee747109ce0b9a0cfbcd3c907bc822:x86_64",
+        "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+        "org.opencontainers.image.version": "3.20.10"
+      },
+      "digest": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "size": 1023
+    },
+    "Labels": {
+      "desktop.docker.io/ports.scheme": "v2"
+    },
+    "Mounts": [],
+    "Names": [
+      "/dk-fx-exited"
+    ],
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "EndpointID": "",
+          "Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "GwPriority": 0,
+          "IPAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "MacAddress": "",
+          "NetworkID": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+        }
+      }
+    },
+    "Ports": [],
+    "SizeRootFs": 8495104,
+    "SizeRw": 4096,
+    "State": "exited",
+    "Status": "Exited (3) 3 seconds ago"
+  },
+  {
+    "Command": "sh -c 'echo hello-tty; sleep 600'",
+    "Created": 1790900253,
+    "Health": {
+      "FailingStreak": 0,
+      "Status": "none"
+    },
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Id": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb",
+    "Image": "alpine:3.20",
+    "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ImageManifestDescriptor": {
+      "annotations": {
+        "com.docker.official-images.bashbrew.arch": "amd64",
+        "org.opencontainers.image.base.name": "scratch",
+        "org.opencontainers.image.created": "2026-04-16T23:53:23Z",
+        "org.opencontainers.image.revision": "0db70ae354ee747109ce0b9a0cfbcd3c907bc822",
+        "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#0db70ae354ee747109ce0b9a0cfbcd3c907bc822:x86_64",
+        "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+        "org.opencontainers.image.version": "3.20.10"
+      },
+      "digest": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "size": 1023
+    },
+    "Labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "tty",
+      "desktop.docker.io/ports.scheme": "v2"
+    },
+    "Mounts": [],
+    "Names": [
+      "/dk-fx-tty"
+    ],
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "EndpointID": "4cc8eeb9c86dc339c464c3877e1d6bb57879330848c9d03b6025cf374568e5d9",
+          "Gateway": "172.17.0.1",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "GwPriority": 0,
+          "IPAddress": "172.17.0.3",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "MacAddress": "62:63:b9:1c:70:d3",
+          "NetworkID": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+        }
+      }
+    },
+    "SizeRootFs": 8495104,
+    "SizeRw": 4096,
+    "State": "running",
+    "Status": "Up 3 seconds"
+  },
+  {
+    "Command": "sh -c 'echo started; while true; do echo tick; sleep 1; done'",
+    "Created": 1790900253,
+    "Health": {
+      "FailingStreak": 0,
+      "Status": "healthy"
+    },
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+    "Image": "alpine:3.20",
+    "ImageID": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ImageManifestDescriptor": {
+      "annotations": {
+        "com.docker.official-images.bashbrew.arch": "amd64",
+        "org.opencontainers.image.base.name": "scratch",
+        "org.opencontainers.image.created": "2026-04-16T23:53:23Z",
+        "org.opencontainers.image.revision": "0db70ae354ee747109ce0b9a0cfbcd3c907bc822",
+        "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#0db70ae354ee747109ce0b9a0cfbcd3c907bc822:x86_64",
+        "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+        "org.opencontainers.image.version": "3.20.10"
+      },
+      "digest": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "size": 1023
+    },
+    "Labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "web",
+      "desktop.docker.io/ports.scheme": "v2",
+      "desktop.docker.io/ports/80/tcp": "127.0.0.1:"
+    },
+    "Mounts": [
+      {
+        "Destination": "/data",
+        "Driver": "local",
+        "Mode": "z",
+        "Name": "dk-fx-data",
+        "Propagation": "",
+        "RW": true,
+        "Source": "/var/lib/docker/volumes/dk-fx-data/_data",
+        "Type": "volume"
+      }
+    ],
+    "Names": [
+      "/dk-fx-web"
+    ],
+    "NetworkSettings": {
+      "Networks": {
+        "dk-fx-net": {
+          "EndpointID": "c39d6299dc7a69c369701ad38ea4a551b0fb71dc8c9168698352339a3e9a3b16",
+          "Gateway": "172.18.0.1",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "GwPriority": 0,
+          "IPAddress": "172.18.0.2",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "MacAddress": "e2:35:a1:0b:74:67",
+          "NetworkID": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+        }
+      }
+    },
+    "Ports": [
+      {
+        "IP": "127.0.0.1",
+        "PrivatePort": 80,
+        "PublicPort": 59748,
+        "Type": "tcp"
+      }
+    ],
+    "SizeRootFs": 8499200,
+    "SizeRw": 8192,
+    "State": "running",
+    "Status": "Up 4 seconds (healthy)"
+  }
+]

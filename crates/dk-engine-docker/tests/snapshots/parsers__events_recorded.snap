@@ -1,0 +1,151 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: summary
+---
+[
+  {
+    "action": "destroy",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "destroy",
+    "kind": "network",
+    "name": "dk-fx-net"
+  },
+  {
+    "action": "pull",
+    "kind": "image",
+    "name": "alpine"
+  },
+  {
+    "action": "create",
+    "kind": "network",
+    "name": "dk-fx-net"
+  },
+  {
+    "action": "create",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "connect",
+    "kind": "network",
+    "name": "dk-fx-net"
+  },
+  {
+    "action": "start",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "create",
+    "kind": "container",
+    "name": "dk-fx-tty"
+  },
+  {
+    "action": "start",
+    "kind": "container",
+    "name": "dk-fx-tty"
+  },
+  {
+    "action": "create",
+    "kind": "container",
+    "name": "dk-fx-exited"
+  },
+  {
+    "action": "start",
+    "kind": "container",
+    "name": "dk-fx-exited"
+  },
+  {
+    "action": "die",
+    "kind": "container",
+    "name": "dk-fx-exited"
+  },
+  {
+    "action": "exec_create: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_start: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_die",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "health_status: healthy",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_create: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_start: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_die",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_create: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_start: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_die",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "top",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_create: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_start: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_die",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_create: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_start: true",
+    "kind": "container",
+    "name": "dk-fx-web"
+  },
+  {
+    "action": "exec_die",
+    "kind": "container",
+    "name": "dk-fx-web"
+  }
+]

@@ -1,0 +1,258 @@
+{
+  "AppArmorProfile": "",
+  "Args": [
+    "-c",
+    "echo started; while true; do echo tick; sleep 1; done"
+  ],
+  "Config": {
+    "AttachStderr": false,
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "Cmd": [
+      "sh",
+      "-c",
+      "echo started; while true; do echo tick; sleep 1; done"
+    ],
+    "Domainname": "",
+    "Env": [
+      "APP_MODE=<redacted>",
+      "DB_PASSWORD=<redacted>",
+      "PATH=<redacted>"
+    ],
+    "ExposedPorts": {
+      "80/tcp": {}
+    },
+    "Healthcheck": {
+      "Interval": 1000000000,
+      "Retries": 1,
+      "Test": [
+        "CMD",
+        "true"
+      ],
+      "Timeout": 1000000000
+    },
+    "Hostname": "38bcb50e6629",
+    "Image": "alpine:3.20",
+    "Labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "web"
+    },
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Tty": false,
+    "User": "",
+    "Volumes": {},
+    "WorkingDir": "/srv"
+  },
+  "Created": "2026-10-02T00:17:33.508896001Z",
+  "Driver": "overlayfs",
+  "HostConfig": {
+    "AutoRemove": false,
+    "BlkioWeight": 0,
+    "Cgroup": "",
+    "CgroupParent": "",
+    "CgroupnsMode": "private",
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "ContainerIDFile": "",
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpuShares": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "IOMaximumBandwidth": 0,
+    "IOMaximumIOps": 0,
+    "IpcMode": "private",
+    "Isolation": "",
+    "LogConfig": {
+      "Config": {},
+      "Type": "json-file"
+    },
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware"
+    ],
+    "Memory": 268435456,
+    "MemoryReservation": 0,
+    "MemorySwap": 536870912,
+    "Mounts": [
+      {
+        "Source": "dk-fx-data",
+        "Target": "/data",
+        "Type": "volume"
+      }
+    ],
+    "NanoCpus": 500000000,
+    "NetworkMode": "bridge",
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "PortBindings": {
+      "80/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": ""
+        }
+      ]
+    },
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ],
+    "ReadonlyRootfs": false,
+    "RestartPolicy": {
+      "MaximumRetryCount": 0,
+      "Name": "unless-stopped"
+    },
+    "Runtime": "runc",
+    "ShmSize": 67108864,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "VolumeDriver": ""
+  },
+  "HostnamePath": "/var/lib/docker/containers/38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f/hostname",
+  "HostsPath": "/var/lib/docker/containers/38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f/hosts",
+  "Id": "38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f",
+  "Image": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+  "ImageManifestDescriptor": {
+    "annotations": {
+      "com.docker.official-images.bashbrew.arch": "amd64",
+      "org.opencontainers.image.base.name": "scratch",
+      "org.opencontainers.image.created": "2026-04-16T23:53:23Z",
+      "org.opencontainers.image.revision": "0db70ae354ee747109ce0b9a0cfbcd3c907bc822",
+      "org.opencontainers.image.source": "https://github.com/alpinelinux/docker-alpine.git#0db70ae354ee747109ce0b9a0cfbcd3c907bc822:x86_64",
+      "org.opencontainers.image.url": "https://hub.docker.com/_/alpine",
+      "org.opencontainers.image.version": "3.20.10"
+    },
+    "digest": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    "size": 1023
+  },
+  "LogPath": "/var/lib/docker/containers/38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f/38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f-json.log",
+  "MountLabel": "",
+  "Mounts": [
+    {
+      "Destination": "/data",
+      "Driver": "local",
+      "Mode": "z",
+      "Name": "dk-fx-data",
+      "Propagation": "",
+      "RW": true,
+      "Source": "/var/lib/docker/volumes/dk-fx-data/_data",
+      "Type": "volume"
+    }
+  ],
+  "Name": "/dk-fx-web",
+  "NetworkSettings": {
+    "Networks": {
+      "dk-fx-net": {
+        "Aliases": [
+          "web"
+        ],
+        "DNSNames": [
+          "dk-fx-web",
+          "web",
+          "38bcb50e6629"
+        ],
+        "EndpointID": "c39d6299dc7a69c369701ad38ea4a551b0fb71dc8c9168698352339a3e9a3b16",
+        "Gateway": "172.18.0.1",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "GwPriority": 0,
+        "IPAddress": "172.18.0.2",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "MacAddress": "e2:35:a1:0b:74:67",
+        "NetworkID": "5c71669890fc2dcb84bcb44023f7fc2ae7370ef3a1a6250f245b70ceb27ab953"
+      }
+    },
+    "Ports": {
+      "80/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "59748"
+        }
+      ]
+    },
+    "SandboxID": "cb243340e886cb7f498a9cec9460bd6a315bb4c08ee01ffc5852ea4d31f0d43b",
+    "SandboxKey": "/var/run/docker/netns/cb243340e886"
+  },
+  "Path": "sh",
+  "Platform": "linux",
+  "ProcessLabel": "",
+  "ResolvConfPath": "/var/lib/docker/containers/38bcb50e662963d38c159ee1e62410503976ac1113973d3d63937ed2a511178f/resolv.conf",
+  "RestartCount": 0,
+  "State": {
+    "Dead": false,
+    "Error": "",
+    "ExitCode": 0,
+    "FinishedAt": "0001-01-01T00:00:00Z",
+    "Health": {
+      "FailingStreak": 0,
+      "Log": [
+        {
+          "End": "2026-10-02T00:17:34.840832748Z",
+          "ExitCode": 0,
+          "Output": "",
+          "Start": "2026-10-02T00:17:34.813286778Z"
+        },
+        {
+          "End": "2026-10-02T00:17:35.864600909Z",
+          "ExitCode": 0,
+          "Output": "",
+          "Start": "2026-10-02T00:17:35.84205568Z"
+        },
+        {
+          "End": "2026-10-02T00:17:36.886741865Z",
+          "ExitCode": 0,
+          "Output": "",
+          "Start": "2026-10-02T00:17:36.86581644Z"
+        }
+      ],
+      "Status": "healthy"
+    },
+    "OOMKilled": false,
+    "Paused": false,
+    "Pid": 17346,
+    "Restarting": false,
+    "Running": true,
+    "StartedAt": "2026-10-02T00:17:33.652134567Z",
+    "Status": "running"
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  }
+}

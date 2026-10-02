@@ -1,0 +1,97 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: v
+---
+{
+  "cmd": [
+    "sh",
+    "-c",
+    "echo hello-tty; sleep 600"
+  ],
+  "entrypoint": [],
+  "env": [
+    {
+      "key": "PATH",
+      "value": "<redacted>"
+    }
+  ],
+  "finished_at": null,
+  "health_log": [],
+  "hostname": "445eadbbcc62",
+  "mounts": [],
+  "network_settings": {
+    "dns": [],
+    "network_mode": "bridge",
+    "networks": [
+      {
+        "aliases": [],
+        "gateway": "172.17.0.1",
+        "ipv4": "172.17.0.3",
+        "ipv6": null,
+        "mac": "62:63:b9:1c:70:d3",
+        "network": "bridge",
+        "network_id": "4c838f4c640af967550d91166c3c5eeacce81d02ea76b5bb27beb21485e6490f"
+      }
+    ]
+  },
+  "pid": 17415,
+  "platform": "linux",
+  "port_bindings": [],
+  "resources": {
+    "cpu_shares": null,
+    "memory": null,
+    "memory_swap": null,
+    "nano_cpus": null,
+    "pids_limit": null
+  },
+  "restart_count": 0,
+  "restart_policy": "no",
+  "started_at": "2026-10-02T00:17:33.987153415Z",
+  "summary": {
+    "command": "sh -c echo hello-tty; sleep 600",
+    "compose": {
+      "config_files": [
+        "/srv/dk-fx/compose.yaml"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "number": 1,
+      "oneoff": false,
+      "project": "dk-fx",
+      "service": "tty",
+      "working_dir": "/srv/dk-fx"
+    },
+    "created": "2026-10-02T00:17:33.843827615Z",
+    "exit_code": null,
+    "health": null,
+    "id": "445eadbbcc626c1cc904e15a91c6e4cd53af8866cca1a36fb59025812f3000bb",
+    "image": "alpine:3.20",
+    "image_id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "ip_addresses": [
+      "172.17.0.3"
+    ],
+    "labels": {
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "db:service_started:false",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "dk-fx",
+      "com.docker.compose.project.config_files": "/srv/dk-fx/compose.yaml",
+      "com.docker.compose.project.working_dir": "/srv/dk-fx",
+      "com.docker.compose.service": "tty"
+    },
+    "mounts": [],
+    "name": "dk-fx-tty",
+    "networks": [
+      "bridge"
+    ],
+    "ports": [],
+    "size_root_fs": null,
+    "size_rw": null,
+    "state": "running",
+    "status_text": "Up <duration>"
+  },
+  "tty": true,
+  "user": null,
+  "working_dir": "/"
+}

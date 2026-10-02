@@ -1,0 +1,20 @@
+[
+  {
+    "Comment": "buildkit.dockerfile.v0",
+    "Created": 1776383606,
+    "CreatedBy": "CMD [\"/bin/sh\"]",
+    "Id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "Size": 0,
+    "Tags": [
+      "alpine:3.20"
+    ]
+  },
+  {
+    "Comment": "buildkit.dockerfile.v0",
+    "Created": 1776383606,
+    "CreatedBy": "ADD alpine-minirootfs-3.20.10-x86_64.tar.gz / # buildkit",
+    "Id": "<missing>",
+    "Size": 8470528,
+    "Tags": []
+  }
+]

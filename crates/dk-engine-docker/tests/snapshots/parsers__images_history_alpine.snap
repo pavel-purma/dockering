@@ -1,0 +1,20 @@
+---
+source: crates/dk-engine-docker/tests/parsers.rs
+expression: history
+---
+[
+  {
+    "id": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "created": "2026-04-16T23:53:26Z",
+    "created_by": "CMD [\"/bin/sh\"]",
+    "size": 0,
+    "comment": "buildkit.dockerfile.v0"
+  },
+  {
+    "id": null,
+    "created": "2026-04-16T23:53:26Z",
+    "created_by": "ADD alpine-minirootfs-3.20.10-x86_64.tar.gz / # buildkit",
+    "size": 8470528,
+    "comment": "buildkit.dockerfile.v0"
+  }
+]
