@@ -1110,3 +1110,184 @@ fn trm_008_closed_on_container_removal(cx: &mut TestAppContext) {
     h.wait_until(cx, "read-only", |_, cx| view.read(cx).is_read_only());
     h.shutdown();
 }
+
+// ── Stats (STA-001…011, KBD-070) ──────────────────────────────────────────────────────────
+
+use crate::pages::container_detail::stats::{StatsTab, StatsWindow};
+
+fn stats_tab(page: &Entity<ContainerDetailPage>, cx: &mut TestAppContext) -> Entity<StatsTab> {
+    cx.read(|cx| page.read(cx).tabs().stats.clone())
+        .expect("stats tab entity")
+}
+
+fn sample(i: i64, cpu: f64) -> dk_core::StatsSample {
+    dk_core::fake::fixtures::stats_sample(
+        time::OffsetDateTime::now_utc() - time::Duration::seconds(60 - i),
+        cpu,
+        64 * 1024 * 1024,
+    )
+}
+
+fn wait_stats_stream(h: &Harness, cx: &mut TestAppContext, n: usize) {
+    h.wait_until(cx, "stats subscribed", |_, _| {
+        h.engine.open_streams().2 == n
+    });
+}
+
+#[gpui_kit::test]
+fn sta_001_samples_render_and_history_replays(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    wait_stats_stream(&h, cx, 1);
+    let redis = id_of("redis");
+    for i in 0..5 {
+        h.engine.push_stats(&redis, sample(i, 10.0 + i as f64));
+    }
+    h.wait_until(cx, "5 samples", |_, cx| stats.read(cx).samples().len() == 5);
+    // Leave the tab and come back: the hub replays its buffer (STA-006, STA-003).
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "right");
+    assert_eq!(cx.read(|cx| page.read(cx).tab()), ContainerTab::Mounts);
+    h.press(cx, "left");
+    h.wait_until(cx, "replayed", |_, cx| stats.read(cx).samples().len() == 5);
+    let last_cpu = cx.read(|cx| stats.read(cx).samples().last().map(|s| s.cpu_percent));
+    assert_eq!(last_cpu, Some(14.0));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn sta_006_stats_only_while_visible(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Overview);
+    h.draw(cx);
+    assert!(
+        h.engine.calls_to("stats").is_empty(),
+        "no stats stream outside the Stats tab"
+    );
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "right right right");
+    assert_eq!(cx.read(|cx| page.read(cx).tab()), ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    h.wait_until(cx, "streaming", |_, cx| stats.read(cx).is_streaming());
+    wait_stats_stream(&h, cx, 1);
+    // Switching away drops the subscription (the hub lingers 5 s upstream, but our stream
+    // is gone).
+    h.press(cx, "right");
+    assert!(!cx.read(|cx| stats.read(cx).is_streaming()));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_070_window_selector_keys(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    let f = cx.read(|cx| stats.read(cx).window_focus().clone());
+    h.focus(cx, &f);
+    let w = |cx: &mut TestAppContext| cx.read(|cx| stats.read(cx).window());
+    assert_eq!(w(cx), StatsWindow::M5, "default 5m");
+    h.press(cx, "right");
+    assert_eq!(w(cx), StatsWindow::M15);
+    h.press(cx, "left left");
+    assert_eq!(w(cx), StatsWindow::M1);
+    h.press(cx, "5");
+    assert_eq!(w(cx), StatsWindow::M5);
+    h.press(cx, "f");
+    assert_eq!(w(cx), StatsWindow::M15);
+    h.press(cx, "1");
+    assert_eq!(w(cx), StatsWindow::M1);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn sta_008_processes_gated_on_top(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    h.wait_until(cx, "top loaded", |_, cx| stats.read(cx).top().is_some());
+    h.shutdown();
+
+    let h = start(cx, Setup::default());
+    h.engine
+        .set_capabilities(dk_core::Capabilities::all() - dk_core::Capabilities::TOP);
+    h.wait_containers(cx);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::Refresh), cx)
+    });
+    h.wait_until(cx, "caps without TOP", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            !s.read(cx)
+                .capabilities()
+                .contains(dk_core::Capabilities::TOP)
+                && s.read(cx).info().is_some()
+        })
+    });
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    h.draw(cx);
+    assert!(h.engine.calls_to("top").is_empty(), "no top() without TOP");
+    assert!(cx.read(|cx| stats.read(cx).top().is_none()));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn sta_007_stopped_container_keeps_buffer(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    wait_stats_stream(&h, cx, 1);
+    let redis = id_of("redis");
+    for i in 0..3 {
+        h.engine.push_stats(&redis, sample(i, 5.0));
+    }
+    h.wait_until(cx, "samples", |_, cx| stats.read(cx).samples().len() == 3);
+    focus_tab_bar(&h, &page, cx);
+    h.press(cx, "s");
+    h.wait_until(cx, "stopped", |_, cx| {
+        page.read(cx)
+            .detail_state()
+            .is_some_and(|s| !s.read(cx).is_running(cx))
+    });
+    assert_eq!(
+        cx.read(|cx| stats.read(cx).samples().len()),
+        3,
+        "buffer kept"
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn sta_010_disk_usage_on_demand(cx: &mut TestAppContext) {
+    let mut containers = crate::demo::containers();
+    if let Some(c) = containers.iter_mut().find(|c| c.name == "redis") {
+        c.size_rw = Some(12_000);
+        c.size_root_fs = Some(98_000_000);
+    }
+    let h = start(
+        cx,
+        Setup {
+            containers,
+            ..Default::default()
+        },
+    );
+    let page = open_detail(&h, cx, "redis", ContainerTab::Stats);
+    let stats = stats_tab(&page, cx);
+    h.draw(cx);
+    assert!(
+        cx.read(|cx| stats.read(cx).disk().is_none()),
+        "not fetched up front"
+    );
+    // The button / palette entry dispatch from inside the tab (focus on the selector).
+    let f = cx.read(|cx| stats.read(cx).window_focus().clone());
+    h.focus(cx, &f);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::stats::LoadDiskUsage), cx)
+    });
+    h.wait_until(cx, "disk usage", |_, cx| stats.read(cx).disk().is_some());
+    assert_eq!(
+        cx.read(|cx| stats.read(cx).disk()),
+        Some((Some(12_000), Some(98_000_000)))
+    );
+    h.shutdown();
+}
