@@ -435,3 +435,70 @@ fn live_record_fixtures() {
         save("events.json", &serde_json::Value::Array(arr));
     }
 }
+
+#[test]
+#[ignore = "needs WSL ≥ 3.0 with WSLC and the merged docker_json/CLI"]
+fn live_typed_ops_and_cli_pref() {
+    init();
+    let e = block_on(com_engine());
+    if let Some(id) = running_container(&e) {
+        let d = block_on(e.inspect_container(&id)).expect("typed inspect");
+        eprintln!(
+            "typed inspect: {} {:?} env={}",
+            d.summary.name,
+            d.summary.state,
+            d.env.len()
+        );
+    }
+    let vols = block_on(e.list_volumes()).expect("typed volumes");
+    let nets = block_on(e.list_networks()).expect("typed networks");
+    eprintln!(
+        "typed: {} volumes, {} networks: {:?}",
+        vols.len(),
+        nets.len(),
+        nets.iter().map(|n| &n.name).collect::<Vec<_>>()
+    );
+    let name = format!("dk-com-typed-{:08x}", rand_u32());
+    let v = block_on(e.create_volume(VolumeSpec {
+        name: Some(name.clone()),
+        ..Default::default()
+    }))
+    .expect("typed create");
+    assert_eq!(v.name, name);
+    let det = block_on(e.inspect_volume(&name)).expect("typed inspect volume");
+    eprintln!(
+        "volume: {} driver={} used_by={:?}",
+        det.summary.name, det.summary.driver, det.used_by
+    );
+    block_on(e.remove_volume(&name, false)).expect("remove");
+    let s = with_timeout(Duration::from_secs(5), {
+        let s = e.events(EventFilter::default());
+        async move { drop(s) }
+    });
+    assert!(s.is_some());
+    // CLI preference → CLI transport (implemented on main).
+    let f = dk_engine_wslc::WslcFactory::new();
+    let cfg = EngineConfig {
+        id: EngineId::new("wslc-cli-forced"),
+        name: "WSLC (CLI)".into(),
+        endpoint: EngineEndpoint::Wslc {
+            session: None,
+            transport: WslcTransportPref::Cli,
+        },
+        origin: EngineOrigin::Manual,
+        enabled: true,
+        hidden: false,
+    };
+    // The CLI transport spawns tokio processes: drive it on a tokio runtime like the hub does.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("rt");
+    let cli = rt.block_on(f.connect(&cfg)).expect("CLI connect");
+    let info = rt.block_on(cli.info()).expect("cli info");
+    eprintln!(
+        "cli info transport={:?} note={:?}",
+        info.transport, info.transport_note
+    );
+    assert_eq!(info.transport.as_deref(), Some("cli"));
+}
