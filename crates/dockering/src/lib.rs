@@ -27,3 +27,8 @@ pub mod state;
 pub mod strings;
 pub mod theme;
 pub mod ui;
+
+#[cfg(test)]
+pub mod testing;
+#[cfg(test)]
+mod view_tests;

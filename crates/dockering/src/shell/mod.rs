@@ -3,7 +3,7 @@
 //! the command palette (KBD-020), the shortcut reference (KBD-022), and native menus
 //! (SHL-020/021).
 
-mod app_shell;
+pub mod app_shell;
 mod engine_views;
 pub mod menus;
 pub mod palette;

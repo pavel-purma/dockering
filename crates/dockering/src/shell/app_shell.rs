@@ -176,6 +176,13 @@ impl AppShell {
             cx.on_focus_in(&root_focus, window, |this, window, cx| {
                 this.regions.remember(window, cx);
             }),
+            // The focused element vanished (page swap, row removed): never leave focus nowhere
+            // (KBD-007).
+            cx.on_focus_lost(window, |this, window, cx| {
+                if this.overlay() == Overlay::None && !window.has_active_dialog(cx) {
+                    this.focus_page(window, cx);
+                }
+            }),
         ];
         let mut this = Self {
             engines,
@@ -1258,18 +1265,13 @@ impl Focusable for AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.focus_page_pending.replace(false) {
-            let pending = self.focus_page_pending.clone();
-            let this = cx.entity().downgrade();
-            window.on_next_frame(move |window, cx| {
-                let _ = pending;
-                this.update(cx, |this, cx| {
-                    if this.overlay() == Overlay::None && !window.has_active_dialog(cx) {
-                        this.focus_page(window, cx);
-                    }
-                })
-                .ok();
-            });
+        if self.focus_page_pending.replace(false)
+            && self.overlay() == Overlay::None
+            && !window.has_active_dialog(cx)
+        {
+            // Focus the new page's primary control (KBD-007). Handles are valid before their
+            // element renders; the key dispatch path is resolved on the next frame.
+            self.focus_page(window, cx);
         }
         let title = self.render_title_bar(window, cx);
         let sidebar = self.render_sidebar(window, cx);

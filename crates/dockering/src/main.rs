@@ -1,7 +1,7 @@
 //! Dockering app binary: process bootstrap (spec 10 §7). Everything here runs before the first
 //! window opens, so the blocking calls below are allowed (NFR-001 startup exception).
 
-use std::process::ExitCode;
+use std::process::ExitCode; // nfr-001-allow: exit-code type only, no process I/O
 use std::sync::Arc;
 
 use dk_hub::single_instance::Instance;
@@ -40,8 +40,8 @@ fn main() -> ExitCode {
     }
 
     let paths = if args.demo {
-        // nfr-001-allow: startup before first window
-        let root = std::env::temp_dir().join(format!("dockering-demo-{}", std::process::id()));
+        let pid = std::process::id(); // nfr-001-allow: startup before first window
+        let root = std::env::temp_dir().join(format!("dockering-demo-{pid}"));
         Paths::in_dir(root)
     } else {
         match Paths::for_user() {

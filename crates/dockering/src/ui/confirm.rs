@@ -98,6 +98,8 @@ pub struct ConfirmView {
     confirm_focus: FocusHandle,
     on_confirm: OnConfirm,
     done: Rc<RefCell<bool>>,
+    /// Focus Cancel on the first render (KBD-071).
+    focus_cancel: bool,
 }
 
 impl ConfirmView {
@@ -127,7 +129,10 @@ impl ConfirmView {
 }
 
 impl Render for ConfirmView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.focus_cancel) {
+            window.focus(&self.cancel_focus, cx);
+        }
         let spec = &self.spec;
         let extra = spec.items.len().saturating_sub(MAX_LISTED);
         v_flex()
@@ -190,19 +195,28 @@ impl Render for ConfirmView {
                 DialogFooter::new().child(
                     h_flex()
                         .gap_2()
-                        .child(
+                        .child(focus_wrap(
+                            "confirm-cancel-wrap",
+                            &self.cancel_focus,
                             Button::new("confirm-cancel")
                                 .label(s::CANCEL)
-                                .track_focus(&self.cancel_focus)
+                                .tab_stop(false)
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.cancel(window, cx)),
                                 ),
-                        )
-                        .child(
+                            cx.listener(|this, _: &gpui_kit::KeyDownEvent, window, cx| {
+                                this.cancel(window, cx)
+                            }),
+                            window,
+                            cx,
+                        ))
+                        .child(focus_wrap(
+                            "confirm-ok-wrap",
+                            &self.confirm_focus,
                             Button::new("confirm-ok")
                                 .danger()
                                 .label(spec.confirm_label.clone())
-                                .track_focus(&self.confirm_focus)
+                                .tab_stop(false)
                                 .tooltip_with_action(
                                     spec.confirm_label.clone(),
                                     &ConfirmDestructive,
@@ -211,7 +225,12 @@ impl Render for ConfirmView {
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.confirm(window, cx)),
                                 ),
-                        ),
+                            cx.listener(|this, _: &gpui_kit::KeyDownEvent, window, cx| {
+                                this.confirm(window, cx)
+                            }),
+                            window,
+                            cx,
+                        )),
                 ),
             )
     }
@@ -234,6 +253,7 @@ pub fn confirm_destructive(
         confirm_focus: cx.focus_handle(),
         on_confirm: Rc::new(on_confirm),
         done: Rc::new(RefCell::new(false)),
+        focus_cancel: true,
     });
     let body = view.clone();
     window.open_dialog(cx, move |dialog, _, _| {
@@ -243,12 +263,8 @@ pub fn confirm_destructive(
             .overlay_closable(true)
             .child(body.clone())
     });
-    // Initial focus on Cancel (KBD-071). The dialog host focuses itself on open; move focus
-    // to our Cancel button once it has been rendered.
-    let cancel = view.read(cx).cancel_focus.clone();
-    window.on_next_frame(move |window, cx| {
-        window.focus(&cancel, cx);
-    });
+    // Initial focus on Cancel (KBD-071): the dialog host focuses itself on open; Cancel is
+    // inside it, so focusing it keeps the trap and the invoker restore intact.
     view
 }
 
@@ -257,4 +273,31 @@ pub fn should_confirm_stopped_delete(cx: &App) -> bool {
     crate::state::AppState::config(cx)
         .general
         .confirm_delete_stopped
+}
+
+/// A focusable wrapper with a visible ring around a GPUI Kit button, so we own the focus
+/// handle (initial focus on Cancel; KBD-003/071). Enter/Space on the wrapper activate it.
+fn focus_wrap(
+    id: &'static str,
+    handle: &FocusHandle,
+    button: Button,
+    on_activate: impl Fn(&gpui_kit::KeyDownEvent, &mut Window, &mut App) + 'static,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
+    let focused = handle.is_focused(window);
+    div()
+        .id(id)
+        .track_focus(&handle.clone().tab_stop(true))
+        .rounded(cx.theme().radius)
+        .map(|el| crate::ui::focus_ring(el, focused, cx))
+        .on_key_down(move |e: &gpui_kit::KeyDownEvent, window, cx| {
+            if matches!(e.keystroke.key.as_str(), "enter" | "space")
+                && !e.keystroke.modifiers.modified()
+            {
+                cx.stop_propagation();
+                on_activate(e, window, cx);
+            }
+        })
+        .child(button)
 }
