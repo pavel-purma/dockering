@@ -140,17 +140,38 @@ mod imp {
             .map_err(|e| pty_err("reader", e))?;
         let writer = master.take_writer().map_err(|e| pty_err("writer", e))?;
         let killer = child.clone_killer();
+        let writer: SharedWriter = Arc::new(Mutex::new(Some(writer)));
 
         let (mut tx, rx) = mpsc::channel::<EngineResult<Bytes>>(64);
+        let writer_r = writer.clone();
         std::thread::Builder::new()
             .name("wslc-exec-reader".into())
             .spawn(move || {
                 let mut buf = vec![0u8; 16 * 1024];
+                // portable-pty creates the pseudo console with INHERIT_CURSOR, so ConPTY
+                // starts by asking for the cursor position (`ESC[6n`) and blocks until it
+                // gets a report. Answer that first query here so the session never depends on
+                // the UI's terminal emulator replying in time.
+                let mut answered_dsr = false;
+                let mut seen = 0usize;
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
-                            let chunk = Bytes::copy_from_slice(&buf[..n]);
+                            let chunk = &buf[..n];
+                            if !answered_dsr && seen < 256 {
+                                if chunk.windows(4).any(|w| w == b"\x1b[6n") {
+                                    answered_dsr = true;
+                                    if let Ok(mut g) = writer_r.lock()
+                                        && let Some(w) = g.as_mut()
+                                    {
+                                        let _ = w.write_all(b"\x1b[1;1R");
+                                        let _ = w.flush();
+                                    }
+                                }
+                                seen += n;
+                            }
+                            let chunk = Bytes::copy_from_slice(chunk);
                             if futures::executor::block_on(futures::SinkExt::send(
                                 &mut tx,
                                 Ok(chunk),
@@ -168,7 +189,6 @@ mod imp {
             .map_err(|e| pty_err("reader thread", e))?;
 
         let master: SharedMaster = Arc::new(Mutex::new(Some(master)));
-        let writer: SharedWriter = Arc::new(Mutex::new(Some(writer)));
         let (exit_tx, exit_rx) = watch::channel(None);
         let (master_w, writer_w) = (master.clone(), writer.clone());
         std::thread::Builder::new()
