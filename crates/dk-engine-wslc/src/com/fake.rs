@@ -27,6 +27,9 @@ use windows::Win32::System::Pipes::{
 use windows::Win32::System::Threading::WaitForSingleObject;
 use windows::core::{BOOL, HRESULT, IUnknown, PCSTR, PCWSTR, PSTR, PWSTR, implement};
 
+/// The interface `FakeManager::new_interface` hands out (re-exported for tests only; the
+/// vtable module itself stays crate-private, ADR-0003).
+pub use super::abi::v3_0::IWSLCSessionManager;
 use super::abi::v3_0::*;
 use super::ffi::{CoTaskMemArray, CoTaskMemStr, CoTaskMemWStr, hr, write_fixed};
 

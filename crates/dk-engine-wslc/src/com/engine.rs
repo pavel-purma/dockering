@@ -359,9 +359,9 @@ impl WslcComEngine {
         Ok((engine, check))
     }
 
-    /// Test/diagnostic constructor over an existing manager (e.g. an in-process fake server).
-    /// Skips version gating and the self-check.
-    #[doc(hidden)]
+    /// Test constructor over an in-process fake server's manager (`com::fake`). Skips version
+    /// gating and the self-check, so it only exists with feature `test-support` (ADR-0003).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn from_manager_for_tests(
         id: EngineId,
         manager: abi::IWSLCSessionManager,
