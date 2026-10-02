@@ -19,12 +19,22 @@ targets = [
   "x86_64-apple-darwin",
   "aarch64-apple-darwin",
 ]
+# Build deps can generate code that ends up in the binary, so keep them. Dev-only deps
+# (proptest, insta, test-support) never ship.
 ignore-build-dependencies = false
-ignore-dev-dependencies = false
+ignore-dev-dependencies = true
 ignore-transitive-dependencies = false
+# Our own workspace crates are publish = false and covered by LICENSE-MIT/LICENSE-APACHE.
+private = { ignore = true }
 
-[ring]
-accepted = ["OpenSSL"]
+# Per-crate acceptances mirror the `exceptions` in deny.toml (REL-003). Keep both in sync.
+# 0BSD (public-domain-equivalent), transitive via gpui-component (gpui-kit 0.7).
+[enum-iterator]
+accepted = ["0BSD"]
 
-[unicode-ident]
-accepted = ["Unicode-DFS-2016"]
+[enum-iterator-derive]
+accepted = ["0BSD"]
+
+# Permissive BSD-style bzip2 licence, transitive via gpui's http client (async-compression).
+[libbz2-rs-sys]
+accepted = ["bzip2-1.0.6"]
