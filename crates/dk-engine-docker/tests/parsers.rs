@@ -48,6 +48,14 @@ fn stable_status(v: &mut Value) {
     }
 }
 
+/// Key order of `serde_json::Value` depends on cargo feature unification (`preserve_order` is
+/// enabled when GPUI is in the build graph), so snapshots sort map keys.
+macro_rules! snap {
+    ($($t:tt)*) => {
+        insta::with_settings!({ sort_maps => true }, { insta::assert_json_snapshot!($($t)*) })
+    };
+}
+
 #[test]
 fn con_list_containers_snapshot() {
     let list: Vec<_> = items(&fixture("containers", "list"))
@@ -78,7 +86,7 @@ fn con_list_containers_snapshot() {
     for c in v.as_array_mut().unwrap() {
         stable_status(c);
     }
-    insta::assert_json_snapshot!("containers_list", v);
+    snap!("containers_list", v);
 }
 
 #[test]
@@ -122,7 +130,7 @@ fn cdt_inspect_containers_snapshot() {
         let mut v = serde_json::to_value(&d).unwrap();
         v.as_object_mut().unwrap().remove("raw");
         stable_status(v.get_mut("summary").unwrap());
-        insta::assert_json_snapshot!(format!("containers_inspect_{name}"), v);
+        snap!(format!("containers_inspect_{name}"), v);
     }
 }
 
@@ -160,21 +168,21 @@ fn img_images_snapshot() {
     assert_eq!(list.len(), 1);
     assert!(!list[0].dangling);
     assert!(list[0].repo_tags.contains(&"alpine:3.20".to_string()));
-    insta::assert_json_snapshot!("images_list", list);
+    snap!("images_list", list);
 
     let d = docker_json::image_details(&fixture("images", "inspect_alpine")).unwrap();
     assert!(!d.architecture.is_empty());
     assert!(!d.root_fs_layers.is_empty());
     let mut v = serde_json::to_value(&d).unwrap();
     v.as_object_mut().unwrap().remove("raw");
-    insta::assert_json_snapshot!("images_inspect_alpine", v);
+    snap!("images_inspect_alpine", v);
 
     let history: Vec<_> = items(&fixture("images", "history_alpine"))
         .iter()
         .map(docker_json::image_layer)
         .collect();
     assert!(!history.is_empty());
-    insta::assert_json_snapshot!("images_history_alpine", history);
+    snap!("images_history_alpine", history);
 }
 
 #[test]
@@ -195,7 +203,7 @@ fn vol_volumes_snapshot() {
         .collect();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].compose.as_ref().unwrap().project, "dk-fx");
-    insta::assert_json_snapshot!("volumes_list", list);
+    snap!("volumes_list", list);
 
     let v = docker_json::volume_summary(&fixture("volumes", "inspect_data"));
     assert_eq!(v.name, "dk-fx-data");
@@ -220,13 +228,13 @@ fn net_networks_snapshot() {
     assert_eq!(list.len(), 1);
     assert!(list[0].attachable);
     assert!(!list[0].subnets.is_empty());
-    insta::assert_json_snapshot!("networks_list", list);
+    snap!("networks_list", list);
 
     let d = docker_json::network_details(&fixture("networks", "inspect_net")).unwrap();
     assert!(d.containers.iter().any(|c| c.name == "dk-fx-web"));
     let mut v = serde_json::to_value(&d).unwrap();
     v.as_object_mut().unwrap().remove("raw");
-    insta::assert_json_snapshot!("networks_inspect_net", v);
+    snap!("networks_inspect_net", v);
 }
 
 #[test]
@@ -251,7 +259,7 @@ fn eng_events_snapshot() {
             })
         })
         .collect();
-    insta::assert_json_snapshot!("events_recorded", summary);
+    snap!("events_recorded", summary);
 }
 
 #[test]
@@ -263,7 +271,7 @@ fn vol_002_disk_usage_snapshot() {
             .iter()
             .any(|(n, r)| n == "dk-fx-data" && *r == 1)
     );
-    insta::assert_json_snapshot!("system_df", du);
+    snap!("system_df", du);
 }
 
 #[test]
