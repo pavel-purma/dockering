@@ -989,3 +989,73 @@ fn kbd_022_reference_lists_m6_letters(cx: &mut TestAppContext) {
     }
     h.shutdown();
 }
+
+#[gpui_kit::test]
+fn img_004_pull_status_line_without_pull_progress(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.engine
+        .set_capabilities(Capabilities::all() - Capabilities::PULL_PROGRESS);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::Refresh), cx)
+    });
+    h.wait_until(cx, "caps without pull progress", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .info()
+                .is_some_and(|i| !i.capabilities.contains(Capabilities::PULL_PROGRESS))
+        })
+    });
+    let page = images_page(&h, cx);
+    focus_images_table(&h, &page, cx);
+    h.press(cx, "g");
+    h.draw(cx);
+    h.type_text(cx, "busybox:1.37");
+    h.press(cx, "enter");
+    h.wait_until(cx, "pull finished", |_, cx| {
+        PullManager::try_global(cx).is_some_and(|m| {
+            m.read(cx)
+                .finished()
+                .iter()
+                .any(|p| p.reference == "busybox:1.37" && !p.structured)
+        })
+    });
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn img_004_pull_cancel_drops_the_stream(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = images_page(&h, cx);
+    let _ = page;
+    // Start a pull directly and cancel before the fake's stream is consumed.
+    let id = cx.update(|cx| {
+        let manager = PullManager::global(cx);
+        let window = h.any_window();
+        manager.update(cx, |m, cx| {
+            let id = m.start(
+                dk_core::EngineId::new("demo"),
+                "nginx:1.28".into(),
+                Capabilities::all(),
+                window,
+                |_, _| {},
+                cx,
+            );
+            m.cancel(id, cx);
+            id
+        })
+    });
+    h.draw(cx);
+    let cancelled = cx.read(|cx| {
+        PullManager::try_global(cx).is_some_and(|m| {
+            m.read(cx)
+                .finished()
+                .iter()
+                .any(|p| p.id == id && p.phase == PullPhase::Cancelled)
+        })
+    });
+    assert!(cancelled);
+    assert!(
+        cx.read(|cx| PullManager::try_global(cx).is_some_and(|m| m.read(cx).running().is_empty()))
+    );
+    h.shutdown();
+}
