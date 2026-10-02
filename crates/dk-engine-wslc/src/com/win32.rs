@@ -173,6 +173,54 @@ pub fn process_running(exe: &str) -> bool {
     false
 }
 
+// ───────────────────────────── identity ─────────────────────────────
+
+/// String SID of the current process user (`S-1-5-21-…`), used to keep only the caller's
+/// WSLC sessions (ENG-109). `None` on failure.
+pub fn current_user_sid() -> Option<String> {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = HANDLE::default();
+    // SAFETY: pseudo-handle of the current process; `token` is owned below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.ok()?;
+    let token = OwnedHandle::new(token)?;
+    let mut len = 0u32;
+    // SAFETY: size query (expected to fail with ERROR_INSUFFICIENT_BUFFER, setting `len`).
+    let _ = unsafe { GetTokenInformation(token.raw(), TokenUser, None, 0, &mut len) };
+    if len == 0 {
+        return None;
+    }
+    // u64 buffer for pointer alignment of TOKEN_USER.
+    let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+    // SAFETY: `buf` has at least `len` bytes, suitably aligned for TOKEN_USER.
+    unsafe {
+        GetTokenInformation(
+            token.raw(),
+            TokenUser,
+            Some(buf.as_mut_ptr().cast()),
+            len,
+            &mut len,
+        )
+    }
+    .ok()?;
+    // SAFETY: GetTokenInformation(TokenUser) filled a TOKEN_USER at the start of `buf`; the SID
+    // it points to lives inside `buf`.
+    let user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+    let mut out = windows::core::PWSTR::null();
+    // SAFETY: valid SID pointer; `out` is LocalAlloc'ed by the API and freed below.
+    unsafe { ConvertSidToStringSidW(user.User.Sid, &mut out) }.ok()?;
+    // SAFETY: `out` is a NUL-terminated wide string from the API.
+    let s = unsafe { out.to_string() }.ok();
+    // SAFETY: frees the LocalAlloc'ed string exactly once.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(out.0.cast())));
+    }
+    s
+}
+
 // ───────────────────────────── handles & events ─────────────────────────────
 
 /// An owned kernel handle (`CloseHandle` on drop). Used for `system_handle` outputs (events,
@@ -425,6 +473,12 @@ mod tests {
         let name = exe.file_name().and_then(|n| n.to_str()).expect("name");
         assert!(process_running(name));
         assert!(!process_running("dockering-no-such-process-xyz.exe"));
+    }
+
+    #[test]
+    fn current_user_sid_is_a_sid() {
+        let sid = current_user_sid().expect("sid");
+        assert!(sid.starts_with("S-1-"), "{sid}");
     }
 
     #[test]

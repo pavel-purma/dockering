@@ -14,6 +14,8 @@
 #![deny(unsafe_code)]
 
 pub mod cli;
+// TEMPORARY: delete with src/cli_shim.rs when wip/wslc-cli is merged.
+mod cli_shim;
 #[allow(unsafe_code)]
 pub mod com;
 mod factory;

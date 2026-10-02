@@ -225,16 +225,69 @@ impl Com {
     }
 
     fn list_sessions(&self) -> EngineResult<Vec<(u32, Option<String>)>> {
-        let mut arr = CoTaskMemArray::<abi::WSLCSessionListEntry>::new();
-        let (p, n) = arr.out();
-        // SAFETY: verified slot 3; MIDL `size_is(, *Count)` out array freed by `arr`.
-        ffi::check(unsafe { self.manager.0.ListSessions(p, n) }).map_err(|e| com_err(e, None))?;
-        Ok(arr
-            .as_slice()
-            .iter()
-            .map(|e| (e.SessionId, fixed_wstr(&e.DisplayName)))
+        Ok(list_sessions_on(&self.manager.0)?
+            .into_iter()
+            .map(|s| (s.id, s.name))
             .collect())
     }
+}
+
+/// One `ListSessions` row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionEntry {
+    pub id: u32,
+    pub creator_pid: u32,
+    /// `None` when the server returned an unterminated name (self-check failure).
+    pub name: Option<String>,
+    pub sid: Option<String>,
+}
+
+fn list_sessions_on(mgr: &abi::IWSLCSessionManager) -> EngineResult<Vec<SessionEntry>> {
+    let mut arr = CoTaskMemArray::<abi::WSLCSessionListEntry>::new();
+    let (p, n) = arr.out();
+    // SAFETY: verified slot 3; MIDL `size_is(, *Count)` out array freed by `arr`.
+    ffi::check(unsafe { mgr.ListSessions(p, n) }).map_err(|e| com_err(e, None))?;
+    Ok(arr
+        .as_slice()
+        .iter()
+        .map(|e| SessionEntry {
+            id: e.SessionId,
+            creator_pid: e.CreatorPid,
+            name: fixed_wstr(&e.DisplayName),
+            sid: fixed_wstr(&e.Sid),
+        })
+        .collect())
+}
+
+/// Lists WSLC sessions over COM through the ABI module selected for `v` (ENG-109), plus the
+/// caller's default session name (`OpenSessionByName(NULL)` → `GetDisplayName`; opening a
+/// session does not boot its VM). `None` module → `Err` (caller uses the CLI).
+pub async fn list_sessions(v: WslVersion) -> EngineResult<(Vec<SessionEntry>, Option<String>)> {
+    if crate::com::abi::select(&v).is_none() {
+        return Err(EngineError::unreachable(format!(
+            "WSL {v} has no verified COM ABI"
+        )));
+    }
+    let pool = RpcPool::new(1);
+    pool.run(|| {
+        let mgr = Com::create_manager().map_err(|e| com_err(e, None))?;
+        let sessions = list_sessions_on(&mgr)?;
+        let mut out: Option<abi::IWSLCSession> = None;
+        // SAFETY: verified slot 5; null name = caller's default session.
+        let default = if unsafe { mgr.OpenSessionByName(PCWSTR::null(), &mut out) }.is_ok() {
+            out.and_then(|s| {
+                blanket(&s);
+                let mut name = CoTaskMemWStr::null();
+                // SAFETY: verified slot 1; LPWSTR freed by `name`.
+                unsafe { s.GetDisplayName(name.out()) }.ok().ok()?;
+                name.to_string_opt()
+            })
+        } else {
+            None
+        };
+        Ok((sessions, default))
+    })
+    .await
 }
 
 // ───────────────────────────── engine ─────────────────────────────

@@ -19,7 +19,7 @@ pub mod stream;
 pub mod win32;
 
 #[cfg(windows)]
-pub use engine::{SelfCheck, WslcComEngine};
+pub use engine::{SelfCheck, SessionEntry, WslcComEngine, list_sessions};
 
 /// See [`crate::init_process_com_security`].
 pub fn init_process_com_security() -> bool {
