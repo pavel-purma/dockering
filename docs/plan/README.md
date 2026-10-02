@@ -5,6 +5,24 @@ This is the roadmap from an empty repository to v1. **What** we build is defined
 Per-feature plans live in [`features/`](features/) and are produced by the
 `feature-planning` skill.
 
+## Status (2026-10-02)
+
+The v1 implementation is merged on `main`. Every feature spec is `implemented` except
+`macos-native-engine` (`deferred`). Gaps are listed per spec under *Known gaps (v1)*.
+
+| Milestone | Status | Notes |
+|---|---|---|
+| M0 Foundation + early spikes | done | Spikes S-1, S-2, S-5, S-8 done; S-3 done except `CreateContainer`; S-4 partial (§2) |
+| M1 Core + hub + Docker backend | done | |
+| M2 Shell, keyboard foundation, Containers list | done | |
+| M3 Container detail, logs | done | |
+| M4 Terminal | done | TRM-009 limited to host-`docker exec` transports |
+| M5 Stats & charts | done | |
+| M6 Images, volumes, networks | done | |
+| M7 WSL distros | done | |
+| M8 WSLC (COM + CLI) | done | `run_image` over COM returns 501 until `CreateContainer` is verified |
+| M9 Settings, polish, packaging | done, except release-only items | Open: signing/notarisation secrets in the `release` environment; CI runs on real runners (incl. the self-hosted `wsl` runner); the [release checklist](release-checklist.md) on 3 OSes; the keyboard-only walkthrough (KBD-090) on macOS, on Linux, and with a Czech layout |
+
 ## 0. Summary of key decisions
 
 | # | Decision | Why | ADR |

@@ -169,7 +169,7 @@ process, and supports TLS certificates.
   - no ABI module matches the version (newer WSL than we know);
   - `QueryInterface` for an internal IID returns `E_NOINTERFACE`. This is a hint only: IIDs are not guaranteed to change on ABI breaks;
   - the self-check fails;
-  - the user set Settings → Engines → WSLC transport = *CLI*. The options are *Auto* (default), *COM*, and *CLI*.
+  - the user chose transport *CLI* for the engine. The options are *Auto* (default), *COM*, and *CLI*. In v1 the choice is made in the *Add engine* dialog (ENG-105), and it's stored in `EngineEndpoint::Wslc.transport`. Discovered WSLC engines use *Auto*, and an existing engine's transport isn't editable.
 - The chosen transport and WSL version show in the engine tooltip and in Diagnostics.
 - **Safety.** Internal-ABI calls only ever run with a verified ABI module. An unverified vtable is never called, because a mismatched vtable would be undefined behaviour, not just an error. CI checks the vendored IDL against the WSL release tag (§5.7).
 

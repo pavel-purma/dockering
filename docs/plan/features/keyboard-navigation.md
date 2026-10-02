@@ -1,7 +1,7 @@
 # Plan: Keyboard navigation & shortcuts
 
 - **Slug:** `keyboard-navigation`
-- **Status:** draft
+- **Status:** in-progress <!-- tasks 1–15 done; 16 (KBD-090 walkthrough on macOS/Linux + Czech layout) is release-only; 15 partly done (KBD-092 Tab-walk covers Settings only) -->
 - **Spec:** [docs/spec/features/keyboard.md](../../spec/features/keyboard.md)
 - **Milestone:** cross-cutting. The foundation is in **M2**; each later milestone (M3–M9) ships its screens keyboard-complete.
 - **Requirement IDs:** KBD-001…010, 017…029, 030…039, 040…044, 050…053, 060…063, 070…075, 080…084, 090…093 (new) · SHL-010 (changed) · CON-034, CDT-082, LOG-009, TRM-012, STA-011, SET-070, NFR-042 (new)
@@ -137,3 +137,14 @@ Done (spec 60, DoD item 7).
 ## 10. Revision log
 - 2026-10-01: created (shortcut style and rebinding scope decided by the user)
 - 2026-10-02: spike S-8 done; added the `ListTable > DataTable` override technique, the KBD-085 twin-binding approach, and the terminal keystroke interceptor.
+- 2026-10-02: **complete pass** (`/feature-planning complete`). Status → `in-progress`, because two verification items are open.
+
+  | Task | Status | Notes |
+  |---|---|---|
+  | 1–14 | done | See the *Implementation status* table in the spec |
+  | 15 | partial | KBD-093 `a11y_every_action_bound_or_in_palette` done. KBD-092 Tab-walk covers Settings only (`a11y_tab_walk_reaches_all_interactive_settings`); other pages rely on keystroke tests. Follow-up: extend `tab_walk` to every page. |
+  | 16 | open (release) | KBD-090 walkthrough steps are in [release-checklist.md](../release-checklist.md) §2. Still due on macOS, on Linux, and with a Czech layout. |
+  | 17 | done | Reviewer passes per milestone merge |
+
+  Spec reconciled to what was built: four focus regions (KBD-005); `Mod+Shift+O` is the keyboard path for sorting, and column headers aren't Tab stops; port links open from the row cursor, so no `Mod+Enter` (KBD-043); Quit on Windows/Linux is palette-only (KBD-009/018). Known gaps: KBD-085 on Linux, KBD-074 untested, KBD-073 type-ahead unverified.
+  The test names in §8 shipped as planned, except `kbd_037_type_ahead_jumps` → `kbd_037_quick_find_jumps` and `kbd_007_dialog_restores_invoker_focus` → `kbd_071_escape_cancels_add_engine_and_restores_focus`. Per-page `a11y_tab_walk_*` exists only for `settings`.

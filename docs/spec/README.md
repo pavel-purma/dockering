@@ -23,18 +23,21 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 
 | Feature | File | Status |
 |---|---|---|
-| Engine connections & switching | [features/engines.md](features/engines.md) | in-progress |
-| Containers list & grouping | [features/containers.md](features/containers.md) | in-progress |
-| Container detail | [features/container-detail.md](features/container-detail.md) | in-progress |
-| Container logs | [features/container-logs.md](features/container-logs.md) | in-progress |
-| Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | in-progress |
-| Container stats & charts | [features/container-stats.md](features/container-stats.md) | in-progress |
-| Images | [features/images.md](features/images.md) | in-progress |
-| Volumes | [features/volumes.md](features/volumes.md) | in-progress |
-| Networks | [features/networks.md](features/networks.md) | in-progress |
-| Settings | [features/settings.md](features/settings.md) | in-progress |
-| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | in-progress |
+| Engine connections & switching | [features/engines.md](features/engines.md) | implemented |
+| Containers list & grouping | [features/containers.md](features/containers.md) | implemented |
+| Container detail | [features/container-detail.md](features/container-detail.md) | implemented |
+| Container logs | [features/container-logs.md](features/container-logs.md) | implemented |
+| Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | implemented |
+| Container stats & charts | [features/container-stats.md](features/container-stats.md) | implemented |
+| Images | [features/images.md](features/images.md) | implemented |
+| Volumes | [features/volumes.md](features/volumes.md) | implemented |
+| Networks | [features/networks.md](features/networks.md) | implemented |
+| Settings | [features/settings.md](features/settings.md) | implemented |
+| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open) |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
+
+Each implemented spec has a *Verification* table (requirement → tests) and a *Known gaps (v1)*
+section. Manual checks live in [`docs/plan/release-checklist.md`](../plan/release-checklist.md).
 
 ## Conventions
 
