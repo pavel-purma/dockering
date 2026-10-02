@@ -161,6 +161,8 @@ pub struct Adapter<D: ListDelegate> {
     loading: bool,
     /// Pending visible range to report (set during render, read by the owner).
     pending_visible: Option<Range<usize>>,
+    /// Painted bounds of the cursor row (anchors the keyboard row menu, KBD-036).
+    cursor_bounds: std::rc::Rc<std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>>,
 }
 
 impl<D: ListDelegate> Adapter<D> {
@@ -249,11 +251,16 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
             return div().into_any_element();
         };
         let selected = self.model.row_selected(row);
+        let is_cursor = col_ix == 0 && self.model.cursor_ix() == Some(row_ix);
+        let slot = self.cursor_bounds.clone();
         // Cells are rows of inline content, vertically centred (tags don't stretch).
         h_flex()
             .size_full()
             .items_center()
             .overflow_hidden()
+            .when(is_cursor, move |this| {
+                this.on_prepaint(move |b, _, _| slot.set(Some(b)))
+            })
             .child(
                 self.delegate
                     .render_cell(row, row_ix, col, selected, window, cx),
@@ -355,6 +362,7 @@ impl<D: ListDelegate> ListTable<D> {
             columns,
             loading: false,
             pending_visible: None,
+            cursor_bounds: Default::default(),
         };
         let table = cx.new(|cx| {
             TableState::new(adapter, window, cx)
@@ -860,10 +868,14 @@ impl<D: ListDelegate> ListTable<D> {
         let table_focus = self.table.focus_handle(cx);
         let table = self.table.clone();
         // Position: left edge of the table, at the cursor row (36 px rows + header).
-        let row_h = Size::Small.table_row_height();
-        let first = self.model(cx).visible.start;
-        let y = self.bounds.origin.y + row_h * (row_ix.saturating_sub(first) as f32 + 1.5);
-        let pos = gpui_kit::point(self.bounds.origin.x + px(56.), y);
+        // Anchor below the cursor row (its first cell's painted bounds), else the table top.
+        let pos = match self.table.read(cx).delegate().cursor_bounds.get() {
+            Some(b) => gpui_kit::point(b.origin.x + px(48.), b.origin.y + b.size.height),
+            None => gpui_kit::point(
+                self.bounds.origin.x + px(56.),
+                self.bounds.origin.y + px(40.),
+            ),
+        };
         self.key_menu = Some(KeyMenu::open(
             pos,
             table_focus,

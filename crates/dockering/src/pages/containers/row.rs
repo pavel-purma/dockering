@@ -495,17 +495,48 @@ impl ListDelegate for ContainersDelegate {
                 let pause_cap = self.caps.contains(Capabilities::PAUSE);
                 let tty = self.caps.contains(Capabilities::EXEC_TTY);
                 let has_port = c.ports.iter().any(|p| p.public.is_some());
+                use crate::actions::{container as k, list as l};
                 let mut m = if running || paused {
-                    menu.menu_with_disabled(s::ACTION_STOP, on(RowCommand::Stop), ro)
+                    hinted(
+                        menu,
+                        s::ACTION_STOP,
+                        on(RowCommand::Stop),
+                        &k::StartStop,
+                        ro,
+                    )
                 } else {
-                    menu.menu_with_disabled(s::ACTION_START, on(RowCommand::Start), ro)
+                    hinted(
+                        menu,
+                        s::ACTION_START,
+                        on(RowCommand::Start),
+                        &k::StartStop,
+                        ro,
+                    )
                 };
-                m = m.menu_with_disabled(s::ACTION_RESTART, on(RowCommand::Restart), ro);
+                m = hinted(
+                    m,
+                    s::ACTION_RESTART,
+                    on(RowCommand::Restart),
+                    &k::Restart,
+                    ro,
+                );
                 if pause_cap {
                     m = if paused {
-                        m.menu_with_disabled(s::ACTION_UNPAUSE, on(RowCommand::Unpause), ro)
+                        hinted(
+                            m,
+                            s::ACTION_UNPAUSE,
+                            on(RowCommand::Unpause),
+                            &k::PauseToggle,
+                            ro,
+                        )
                     } else {
-                        m.menu_with_disabled(s::ACTION_PAUSE, on(RowCommand::Pause), ro || !running)
+                        hinted(
+                            m,
+                            s::ACTION_PAUSE,
+                            on(RowCommand::Pause),
+                            &k::PauseToggle,
+                            ro || !running,
+                        )
                     };
                 }
                 m = m
@@ -514,20 +545,39 @@ impl ListDelegate for ContainersDelegate {
                         on(RowCommand::Kill),
                         ro || !(running || paused),
                     )
-                    .separator()
-                    .menu(s::ACTION_LOGS, on(RowCommand::Logs));
+                    .separator();
+                m = hinted(m, s::ACTION_LOGS, on(RowCommand::Logs), &k::Logs, false);
                 if tty {
-                    m = m.menu_with_disabled(
+                    m = hinted(
+                        m,
                         s::ACTION_TERMINAL,
                         on(RowCommand::Terminal),
+                        &k::Terminal,
                         !running,
                     );
                 }
-                m.menu(s::ACTION_INSPECT, on(RowCommand::Inspect))
-                    .menu_with_disabled(s::ACTION_OPEN_PORT, on(RowCommand::OpenPort), !has_port)
-                    .menu(s::COPY_ID, on(RowCommand::CopyId))
-                    .separator()
-                    .menu_with_disabled(s::ACTION_DELETE, on(RowCommand::Delete), ro)
+                m = hinted(
+                    m,
+                    s::ACTION_INSPECT,
+                    on(RowCommand::Inspect),
+                    &k::Inspect,
+                    false,
+                );
+                m = hinted(
+                    m,
+                    s::ACTION_OPEN_PORT,
+                    on(RowCommand::OpenPort),
+                    &k::OpenPort,
+                    !has_port,
+                );
+                m = hinted(m, s::COPY_ID, on(RowCommand::CopyId), &l::CopyId, false);
+                hinted(
+                    m.separator(),
+                    s::ACTION_DELETE,
+                    on(RowCommand::Delete),
+                    &l::Delete,
+                    ro,
+                )
             }
         }
     }
@@ -564,4 +614,31 @@ impl ListDelegate for ContainersDelegate {
     fn visible_rows_changed(&mut self, range: Range<usize>) {
         self.visible = range;
     }
+}
+
+/// A menu item that dispatches `action` (an `OnRow`) and shows the binding of the
+/// equivalent list command `hint` (KBD-036: shortcuts shown in the row menu).
+fn hinted(
+    menu: PopupMenu,
+    label: &'static str,
+    action: Box<dyn gpui_kit::Action>,
+    hint: &dyn gpui_kit::Action,
+    disabled: bool,
+) -> PopupMenu {
+    let keys = crate::keymap::hint_for(hint.name(), crate::keymap::ctx::LIST_KEYS);
+    menu.menu_element_with_disabled(action, disabled, move |_, cx| {
+        h_flex()
+            .w_full()
+            .gap_4()
+            .justify_between()
+            .child(label)
+            .when_some(keys.clone(), |this, k| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(k),
+                )
+            })
+    })
 }

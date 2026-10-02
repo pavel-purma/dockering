@@ -929,6 +929,15 @@ pub fn install(cx: &mut App) {
     cx.bind_keys(out);
 }
 
+/// Display hint for an action bound in `context` on this OS (menus whose items dispatch a
+/// wrapper action, KBD-010/036). Generated from the same table `install` uses.
+pub fn hint_for(action_name: &str, context: &str) -> Option<String> {
+    let os = Os::current();
+    bindings_for(os)
+        .find(|b| b.context == Some(context) && (b.action)().name() == action_name)
+        .map(|b| display_keys(&resolve_keys(b.keys, os), os))
+}
+
 /// Bindings in display form for the shortcut reference (KBD-022), current OS only.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceRow {
