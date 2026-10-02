@@ -275,3 +275,10 @@ pub fn should_confirm_stopped_delete(cx: &App) -> bool {
         .general
         .confirm_delete_stopped
 }
+
+impl ConfirmView {
+    /// What the dialog shows (tests: items, reclaimable size).
+    pub fn spec(&self) -> &ConfirmSpec {
+        &self.spec
+    }
+}

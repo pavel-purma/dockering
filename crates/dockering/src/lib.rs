@@ -32,3 +32,5 @@ pub mod ui;
 pub mod testing;
 #[cfg(test)]
 mod view_tests;
+#[cfg(test)]
+mod view_tests_m6;

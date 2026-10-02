@@ -1,15 +1,26 @@
-//! TODO(phase-2): Volumes list page (`docs/spec/features/volumes.md`, VOL-*).
-//!
-//! Build it like `pages/containers`: a `ListTable<…Delegate>` over
-//! `EngineStore.volumes` (`Resource<Vec<…>>`), a toolbar (search, filters), the four
-//! states (`ui::states`), confirmations via `ui::confirm`, notifications via `ui::notify`,
-//! single-letter actions bound in `keymap.rs` (`ListTable` context), and `PageView`.
-
-use gpui_kit::{AppContext, Entity, Window};
-
-use crate::pages::placeholder::PlaceholderPage;
-use crate::strings as s;
-
-pub fn new(_window: &mut Window, cx: &mut gpui_kit::App) -> Entity<PlaceholderPage> {
-    cx.new(|cx| PlaceholderPage::new(s::PAGE_VOLUMES, vec![], s::COMING_SOON, cx))
+//! Stub (replaced below in this milestone).
+use crate::state::EngineStore;
+use crate::ui::page::{PageView, RoutedPage};
+use gpui_kit::prelude::*;
+use gpui_kit::{App, Context, Entity, FocusHandle, IntoElement, Render, Window, div};
+pub struct VolumesPage {
+    focus: FocusHandle,
+}
+impl VolumesPage {
+    pub fn new(_store: Entity<EngineStore>, _w: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            focus: cx.focus_handle().tab_stop(true),
+        }
+    }
+}
+impl PageView for VolumesPage {
+    fn primary_focus(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+impl RoutedPage for VolumesPage {}
+impl Render for VolumesPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().id("stub").track_focus(&self.focus)
+    }
 }

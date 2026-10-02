@@ -1,24 +1,33 @@
-//! TODO(phase-2): Volume detail page (`docs/spec/features/volumes.md`, VOL-*). The route
-//! `Route::VolumeDetail { name, tab }` already works (palette "Go to", back/forward); this
-//! placeholder shows a breadcrumb back to the list.
-
-use gpui_kit::{AppContext, Entity, SharedString, Window};
-
-use crate::nav::Route;
-use crate::pages::placeholder::PlaceholderPage;
-use crate::strings as s;
-
-pub fn new(name: &str, _window: &mut Window, cx: &mut gpui_kit::App) -> Entity<PlaceholderPage> {
-    let label: SharedString = name.to_owned().into();
-    cx.new(|cx| {
-        PlaceholderPage::new(
-            label.clone(),
-            vec![
-                (s::PAGE_VOLUMES.into(), Some(Route::Volumes)),
-                (label.clone(), None),
-            ],
-            s::COMING_SOON,
-            cx,
-        )
-    })
+//! Stub (replaced below in this milestone).
+use crate::nav::VolumeTab;
+use crate::state::EngineStore;
+use crate::ui::page::{PageView, RoutedPage};
+use gpui_kit::prelude::*;
+use gpui_kit::{App, Context, Entity, FocusHandle, IntoElement, Render, Window, div};
+pub struct VolumeDetailPage {
+    focus: FocusHandle,
+}
+impl VolumeDetailPage {
+    pub fn new(
+        _id: String,
+        _tab: VolumeTab,
+        _store: Entity<EngineStore>,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            focus: cx.focus_handle().tab_stop(true),
+        }
+    }
+}
+impl PageView for VolumeDetailPage {
+    fn primary_focus(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+impl RoutedPage for VolumeDetailPage {}
+impl Render for VolumeDetailPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().id("stub").track_focus(&self.focus)
+    }
 }

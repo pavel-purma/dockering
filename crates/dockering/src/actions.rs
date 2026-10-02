@@ -315,6 +315,41 @@ pub mod palette {
     );
 }
 
+// ── M6: Images, Volumes, Networks (IMG-*, VOL-*, NET-*) ─────────────────────────────────────
+pub mod res {
+    use gpui_kit::{Action, SharedString};
+
+    use crate::nav::Route;
+
+    gpui_kit::actions!(
+        res,
+        [
+            /// Open the *Tag image* dialog (IMG-011).
+            TagImage,
+            /// Copy the first repo digest (IMG-011).
+            CopyDigest,
+            /// IMG-003 overflow.
+            PruneDangling,
+            PruneUnused,
+        ]
+    );
+
+    /// Replace the current route without a history entry (detail tab switches).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = res, no_json)]
+    pub struct ReplaceRoute {
+        pub route: Route,
+    }
+
+    /// The *Run* cell button of an image row: moves the cursor to `row`, then runs the same
+    /// handler as `U` (`image::Run`).
+    #[derive(Clone, PartialEq, Debug, Action)]
+    #[action(namespace = res, no_json)]
+    pub struct RunRow {
+        pub row: SharedString,
+    }
+}
+
 /// Every action namespace this crate defines (KBD-093 coverage test).
 pub const NAMESPACES: &[&str] = &[
     "dk::",
@@ -330,6 +365,7 @@ pub const NAMESPACES: &[&str] = &[
     "form::",
     "switcher::",
     "palette::",
+    "res::",
 ];
 
 pub use list::{OnRow, RowCommand, SetFilter, SetGroupBy, SortByColumn};

@@ -244,3 +244,56 @@ impl Harness {
         cx.run_until_parked();
     }
 }
+
+// ── M6 helpers (Images, Volumes, Networks) ──────────────────────────────────────────────
+
+impl Harness {
+    /// The mounted M6 page of type `V`, if the current page is one.
+    pub fn dyn_page<V: 'static>(&self, cx: &mut TestAppContext) -> Option<Entity<V>> {
+        self.read(cx, |s, _, _| match s.page() {
+            crate::shell::ShellPage::Dyn(p) => p.downcast::<V>(),
+            _ => None,
+        })
+    }
+
+    /// Navigates (as a palette/sidebar would) and waits until a `V` page is mounted.
+    pub fn goto<V: 'static>(&self, cx: &mut TestAppContext, route: crate::nav::Route) -> Entity<V> {
+        self.update(cx, |_, window, cx| {
+            window.dispatch_action(Box::new(crate::actions::Navigate { route }), cx)
+        });
+        self.wait_until(cx, "page mounted", |_, cx| {
+            match self.shell.read(cx).page() {
+                crate::shell::ShellPage::Dyn(p) => p.downcast::<V>().is_some(),
+                _ => false,
+            }
+        });
+        self.dyn_page::<V>(cx).expect("page")
+    }
+
+    /// Focuses `handle` and runs pending work.
+    pub fn focus(&self, cx: &mut TestAppContext, handle: &gpui_kit::FocusHandle) {
+        let h = handle.clone();
+        cx.update_window(self.any_window(), |_, window, cx| window.focus(&h, cx))
+            .expect("window");
+        self.draw(cx);
+    }
+
+    pub fn has_dialog(&self, cx: &mut TestAppContext) -> bool {
+        use gpui_kit::component::WindowExt;
+        cx.update_window(self.any_window(), |_, window, cx| {
+            window.has_active_dialog(cx)
+        })
+        .expect("window")
+    }
+
+    pub fn is_focused(&self, cx: &mut TestAppContext, handle: &gpui_kit::FocusHandle) -> bool {
+        let h = handle.clone();
+        cx.update_window(self.any_window(), |_, window, _| h.is_focused(window))
+            .expect("window")
+    }
+}
+
+/// Image fixture whose id matches `fixtures::container`'s `image_id` (so it is "in use").
+pub fn in_use_image(reference: &str) -> dk_core::ImageSummary {
+    dk_core::fake::fixtures::image(reference, "nginx:1.27")
+}

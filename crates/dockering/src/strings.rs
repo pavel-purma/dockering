@@ -321,3 +321,287 @@ pub const MENU_HELP: &str = "Help";
 
 // ── placeholders (phase 2) ──────────────────────────────────────────────────────────────
 pub const COMING_SOON: &str = "This page lands in a later milestone.";
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// M6: Images, Volumes, Networks (IMG-*, VOL-*, NET-*). Self-contained section.
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// ── shared resource UI ──────────────────────────────────────────────────────────────────
+pub const NONE_TAG: &str = "<none>";
+pub const DASH: &str = "—";
+pub const IN_USE: &str = "In use";
+pub const FILTER_IN_USE: &str = "In use";
+pub const FILTER_UNUSED: &str = "Unused";
+pub const FILTER_DANGLING: &str = "Dangling";
+pub const COL_TAG: &str = "Tag";
+pub const COL_IMAGE_ID: &str = "Image ID";
+pub const COL_SIZE: &str = "Size";
+pub const COL_DRIVER: &str = "Driver";
+pub const COL_SCOPE: &str = "Scope";
+pub const COL_SUBNETS: &str = "Subnet(s)";
+pub const COL_GATEWAY: &str = "Gateway";
+pub const COL_CONTAINERS: &str = "Containers";
+pub const COL_COMPOSE: &str = "Compose project";
+pub const COL_CREATED_BY: &str = "Created by";
+pub const COL_COMMENT: &str = "Comment";
+pub const COL_DESTINATION: &str = "Destination";
+pub const COL_MODE: &str = "Mode";
+pub const COL_IPV4: &str = "IPv4";
+pub const COL_IPV6: &str = "IPv6";
+pub const COL_MAC: &str = "MAC";
+pub const READ_WRITE: &str = "RW";
+pub const READ_ONLY_SHORT: &str = "RO";
+pub const COPY: &str = "Copy";
+pub const COPY_NAME: &str = "Copy name";
+pub const COPY_DIGEST: &str = "Copy digest";
+pub const YES: &str = "Yes";
+pub const NO: &str = "No";
+pub const DETAIL_LOAD_FAILED: &str = "Couldn't load the details";
+pub const TAB_OVERVIEW: &str = "Overview";
+pub const TAB_LAYERS: &str = "Layers";
+pub const TAB_USED_BY: &str = "Used by";
+pub const TAB_INSPECT: &str = "Inspect";
+pub const TAB_CONTAINERS: &str = "Containers";
+pub const NOT_USED: &str = "No containers use this.";
+pub const NO_ATTACHED: &str = "No containers are attached.";
+pub const ADD_ROW: &str = "Add row";
+pub const REMOVE_ROW: &str = "Remove row";
+pub fn in_use_by(n: usize) -> String {
+    if n == 1 {
+        "In use by 1 container".to_owned()
+    } else {
+        format!("In use by {n} containers")
+    }
+}
+pub fn resource_gone(kind: &str) -> String {
+    format!("This {kind} no longer exists")
+}
+pub fn deleted_n(kind: &str, n: usize) -> String {
+    if n == 1 {
+        format!("Deleted 1 {kind}")
+    } else {
+        format!("Deleted {n} {kind}s")
+    }
+}
+pub fn delete_failed(kind: &str, name: &str) -> String {
+    format!("Couldn't delete {kind} {name}")
+}
+pub fn delete_partial(kind: &str, ok: usize, failed: usize) -> String {
+    format!("Deleted {ok} {kind}s, {failed} failed")
+}
+pub fn pruned_kind(kind: &str, n: usize, size: Option<&str>) -> String {
+    match size {
+        Some(size) => format!("Pruned {n} {kind}s, reclaimed {size}"),
+        None => format!("Pruned {n} {kind}s"),
+    }
+}
+pub fn total_count(kind: &str, n: usize) -> String {
+    format!("{n} {kind}{}", if n == 1 { "" } else { "s" })
+}
+pub fn total_count_size(kind: &str, n: usize, size: &str) -> String {
+    format!("{} · {size}", total_count(kind, n))
+}
+
+// ── images ──────────────────────────────────────────────────────────────────────────────
+pub const IMAGE: &str = "image";
+pub const PULL: &str = "Pull";
+pub const PULL_IMAGE: &str = "Pull image";
+pub const PULL_IMAGE_TITLE: &str = "Pull an image";
+pub const PULL_REFERENCE: &str = "Image reference";
+pub const PULL_REFERENCE_HINT: &str = "For example nginx:latest or ghcr.io/owner/app:1.0";
+pub const PULL_CANCEL: &str = "Cancel pull";
+pub const PULL_CANCELLED: &str = "Pull cancelled";
+pub const RUN: &str = "Run";
+pub const RUN_IMAGE: &str = "Run…";
+pub const TAG_IMAGE: &str = "Tag…";
+pub const TAG_IMAGE_TITLE: &str = "Tag image";
+pub const TAG: &str = "Tag";
+pub const REPOSITORY: &str = "Repository";
+pub const PRUNE_DANGLING: &str = "Prune dangling images";
+pub const PRUNE_UNUSED_IMAGES: &str = "Prune unused images";
+pub const NO_IMAGES: &str = "No images yet";
+pub const NO_IMAGES_BODY: &str = "Pull an image to get started.";
+pub const NO_MATCHING_IMAGES: &str = "No images match the filter";
+pub const IMAGE_IN_USE_TITLE: &str = "Image is in use";
+pub const IMAGE_IN_USE_BODY: &str = "These containers use the image. Force delete removes it anyway; the containers keep running from the untagged image.";
+pub const FORCE: &str = "Force";
+pub const NO_DIGEST: &str = "This image has no digest (built locally or never pushed)";
+pub const PRUNE_DANGLING_BODY: &str = "Untagged images that no container uses will be removed.";
+pub const PRUNE_UNUSED_BODY: &str =
+    "Images that no container uses will be removed, including tagged ones.";
+pub const ARCHITECTURE: &str = "Architecture";
+pub const OS: &str = "OS";
+pub const VARIANT: &str = "Variant";
+pub const AUTHOR: &str = "Author";
+pub const ENTRYPOINT: &str = "Entrypoint";
+pub const CMD: &str = "Cmd";
+pub const ENV: &str = "Environment";
+pub const EXPOSED_PORTS: &str = "Exposed ports";
+pub const WORKDIR: &str = "Working dir";
+pub const USER: &str = "User";
+pub const VOLUMES_LABEL: &str = "Volumes";
+pub const LABELS: &str = "Labels";
+pub const DIGESTS: &str = "Digests";
+pub const TAGS: &str = "Tags";
+pub const ID: &str = "ID";
+pub const CREATED: &str = "Created";
+pub const SIZE: &str = "Size";
+pub const NO_HISTORY: &str = "Layer history isn't available for this engine.";
+pub fn confirm_delete_images(n: usize) -> String {
+    if n == 1 {
+        "Delete image?".to_owned()
+    } else {
+        format!("Delete {n} images?")
+    }
+}
+pub fn confirm_prune_images(n: usize) -> String {
+    if n == 1 {
+        "Prune 1 image?".to_owned()
+    } else {
+        format!("Prune {n} images?")
+    }
+}
+pub fn pulling(reference: &str) -> String {
+    format!("Pulling {reference}")
+}
+pub fn pulled(reference: &str) -> String {
+    format!("Pulled {reference}")
+}
+pub fn pull_failed(reference: &str) -> String {
+    format!("Couldn't pull {reference}")
+}
+pub fn run_title(reference: &str) -> String {
+    format!("Run {reference}")
+}
+pub fn tagged(reference: &str) -> String {
+    format!("Tagged as {reference}")
+}
+pub fn layer_status(id: &str, status: &str) -> String {
+    format!("{id}: {status}")
+}
+
+// ── run dialog (IMG-005) ────────────────────────────────────────────────────────────────
+pub const CONTAINER_NAME: &str = "Container name";
+pub const OPTIONAL_RANDOM: &str = "Optional; a random name is used when empty";
+pub const PORTS: &str = "Ports";
+pub const PORT_HOST: &str = "Host port";
+pub const PORT_CONTAINER: &str = "Container port[/proto]";
+pub const ADD_PORT: &str = "Add port";
+pub const ENV_VARS: &str = "Environment variables";
+pub const ENV_KEY: &str = "Key";
+pub const ENV_VALUE: &str = "Value";
+pub const ADD_ENV: &str = "Add variable";
+pub const MOUNTS: &str = "Volumes";
+pub const MOUNT_SOURCE: &str = "Volume name or host path";
+pub const MOUNT_TARGET: &str = "Container path";
+pub const ADD_MOUNT: &str = "Add volume";
+pub const READ_ONLY: &str = "Read-only";
+pub const REMOVE_WHEN_STOPPED: &str = "Remove when stopped";
+pub const START: &str = "Start";
+pub const ERR_NAME: &str = "Use letters, digits, '_', '.' or '-', starting with a letter or digit.";
+pub const ERR_PORT: &str = "Ports are numbers from 1 to 65535.";
+pub const ERR_PROTO: &str = "The protocol must be tcp, udp or sctp.";
+pub const ERR_CONTAINER_PORT: &str = "The container port is required.";
+pub const ERR_ENV_KEY: &str = "Keys can't be empty or contain '=' or spaces.";
+pub const ERR_MOUNT_TARGET: &str = "The container path must be absolute (start with /).";
+pub const ERR_MOUNT_SOURCE: &str = "Enter a volume name or an absolute host path.";
+pub const ERR_IMAGE_REF: &str = "Not a valid image reference, for example nginx:latest.";
+pub const ERR_REQUIRED: &str = "Required.";
+pub const ERR_DRIVER: &str = "Not a valid driver name.";
+pub fn run_failed(reference: &str) -> String {
+    format!("Couldn't run {reference}")
+}
+
+// ── volumes ─────────────────────────────────────────────────────────────────────────────
+pub const VOLUME: &str = "volume";
+pub const CREATE_VOLUME: &str = "Create volume";
+pub const CREATE_VOLUME_TITLE: &str = "Create a volume";
+pub const CREATE: &str = "Create";
+pub const DRIVER: &str = "Driver";
+pub const DRIVER_OPTIONS: &str = "Driver options";
+pub const ADD_OPTION: &str = "Add option";
+pub const ADD_LABEL: &str = "Add label";
+pub const PRUNE_UNUSED_VOLUMES: &str = "Prune unused volumes";
+pub const PRUNE_VOLUMES_BODY: &str =
+    "Volumes that no container uses will be removed together with their data.";
+pub const NO_VOLUMES: &str = "No volumes yet";
+pub const NO_VOLUMES_BODY: &str =
+    "Volumes keep container data. Create one, or run a container that uses one.";
+pub const NO_MATCHING_VOLUMES: &str = "No volumes match the filter";
+pub const VOLUME_IN_USE_TITLE: &str = "Volume is in use";
+pub const VOLUME_IN_USE_BODY: &str =
+    "Remove these containers first; a volume that a container uses can't be deleted.";
+pub const MOUNTPOINT: &str = "Mountpoint";
+pub const OPTIONS: &str = "Options";
+pub const STATUS: &str = "Status";
+pub const NAME: &str = "Name";
+pub const CONFIRM_DELETE_VOLUMES_BODY: &str = "The data in the volume is deleted permanently.";
+pub fn confirm_delete_volumes(n: usize) -> String {
+    if n == 1 {
+        "Delete volume?".to_owned()
+    } else {
+        format!("Delete {n} volumes?")
+    }
+}
+pub fn confirm_prune_volumes(n: usize) -> String {
+    if n == 1 {
+        "Prune 1 volume?".to_owned()
+    } else {
+        format!("Prune {n} volumes?")
+    }
+}
+pub fn created_volume(name: &str) -> String {
+    format!("Created volume {name}")
+}
+pub fn create_volume_failed(name: &str) -> String {
+    if name.is_empty() {
+        "Couldn't create the volume".to_owned()
+    } else {
+        format!("Couldn't create volume {name}")
+    }
+}
+
+// ── networks ────────────────────────────────────────────────────────────────────────────
+pub const NETWORK: &str = "network";
+pub const PRUNE_UNUSED_NETWORKS: &str = "Prune unused networks";
+pub const PRUNE_NETWORKS_BODY: &str =
+    "Custom networks that no container is attached to will be removed.";
+pub const NO_NETWORKS: &str = "No networks";
+pub const NO_NETWORKS_BODY: &str = "Networks appear here when the engine or Compose creates them.";
+pub const NO_MATCHING_NETWORKS: &str = "No networks match the search";
+pub const BUILTIN_NETWORK: &str = "Built-in networks can't be deleted";
+pub const NETWORK_MGMT_UNSUPPORTED: &str = "This engine doesn't support managing networks";
+pub const INTERNAL: &str = "Internal";
+pub const ATTACHABLE: &str = "Attachable";
+pub const IPV6: &str = "IPv6";
+pub const IPAM: &str = "IPAM config";
+pub const SUBNET: &str = "Subnet";
+pub const GATEWAY: &str = "Gateway";
+pub const IP_RANGE: &str = "IP range";
+pub fn confirm_delete_networks(n: usize) -> String {
+    if n == 1 {
+        "Delete network?".to_owned()
+    } else {
+        format!("Delete {n} networks?")
+    }
+}
+pub fn confirm_prune_networks(n: usize) -> String {
+    if n == 1 {
+        "Prune 1 network?".to_owned()
+    } else {
+        format!("Prune {n} networks?")
+    }
+}
+
+// ── palette (M6) ────────────────────────────────────────────────────────────────────────
+pub const CMD_PULL_IMAGE: &str = "Pull image…";
+pub const CMD_RUN_IMAGE: &str = "Run image…";
+pub const CMD_TAG_IMAGE: &str = "Tag image…";
+pub const CMD_COPY_DIGEST: &str = "Copy image digest";
+pub const CMD_PRUNE_DANGLING: &str = "Prune dangling images";
+pub const CMD_PRUNE_UNUSED_IMAGES: &str = "Prune unused images";
+pub const CMD_NEW_VOLUME: &str = "New volume…";
+pub const CMD_PRUNE_VOLUMES: &str = "Prune unused volumes";
+pub const CMD_PRUNE_NETWORKS: &str = "Prune unused networks";
+pub const CMD_DELETE_RESOURCE: &str = "Delete";
+pub const CMD_COPY_RESOURCE_ID: &str = "Copy id";
