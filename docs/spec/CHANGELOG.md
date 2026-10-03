@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · ci · `ci.yml` runs only on demand (`workflow_dispatch`), not on push to `main` or on pull requests. Packaging runs on every manual run.
 - 2026-10-03 · ui · Content groups (detail sections, settings groups) drop the `GroupBox` border: a title plus a rule to the right edge (`ui::section`, spec 30 §4); inner tables/lists keep their border.
 - 2026-10-03 · ui · SHL-005: select-all checkbox in the table header (Containers, Images, Volumes); the selection actions show from one checked row and act on the checked rows; row checkboxes respond to mouse clicks without focusing the table first (were dropped when the table wasn't focused); a small gap above the table. Tests `shl_005_*`.
 - 2026-10-03 · ui · Page header second row: search on the left; summary counts then the page `⋮` on the right. While 2+ rows are selected the selection actions take the summary's place (SHL-005, spec 30 §1). Test `shl_005_selection_actions_replace_summary`.
