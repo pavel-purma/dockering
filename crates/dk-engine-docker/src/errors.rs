@@ -125,7 +125,12 @@ pub(crate) fn map_err(e: BollardError, ctx: &ErrCtx, nf: NotFoundCtx<'_>) -> Eng
             hint: Some(HINT_TLS.to_owned()),
         },
         other => {
-            if let Some(io) = find_io_error(&other) {
+            // `IOError` is `#[error(transparent)]`: its `source()` skips the wrapped error.
+            let io = match &other {
+                BollardError::IOError { err } => Some(err),
+                _ => find_io_error(&other),
+            };
+            if let Some(io) = io {
                 let kind = io.kind();
                 let reason = match io.raw_os_error() {
                     // ERROR_PIPE_BUSY
