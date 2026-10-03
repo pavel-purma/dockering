@@ -523,7 +523,7 @@ impl ImageDetailPage {
                             (
                                 route.clone(),
                                 vec![
-                                    route_link(("used-by", ix), c.name.clone(), route),
+                                    route_link(("used-by", ix), c.name.clone(), route, cx),
                                     crate::ui::status_chip::container_chip(c.state, c.exit_code)
                                         .into_any_element(),
                                     div().text_xs().child(c.image.clone()).into_any_element(),
@@ -602,10 +602,13 @@ impl Render for ImageDetailPage {
             .on_action(cx.listener(Self::on_copy_id))
             .on_action(cx.listener(Self::on_copy_digest))
             .on_action(cx.listener(Self::on_delete))
-            .child(breadcrumb(vec![
-                Crumb::link(s::PAGE_IMAGES, Route::Images),
-                Crumb::here(title.clone()),
-            ]))
+            .child(breadcrumb(
+                vec![
+                    Crumb::link(s::PAGE_IMAGES, Route::Images),
+                    Crumb::here(title.clone()),
+                ],
+                cx,
+            ))
             .child(header(
                 &self.header_focus,
                 title,
@@ -627,14 +630,23 @@ impl Render for ImageDetailPage {
                         Some(IconName::Play),
                         Box::new(image::Run),
                         ro,
+                        &self.header_focus,
                     ),
-                    header_action("img-tag", s::TAG_IMAGE, None, Box::new(TagImage), ro),
+                    header_action(
+                        "img-tag",
+                        s::TAG_IMAGE,
+                        None,
+                        Box::new(TagImage),
+                        ro,
+                        &self.header_focus,
+                    ),
                     header_action(
                         "img-copy-id",
                         s::COPY_ID,
                         Some(IconName::Copy),
                         Box::new(list::CopyId),
                         false,
+                        &self.header_focus,
                     ),
                     header_action(
                         "img-copy-digest",
@@ -642,8 +654,16 @@ impl Render for ImageDetailPage {
                         None,
                         Box::new(CopyDigest),
                         gone,
+                        &self.header_focus,
                     ),
-                    header_action("img-delete", s::DELETE, None, Box::new(list::Delete), ro),
+                    header_action(
+                        "img-delete",
+                        s::DELETE,
+                        None,
+                        Box::new(list::Delete),
+                        ro,
+                        &self.header_focus,
+                    ),
                 ],
                 cx,
             ))

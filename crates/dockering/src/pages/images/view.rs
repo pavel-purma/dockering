@@ -700,7 +700,7 @@ impl ImagesPage {
             controls,
             &self.search,
             s::total_count_size(s::IMAGE, count, &format_size(size)),
-            chrome::selection_actions(selected, Vec::new(), ro, cx),
+            chrome::selection_actions(selected, Vec::new(), ro, &self.overflow_focus, cx),
             overflow,
             cx,
         )

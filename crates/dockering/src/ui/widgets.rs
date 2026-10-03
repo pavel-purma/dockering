@@ -15,6 +15,7 @@ use time::OffsetDateTime;
 use crate::actions::{CopyText, OpenUrl};
 use crate::state::Ticker;
 use crate::strings as s;
+use crate::ui::dispatch;
 
 /// A titled group of content without a surrounding border (spec 30 §4): the title, then a
 /// hairline that runs to the right edge, then the content. The content (a table, a list)
@@ -45,9 +46,12 @@ pub fn section(title: impl Into<SharedString>, body: impl IntoElement, cx: &App)
 /// `abcdef123456` + copy button (SHL-008). The button dispatches [`CopyText`].
 pub fn copy_id(id_prefix: impl Into<ElementId>, full_id: &str, cx: &App) -> impl IntoElement {
     let text: SharedString = full_id.to_owned().into();
+    let anchor = dispatch::DispatchAnchor::new(cx);
     h_flex()
+        .relative()
         .gap_1()
         .items_center()
+        .child(anchor.element())
         .child(
             div()
                 .font_family(cx.theme().mono_font_family.clone())
@@ -60,10 +64,10 @@ pub fn copy_id(id_prefix: impl Into<ElementId>, full_id: &str, cx: &App) -> impl
                 .xsmall()
                 .icon(IconName::Copy)
                 .tooltip(s::COPY_ID)
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    window.dispatch_action(Box::new(CopyText { text: text.clone() }), cx)
-                }),
+                .on_click(dispatch::on_click_stop(
+                    anchor.handle(),
+                    Box::new(CopyText { text }),
+                )),
         )
 }
 
@@ -90,16 +94,15 @@ pub fn port_link(id: impl Into<ElementId>, p: &PortMapping, cx: &App) -> gpui_ki
     match port_url(p) {
         Some(url) => {
             let url: SharedString = url.into();
-            Button::new(id)
-                .link()
-                .xsmall()
-                .label(format!("{label} ↗"))
-                .tooltip(url.clone())
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    window.dispatch_action(Box::new(OpenUrl { url: url.clone() }), cx)
-                })
-                .into_any_element()
+            dispatch::anchored(cx, |origin| {
+                Button::new(id)
+                    .link()
+                    .xsmall()
+                    .label(format!("{label} ↗"))
+                    .tooltip(url.clone())
+                    .on_click(dispatch::on_click_stop(origin, Box::new(OpenUrl { url })))
+            })
+            .into_any_element()
         }
         None => div()
             .text_xs()

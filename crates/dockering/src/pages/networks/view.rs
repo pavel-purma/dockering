@@ -461,7 +461,13 @@ impl NetworksPage {
             [],
             &self.search,
             s::total_count(s::NETWORK, count),
-            chrome::selection_actions(selected, Vec::new(), delete_disabled, cx),
+            chrome::selection_actions(
+                selected,
+                Vec::new(),
+                delete_disabled,
+                &self.overflow_focus,
+                cx,
+            ),
             overflow,
             cx,
         )

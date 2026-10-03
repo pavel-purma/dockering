@@ -42,6 +42,7 @@ use crate::actions::{logs, logs_nav};
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::notify;
 
 /// Flush cadence (LOG-007).
@@ -702,6 +703,8 @@ impl LogsView {
         let has_query = !self.query.is_empty();
         let counter = has_query
             .then(|| s::logs_matches(self.current_match.map_or(0, |m| m + 1), self.matches.len()));
+        // The lines view's focus node is inside this view (KBD-002 click dispatch).
+        let origin = self.focus.clone();
         let btn = |id: &'static str,
                    icon: IconName,
                    tip: &'static str,
@@ -712,7 +715,7 @@ impl LogsView {
                 .small()
                 .icon(icon)
                 .tooltip_with_action(tip, action.as_ref(), Some(ctx::LOGS))
-                .on_click(move |_, w, cx| w.dispatch_action(a.boxed_clone(), cx))
+                .on_click(dispatch::on_click(&origin, a))
         };
         let toggle =
             |id: &'static str, label: &'static str, on: bool, action: Box<dyn gpui_kit::Action>| {
@@ -723,7 +726,7 @@ impl LogsView {
                     .label(label)
                     .selected(on)
                     .tooltip_with_action(label, action.as_ref(), Some(ctx::LOGS))
-                    .on_click(move |_, w, cx| w.dispatch_action(a.boxed_clone(), cx))
+                    .on_click(dispatch::on_click(&origin, a))
             };
         h_flex()
             .id("logs-toolbar")
@@ -1071,7 +1074,7 @@ impl Render for LogsView {
                 .icon(IconName::ArrowDown)
                 .label(s::logs_jump(self.unseen))
                 .tooltip_with_action(s::LOGS_FOLLOW, &logs::Bottom, Some(ctx::LOGS))
-                .on_click(|_, w, cx| w.dispatch_action(Box::new(logs::Bottom), cx))
+                .on_click(dispatch::on_click(&self.focus, Box::new(logs::Bottom)))
         });
         let empty = self.lines.is_empty();
         let connecting = self.stream_state == StreamState::Connecting;

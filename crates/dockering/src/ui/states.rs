@@ -8,6 +8,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{Action, AnyElement, App, ElementId, IntoElement, SharedString, div, px};
 
 use crate::strings as s;
+use crate::ui::dispatch::{self, DispatchAnchor};
 
 /// Empty state with an icon, title, description, and an optional CTA that dispatches
 /// `action` (CON-032).
@@ -20,6 +21,7 @@ pub fn empty_state(
 ) -> AnyElement {
     v_flex()
         .id("empty-state")
+        .relative()
         .size_full()
         .items_center()
         .justify_center()
@@ -43,13 +45,12 @@ pub fn empty_state(
                 .child(description.into()),
         )
         .when_some(cta, |this, (label, action)| {
-            this.child(
+            let anchor = DispatchAnchor::new(cx);
+            this.child(anchor.element()).child(
                 Button::new("empty-cta")
                     .primary()
                     .label(label)
-                    .on_click(move |_, window, cx| {
-                        window.dispatch_action(action.boxed_clone(), cx)
-                    }),
+                    .on_click(dispatch::on_click(anchor.handle(), action)),
             )
         })
         .into_any_element()
@@ -64,8 +65,11 @@ pub fn error_panel(
     cx: &App,
 ) -> AnyElement {
     let hint = error.hint().map(|h| SharedString::from(h.to_owned()));
+    let anchor = DispatchAnchor::new(cx);
     v_flex()
         .id(id)
+        .relative()
+        .child(anchor.element())
         .size_full()
         .items_center()
         .justify_center()
@@ -96,7 +100,7 @@ pub fn error_panel(
             Button::new("retry")
                 .label(s::RETRY)
                 .icon(IconName::RefreshCw)
-                .on_click(move |_, window, cx| window.dispatch_action(retry.boxed_clone(), cx)),
+                .on_click(dispatch::on_click(anchor.handle(), retry)),
         )
         .into_any_element()
 }

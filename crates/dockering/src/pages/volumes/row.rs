@@ -151,6 +151,7 @@ impl ListDelegate for VolumesDelegate {
                     .child(row_menu_button(
                         ("more", row_ix),
                         on_row(&key, RowCommand::ContextMenu),
+                        cx,
                     ))
                     .into_any_element()
             }

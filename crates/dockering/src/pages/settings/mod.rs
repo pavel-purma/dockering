@@ -609,15 +609,13 @@ impl SettingsPage {
     }
 }
 
-/// Click handler that dispatches `action` from the page's own root node, so it
-/// reaches the page's and the shell's handlers even when focus is elsewhere: GPUI Kit buttons
-/// don't take focus on mouse down, and `Window::dispatch_action` starts at the focused node.
+/// Click handler that dispatches `action` from the page's own root node (see
+/// [`crate::ui::dispatch`]).
 pub(crate) fn dispatch_here(
     page: &FocusHandle,
     action: impl gpui_kit::Action,
 ) -> impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static {
-    let page = page.clone();
-    move |_, window, cx| page.dispatch_action(&action, window, cx)
+    crate::ui::dispatch::on_click(page, Box::new(action))
 }
 
 /// A titled section of setting rows.

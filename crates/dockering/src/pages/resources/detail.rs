@@ -26,6 +26,7 @@ use crate::actions::{Back, Navigate};
 use crate::keymap::ctx;
 use crate::nav::Route;
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::notify;
 use crate::ui::segmented::{Segment, Segmented};
 
@@ -173,7 +174,7 @@ pub fn header(
                 .ghost()
                 .icon(IconName::ArrowLeft)
                 .tooltip_with_action(s::BACK, &Back, None)
-                .on_click(|_, window, cx| window.dispatch_action(Box::new(Back), cx)),
+                .on_click(dispatch::on_click(focus, Box::new(Back))),
         )
         .child(
             div()
@@ -195,6 +196,7 @@ pub fn header_action(
     icon: Option<IconName>,
     action: Box<dyn Action>,
     disabled: bool,
+    origin: &FocusHandle,
 ) -> AnyElement {
     let hint = action.boxed_clone();
     Button::new(id)
@@ -204,14 +206,17 @@ pub fn header_action(
         .when_some(icon, |b, i| b.icon(i))
         .disabled(disabled)
         .tooltip_with_action(label, hint.as_ref(), Some(ctx::DETAIL_HEADER))
-        .on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx))
+        .on_click(dispatch::on_click(origin, action))
         .into_any_element()
 }
 
 /// "This image no longer exists" + *Back to list* (spec 30 §2).
 pub fn gone_banner(kind: &str, parent: Route, cx: &App) -> AnyElement {
+    let anchor = dispatch::DispatchAnchor::new(cx);
     h_flex()
         .id("gone-banner")
+        .relative()
+        .child(anchor.element())
         .gap_3()
         .items_center()
         .p_2()
@@ -222,14 +227,10 @@ pub fn gone_banner(kind: &str, parent: Route, cx: &App) -> AnyElement {
             Button::new("back-to-list")
                 .small()
                 .label(s::BACK_TO_LIST)
-                .on_click(move |_, window, cx| {
-                    window.dispatch_action(
-                        Box::new(Navigate {
-                            route: parent.clone(),
-                        }),
-                        cx,
-                    )
-                }),
+                .on_click(dispatch::on_click(
+                    anchor.handle(),
+                    Box::new(Navigate { route: parent }),
+                )),
         )
         .into_any_element()
 }
@@ -320,8 +321,9 @@ pub fn route_link(
     id: impl Into<gpui_kit::ElementId>,
     label: impl Into<SharedString>,
     route: Route,
+    cx: &App,
 ) -> AnyElement {
-    crate::ui::links::resource_link(id, label, route)
+    crate::ui::links::resource_link(id, label, route, cx)
 }
 
 /// A focusable list of link rows (Used by / Containers tabs): one Tab stop, `↑/↓` move a

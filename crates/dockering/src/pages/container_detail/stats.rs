@@ -36,6 +36,7 @@ use crate::actions::stats as act;
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::segmented::{Segment, Segmented};
 
 /// Max points per chart series (STA-003).
@@ -785,7 +786,10 @@ impl Render for StatsTab {
                         .label(s::STATS_LOAD_DISK)
                         .loading(self.disk_loading)
                         .tooltip(s::CMD_STATS_DISK)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(act::LoadDiskUsage), cx)),
+                        .on_click(dispatch::on_click(
+                            &self.window_focus,
+                            Box::new(act::LoadDiskUsage),
+                        )),
                 ),
             });
 

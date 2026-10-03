@@ -4,10 +4,11 @@
 
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::{ElementId, IntoElement, SharedString};
+use gpui_kit::{App, ElementId, IntoElement, SharedString};
 
 use crate::actions::Navigate;
 use crate::nav::{ImageTab, NetworkTab, Route, VolumeTab};
+use crate::ui::dispatch;
 
 /// Route for an image id (or reference): container detail → image detail.
 pub fn image_route(image_id: &str) -> Route {
@@ -39,18 +40,14 @@ pub fn resource_link(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     route: Route,
+    cx: &App,
 ) -> gpui_kit::AnyElement {
-    Button::new(id)
-        .link()
-        .xsmall()
-        .label(label.into())
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(
-                Box::new(Navigate {
-                    route: route.clone(),
-                }),
-                cx,
-            )
-        })
-        .into_any_element()
+    dispatch::anchored(cx, |origin| {
+        Button::new(id)
+            .link()
+            .xsmall()
+            .label(label.into())
+            .on_click(dispatch::on_click(origin, Box::new(Navigate { route })))
+    })
+    .into_any_element()
 }

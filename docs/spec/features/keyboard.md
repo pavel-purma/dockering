@@ -15,7 +15,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 | ID | Requirement |
 |---|---|
 | KBD-001 | **Full operability.** Every interactive element (button, link, tab, menu, input, checkbox, table row, group row, chart window selector, dialog control) MUST be focusable and activatable from the keyboard. Any mouse-only feature is a bug. |
-| KBD-002 | **Everything is an action.** Every user command is a GPUI `Action` (registered with `actions!` / `#[derive(Action)]`) dispatched in a `key_context`. Buttons, menus, the command palette, and shortcuts all invoke the same action. No logic lives only in click handlers. |
+| KBD-002 | **Everything is an action.** Every user command is a GPUI `Action` (registered with `actions!` / `#[derive(Action)]`) dispatched in a `key_context`. Buttons, menus, the command palette, and shortcuts all invoke the same action. No logic lives only in click handlers. Keys dispatch from the focused element; pointer clicks dispatch from the clicked control's own place in the tree (`ui::dispatch`), never from wherever keyboard focus was left, so a click works whatever holds focus (e.g. after a popup was dismissed by clicking the title bar). |
 | KBD-003 | **No focus rings.** Focused controls draw no ring or accent border (theme `focus_ring = false`, `ring` = the input border colour). Keyboard position stays visible through the controls' own state: the table cursor row, the sidebar cursor tint, the text caret, and open menus. (Revised 2026-10-02: shortcuts are the goal, not a focus-ring-driven keyboard-only UI.) |
 | KBD-004 | **Logical Tab order.** `Tab` / `Shift+Tab` cycle focus *within the current region* in visual order (left→right, top→bottom), using `tab_index` / `tab_stop`. Rows inside a table are **not** separate Tab stops: the table is one stop with arrow-key navigation inside it (roving focus). |
 | KBD-005 | **Regions (landmarks).** The window has four focus regions: *Title bar*, *Sidebar*, *Content*, and *Status bar*. The page header/toolbar and the detail tab bar belong to *Content* and are reached with `Tab` inside it. On Settings routes the *Sidebar* region holds the settings section nav (SET-080). `F6` / `Shift+F6` cycle between regions. Each region remembers its last-focused child. |
@@ -131,7 +131,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-004 | `ListTable > DataTable` `tab`/`shift-tab` overrides; `a11y_tab_walk_reaches_all_interactive_settings` |
 | KBD-005 | `kbd_005_f6_cycles_regions` |
 | KBD-006 | `kbd_006_escape_priority_order` |
-| KBD-007 | `kbd_007_focus_after_delete_moves_to_next_row`, `kbd_007_cursor_moves_to_next_row_after_delete`, `shl_004_refresh_keeps_cursor_and_selection_by_key`, `kbd_071_escape_cancels_add_engine_and_restores_focus` |
+| KBD-007 | `kbd_007_header_menus_open_after_switcher_dismissed_by_title_click`, `kbd_007_focus_after_delete_moves_to_next_row`, `kbd_007_cursor_moves_to_next_row_after_delete`, `shl_004_refresh_keeps_cursor_and_selection_by_key`, `kbd_071_escape_cancels_add_engine_and_restores_focus` |
 | KBD-008 | `kbd_008_letters_ignored_in_search_input`, `kbd_008_g_u_n_ignored_in_search_inputs`, `keymap_single_letters_only_in_list_contexts` |
 | KBD-009, 080, 081 | `keymap.rs` data table with OS masks; `keymap_bindings_parse` |
 | KBD-010 | `tooltip_with_action` / `Kbd` in tooltips, `keymap::hint_for` in row menus, palette and reference generated from the keymap |

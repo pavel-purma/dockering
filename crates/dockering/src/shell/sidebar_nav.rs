@@ -12,12 +12,14 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Collapsible, Icon, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, ElementId, IntoElement, MouseButton, SharedString, Window, div, px, transparent_black,
+    App, ElementId, FocusHandle, IntoElement, MouseButton, SharedString, Window, div, px,
+    transparent_black,
 };
 
 use crate::actions::Navigate;
 use crate::nav::Route;
 use crate::theme::accent_text;
+use crate::ui::dispatch;
 
 /// One sidebar entry: a page, a settings section, or *Back*.
 #[derive(Clone)]
@@ -71,7 +73,8 @@ impl SidebarItem for NavMenu {
         let collapsed = self.collapsed;
         let heading_fg = cx.theme().sidebar_foreground.opacity(0.7);
         let divider = cx.theme().sidebar_border;
-        let mut children = Vec::new();
+        let anchor = dispatch::DispatchAnchor::new(cx);
+        let mut children = vec![anchor.element().into_any_element()];
         let mut ix = 0;
         for (heading, items) in self.groups {
             if let Some(heading) = heading {
@@ -89,15 +92,25 @@ impl SidebarItem for NavMenu {
                 });
             }
             for item in items {
-                children.push(render_item(ix, item, collapsed, cx));
+                children.push(render_item(ix, item, collapsed, anchor.handle(), cx));
                 ix += 1;
             }
         }
-        v_flex().id(id.into()).gap_0p5().children(children)
+        v_flex()
+            .id(id.into())
+            .relative()
+            .gap_0p5()
+            .children(children)
     }
 }
 
-fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit::AnyElement {
+fn render_item(
+    ix: usize,
+    item: NavItem,
+    collapsed: bool,
+    origin: &FocusHandle,
+    cx: &App,
+) -> gpui_kit::AnyElement {
     let theme = cx.theme();
     let accent = accent_text(theme.is_dark());
     let label = item.label.clone();
@@ -169,13 +182,6 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
         // A mouse click navigates without moving focus into the sidebar region, so the
         // new page takes focus (KBD-007) and no cursor appears on the sidebar.
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(
-                Box::new(Navigate {
-                    route: route.clone(),
-                }),
-                cx,
-            )
-        })
+        .on_click(dispatch::on_click(origin, Box::new(Navigate { route })))
         .into_any_element()
 }

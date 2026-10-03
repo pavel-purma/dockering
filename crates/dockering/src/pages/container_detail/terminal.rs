@@ -31,6 +31,7 @@ use crate::actions::{container, term};
 use crate::keymap::ctx;
 use crate::state::{AppState, ParkedSessions, TerminalRegistry};
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::notify;
 use crate::ui::segmented::{Segment, Segmented};
 
@@ -604,8 +605,11 @@ impl TerminalTab {
         } else {
             s::TERMINAL_UNSUPPORTED
         };
+        let anchor = dispatch::DispatchAnchor::new(cx);
         v_flex()
             .id("terminal-not-running")
+            .relative()
+            .child(anchor.element())
             .size_full()
             .items_center()
             .justify_center()
@@ -627,7 +631,10 @@ impl TerminalTab {
                             &container::StartStop,
                             Some(ctx::DETAIL_HEADER),
                         )
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(container::StartStop), cx)),
+                        .on_click(dispatch::on_click(
+                            anchor.handle(),
+                            Box::new(container::StartStop),
+                        )),
                 )
             })
             .into_any_element()
@@ -682,7 +689,10 @@ impl TerminalTab {
                     .small()
                     .icon(IconName::Plus)
                     .tooltip_with_action(s::TERMINAL_NEW, &term::NewSession, Some(ctx::TERMINAL))
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(term::NewSession), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.sub_tabs_focus,
+                        Box::new(term::NewSession),
+                    )),
             )
             .child(
                 Button::new("terminal-close")
@@ -695,7 +705,10 @@ impl TerminalTab {
                         &term::CloseSession,
                         Some(ctx::TERMINAL),
                     )
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(term::CloseSession), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.sub_tabs_focus,
+                        Box::new(term::CloseSession),
+                    )),
             )
             .child(div().flex_1())
             .child(
@@ -743,7 +756,10 @@ impl TerminalTab {
                     .icon(IconName::RotateCw)
                     .label(s::TERMINAL_RECONNECT)
                     .tooltip(s::CMD_TERM_RECONNECT)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(Reconnect), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.sub_tabs_focus,
+                        Box::new(Reconnect),
+                    )),
             )
             .when(external, |this| {
                 this.child(
@@ -752,7 +768,10 @@ impl TerminalTab {
                         .ghost()
                         .icon(IconName::ExternalLink)
                         .tooltip(s::TERMINAL_EXTERNAL)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(OpenExternal), cx)),
+                        .on_click(dispatch::on_click(
+                            &self.sub_tabs_focus,
+                            Box::new(OpenExternal),
+                        )),
                 )
             })
             .into_any_element()

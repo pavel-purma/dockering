@@ -2,10 +2,11 @@
 //! `Breadcrumb`; the parent items dispatch [`Navigate`].
 
 use gpui_kit::component::breadcrumb::{Breadcrumb, BreadcrumbItem};
-use gpui_kit::{IntoElement, SharedString};
+use gpui_kit::{App, IntoElement, SharedString};
 
 use crate::actions::Navigate;
 use crate::nav::Route;
+use crate::ui::dispatch;
 
 /// One crumb: a label and the route it links to (`None` = current page, not a link).
 pub struct Crumb {
@@ -28,19 +29,16 @@ impl Crumb {
     }
 }
 
-pub fn breadcrumb(crumbs: Vec<Crumb>) -> impl IntoElement {
-    Breadcrumb::new().children(crumbs.into_iter().map(|c| {
-        let item = BreadcrumbItem::new(c.label);
-        match c.route {
-            Some(route) => item.on_click(move |_, window, cx| {
-                window.dispatch_action(
-                    Box::new(Navigate {
-                        route: route.clone(),
-                    }),
-                    cx,
-                )
-            }),
-            None => item.disabled(true),
-        }
-    }))
+pub fn breadcrumb(crumbs: Vec<Crumb>, cx: &App) -> impl IntoElement {
+    dispatch::anchored(cx, |origin| {
+        Breadcrumb::new().children(crumbs.into_iter().map(|c| {
+            let item = BreadcrumbItem::new(c.label);
+            match c.route {
+                Some(route) => {
+                    item.on_click(dispatch::on_click(origin, Box::new(Navigate { route })))
+                }
+                None => item.disabled(true),
+            }
+        }))
+    })
 }

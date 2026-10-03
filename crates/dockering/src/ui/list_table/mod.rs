@@ -42,6 +42,7 @@ use crate::actions::{OnRow, RowCommand, list};
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
+use crate::ui::dispatch::{self, DispatchAnchor};
 use crate::ui::menu::{KeyMenu, MenuAnchor, TrackBounds as _};
 
 /// Key of the leading checkbox column; its header renders a select-all checkbox.
@@ -468,21 +469,22 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
                 })
             })
             .when_some(key, |this, key| {
+                // The click dispatches from the row itself, not from focus (KBD-002).
+                let anchor = DispatchAnchor::new(cx);
+                let origin = anchor.handle().clone();
                 // Runs before the GPUI Kit row handler on the same element, which moves the
                 // cursor. A double click only counts once (groups would toggle back), and a
                 // modified click only moves the cursor.
-                this.on_click(move |e, window, cx| {
+                this.child(anchor.element()).on_click(move |e, window, cx| {
                     let m = e.modifiers();
                     if e.click_count() != 1 || m.secondary() || m.shift || m.alt {
                         return;
                     }
-                    window.dispatch_action(
-                        Box::new(OnRow {
-                            row: key.clone(),
-                            action: RowCommand::Open,
-                        }),
-                        cx,
-                    )
+                    let open = OnRow {
+                        row: key.clone(),
+                        action: RowCommand::Open,
+                    };
+                    dispatch::dispatch_from(&origin, &open, window, cx)
                 })
             })
     }
