@@ -149,7 +149,7 @@ release PR and the tag wouldn't start `release.yml`.
    - at the public launch (GitHub Free has no rulesets or protection for private repos):
      branch protection on `main` requiring a PR, linear history, and these checks (the names
      GitHub shows): `lint`, `test (ubuntu-24.04)`, `test (windows-2025)`, `test (macos-15)`,
-     `build (…)` ×6, `installer (x86_64-pc-windows-msvc)`, `installer (aarch64-pc-windows-msvc)`,
+     `build (…)` ×6 (the two Windows ones also build and smoke-test the installer),
      `conventional commit title`; and a **tag ruleset** for `v*` restricting creation to the
      release bot App, with a bypass for you.
 
