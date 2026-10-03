@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · ui/containers · Mounts tab (CDT-020): the separate RW column is folded into Mode (`RW`/`RO` plus other options such as `z`), and Source/Destination get 4× the width of Type/Mode so long paths no longer wrap in a fifth-width column. Detail-panel tables take optional relative column widths (`Section::weights`).
 - 2026-10-03 · docker · `DISK_USAGE` is advertised only at negotiated API ≥ 1.52: bollard 0.21 drops the legacy `/system/df` shape, so older daemons (e.g. Docker 28, API 1.48) reported all sizes as 0. Below 1.52 `disk_usage` returns `Unsupported` and Volumes/Images use their fallbacks (spec 21 §2/§6, VOL-002, IMG-003).
 - 2026-10-03 · ci · `ci.yml` runs again on push to `main` and on pull requests (reverts the manual-only change; Actions minutes are free for the public repo); packaging runs on `main` only. Dependabot version updates for `cargo` and `github-actions` (REL-060).
 - 2026-10-03 · ui · Start/stop (Containers) and Run (Images) row icons fill with their chalk colour while hovered (`ui::action_icons`); checkbox and Name columns pinned left on every list (GPUI Kit fixed columns); checkboxes inset 6 px; Volumes status: *In use* pill + "by N containers" text (VOL-001).
