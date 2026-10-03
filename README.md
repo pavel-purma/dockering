@@ -1,10 +1,54 @@
-# Dockering
+<p align="center"><img src="assets/brand/logo.png" width="112" alt="Dockering logo"></p>
+<h1 align="center">Dockering</h1>
+<p align="center"><b>A fast, native desktop client for container engines.</b><br>
+Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight window, on Windows, macOS, and Linux.</p>
+<p align="center">
+  <a href="https://github.com/pavel-purma/dockering/actions/workflows/ci.yml"><img src="https://github.com/pavel-purma/dockering/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/pavel-purma/dockering/actions/workflows/release.yml"><img src="https://github.com/pavel-purma/dockering/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <!-- After the public launch (REL-060), when shields.io can read the repo:
+  <a href="https://github.com/pavel-purma/dockering/releases/latest"><img src="https://img.shields.io/github/v/release/pavel-purma/dockering" alt="Latest release"></a>
+  <a href="https://github.com/pavel-purma/dockering/releases"><img src="https://img.shields.io/github/downloads/pavel-purma/dockering/total" alt="Downloads"></a>
+  <a href="#license"><img src="https://img.shields.io/github/license/pavel-purma/dockering" alt="License"></a>
+  <a href="https://winstall.app/apps/PavelPurma.Dockering"><img src="https://img.shields.io/winget/v/PavelPurma.Dockering" alt="winget"></a>
+  -->
+</p>
 
-A fast, native desktop client for container engines: Docker, Docker inside WSL distros, and
-WSL containers (WSLC). It runs on Windows, macOS, and Linux, and is written in Rust with
-[GPUI Kit](https://gpui-kit.com/).
+<!-- TODO: add docs/assets/screenshot-containers.png (the containers list grouped by Compose project) -->
 
-> Status: **planning**. See the [specification](docs/spec/README.md) and the [implementation plan](docs/plan/README.md).
+## Download
+
+| Windows | macOS | Linux |
+|---|---|---|
+| [Installer (x64)](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-Setup-x64.exe) · [ARM64](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-Setup-arm64.exe) | [Apple silicon](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.dmg) · [Intel](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.dmg) | [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.tar.gz) |
+| `winget install dockering` | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) |
+| Portable: [x64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x64.zip) · [ARM64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-arm64.zip) | | |
+
+All versions and checksums are on the [Releases](https://github.com/pavel-purma/dockering/releases) page.
+Every asset has a build-provenance attestation: `gh attestation verify <file> -R pavel-purma/dockering`.
+
+> The repository is private until the public launch, so these links work only for collaborators
+> for now. winget arrives with the first signed public release.
+
+### Install on Windows
+
+- **Installer:** run `Dockering-Setup-x64.exe`. By default it installs for your user only, into
+  `%LocalAppData%\Programs\Dockering`, and needs no admin rights. To install for all users, pick that
+  option in the wizard or pass `/ALLUSERS`. For a silent install, run
+  `Dockering-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
+- **winget:** `winget install dockering`. Add `--scope machine` to install for all users.
+- **Portable:** unzip `Dockering-x64.zip` anywhere and run `dockering.exe`. The portable build
+  tells you when a new version is out but doesn't install it.
+
+Requires Windows 10 22H2 or newer, x64 or ARM64.
+
+## Why Dockering
+
+- **Native and fast.** Built with Rust and GPUI, GPU-rendered at 60 fps. No Electron.
+- **All your engines in one place.** Docker Desktop, Docker inside any WSL distro, WSL containers,
+  and remote Docker over TLS. Switch between them with `Ctrl+K`.
+- **Shortcuts for almost everything.** Every action is in the command palette (`Ctrl+Shift+P`).
+- **Just the core.** Containers grouped by Compose project, logs, an interactive terminal, live
+  stats, images, volumes, and networks. No sign-in, no extensions, no telemetry.
 
 ## Features (v1)
 
@@ -13,7 +57,28 @@ WSL containers (WSLC). It runs on Windows, macOS, and Linux, and is written in R
 - Images (pull, run, delete, prune), volumes (create, delete, prune), and networks
 - Multiple engines with one-click switching: local socket or pipe, remote TCP/TLS, WSL distros, and WSLC
 
-## Build and run
+## Updates
+
+Release builds check GitHub Releases for a new version once a day. Installed Windows copies
+download it in the background and show **Restart to update** in the status bar. Nothing is
+installed until you click it. Portable, macOS, and Linux builds only tell you that a new version
+is out.
+
+## Privacy & network
+
+Dockering talks only to the engines you configure and, through them, to registries. The one
+other request is the update check: an anonymous HTTPS GET of the latest release manifest from
+`github.com`, with no ids or cookies.
+
+You can turn the update check off three ways:
+
+- in **Settings › Updates**;
+- with the environment variable `DOCKERING_DISABLE_UPDATES=1`;
+- for a whole machine, with the policy value `HKLM\Software\Policies\Dockering\DisableUpdates = 1` (DWORD).
+
+Before anything runs, a download is checked against a signed manifest and its SHA-256 hash.
+
+## Build from source
 
 Rust is pinned in `rust-toolchain.toml` (rustup installs it automatically). GPUI Kit also needs
 native prerequisites. See [spec 50](docs/spec/50-build-and-release.md#platform-prerequisites-from-gpui-kit).
@@ -48,8 +113,9 @@ cargo xtask dist                                     # release build + package f
 cargo xtask package --target <triple>                # package an existing release build
 ```
 
-Packages go to `target/dist/<triple>/`: `.msi` (x64) or NSIS `.exe` (ARM64) plus a `.zip` on
-Windows, `.dmg` on macOS, and `.deb`, `.AppImage`, and `.tar.gz` on Linux.
+Packages go to `target/dist/<triple>/` with stable names (REL-012): `Dockering-Setup-<x64|arm64>.exe`
+(needs Inno Setup 6.3+: `winget install JRSoftware.InnoSetup`) and `Dockering-<arch>.zip` on Windows,
+`Dockering-<arch>.dmg` on macOS, and `.deb`, `.AppImage`, and `.tar.gz` on Linux.
 
 After changing dependencies, regenerate the third-party notices with
 `cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html` (`cargo install cargo-about --locked --features cli`).
@@ -79,6 +145,14 @@ Windows, so the MSVC environment is loaded automatically):
   in detail — use the VS Code `cppvsdbg` configuration when you need that. On macOS/Linux, drop the
   `.exe` suffix from `program` in `.zed/debug.json`.
 
+## Releases
+
+Releases follow a standard flow. [release-plz](https://release-plz.dev) keeps a release PR open
+with the next version and its changelog. Merging that PR tags `vX.Y.Z`, and the release workflow
+then builds, signs, and drafts the GitHub Release. [docs/release.md](docs/release.md) has the
+details, including signing and the go-public checklist. PR titles use
+[conventional commits](https://www.conventionalcommits.org/), because they become the changelog.
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
@@ -86,5 +160,5 @@ Third-party notices: [THIRD_PARTY_LICENSES.html](THIRD_PARTY_LICENSES.html).
 
 ## Contributing with agents
 
-This repository uses a spec-driven agentic workflow. Start with [CLAUDE.md](CLAUDE.md).
-Plan features with `/feature-planning <idea>`.
+This repository uses a spec-driven agentic workflow. Start with [CLAUDE.md](CLAUDE.md) and the
+[specification](docs/spec/README.md). Plan features with `/feature-planning <idea>`.
