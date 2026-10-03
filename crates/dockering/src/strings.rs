@@ -856,7 +856,6 @@ pub fn health_result(code: i64, when: &str) -> String {
 // Mounts (CDT-020)
 pub const COL_TYPE: &str = "Type";
 pub const COL_SOURCE: &str = "Source";
-pub const COL_RW: &str = "RW";
 pub const NO_MOUNTS: &str = "This container has no mounts";
 // Network (CDT-030)
 pub const SEC_PORTS: &str = "Port bindings";

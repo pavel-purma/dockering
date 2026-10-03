@@ -1,5 +1,5 @@
 //! Mounts tab (CDT-020): Type, Source (a volume name links to volume detail), Destination,
-//! Mode, RW, as one focusable rows panel (KBD-044: `Enter` follows a volume link).
+//! Mode, as one focusable rows panel (KBD-044: `Enter` follows a volume link).
 
 use dk_core::{ContainerDetails, MountKind};
 use gpui_kit::{
@@ -47,6 +47,24 @@ pub fn kind_label(k: MountKind) -> &'static str {
     }
 }
 
+/// `RW`/`RO` from the access flag, then any other mode options (`z`, `Z`, …); Docker's
+/// `Mode` string repeats `rw`/`ro` for binds and is often empty for volumes.
+pub fn mode_label(rw: bool, mode: &str) -> String {
+    let access = if rw {
+        s::READ_WRITE
+    } else {
+        s::READ_ONLY_SHORT
+    };
+    std::iter::once(access)
+        .chain(
+            mode.split(',')
+                .map(str::trim)
+                .filter(|o| !o.is_empty() && *o != "rw" && *o != "ro"),
+        )
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn sections(d: &ContainerDetails) -> Vec<Section> {
     let rows = d
         .mounts
@@ -60,19 +78,13 @@ pub fn sections(d: &ContainerDetails) -> Vec<Section> {
                 Some(v) => Cell::Link(v.clone().into()),
                 None => Cell::mono(m.source.clone()),
             };
-            let mode = if m.mode.is_empty() {
-                s::NONE_VALUE.to_owned()
-            } else {
-                m.mode.clone()
-            };
             let row = Row::new(
                 format!("mount:{i}"),
                 vec![
                     Cell::text(kind_label(m.kind)),
                     source,
                     Cell::mono(m.destination.clone()),
-                    Cell::text(mode),
-                    Cell::text(if m.rw { s::YES } else { s::NO }),
+                    Cell::text(mode_label(m.rw, &m.mode)),
                 ],
                 volume.clone().unwrap_or_else(|| m.source.clone()),
             );
@@ -84,19 +96,17 @@ pub fn sections(d: &ContainerDetails) -> Vec<Section> {
             }
         })
         .collect();
-    vec![Section::table(
-        "mounts",
-        crate::nav::ContainerTab::Mounts.label(),
-        &[
-            s::COL_TYPE,
-            s::COL_SOURCE,
-            s::COL_DESTINATION,
-            s::COL_MODE,
-            s::COL_RW,
-        ],
-        rows,
-        s::NO_MOUNTS,
-    )]
+    vec![
+        Section::table(
+            "mounts",
+            crate::nav::ContainerTab::Mounts.label(),
+            &[s::COL_TYPE, s::COL_SOURCE, s::COL_DESTINATION, s::COL_MODE],
+            rows,
+            s::NO_MOUNTS,
+        )
+        // Paths get the room; type and mode are short.
+        .weights(&[1., 4., 4., 1.]),
+    ]
 }
 
 impl Focusable for MountsTab {
@@ -122,5 +132,19 @@ impl Render for MountsTab {
             cx,
             |v: &mut Self| &mut v.rows,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mode_label;
+
+    #[test]
+    fn cdt_020_mode_label_merges_access_and_options() {
+        assert_eq!(mode_label(true, "rw"), "RW");
+        assert_eq!(mode_label(false, "ro"), "RO");
+        assert_eq!(mode_label(true, ""), "RW");
+        assert_eq!(mode_label(true, "z"), "RW, z");
+        assert_eq!(mode_label(false, "ro,Z"), "RO, Z");
     }
 }
