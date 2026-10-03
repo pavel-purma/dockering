@@ -46,6 +46,8 @@ jobs:
         run: cargo fmt --all --check
       - name: NFR-001 blocking-call check
         run: cargo xtask check-blocking
+      - name: Generated icons are up to date (REL-050)
+        run: cargo xtask icons --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo deny (licences, bans, sources, advisories)
@@ -143,7 +145,7 @@ jobs:
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
       # Packaging smoke test on main (PRs only build, to keep them fast).
       - name: Install cargo-packager
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && runner.os != 'Windows'
         shell: bash
         run: cargo packager --version 2>/dev/null || cargo install cargo-packager --locked --version 0.11.8
       - name: cargo xtask package
@@ -162,5 +164,51 @@ jobs:
         with:
           name: dockering-${{ matrix.target }}
           path: upload/
+          retention-days: 14
+          if-no-files-found: error
+
+  # REL-014: the Windows installer is built and smoke-tested on every push to main (and on PRs
+  # that touch packaging). Unsigned; signing happens only in release.yml.
+  installer:
+    name: installer (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, os: windows-2025, arch: x64 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: installer-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version 6.7.1 -y --no-progress
+          }
+      - name: cargo build --release
+        run: cargo build --release --locked -p dockering --target ${{ matrix.target }}
+      - name: cargo xtask package (inno + zip)
+        run: cargo xtask package --target ${{ matrix.target }} --formats inno
+      - name: Silent install / uninstall, per user and all users (REL-014)
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $setup = "target\dist\${{ matrix.target }}\Dockering-Setup-${{ matrix.arch }}.exe"
+          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version
+          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version -AllUsers
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-${{ matrix.target }}
+          path: target/dist/${{ matrix.target }}/Dockering-*
           retention-days: 14
           if-no-files-found: error

@@ -17,5 +17,10 @@ Spec changes are tracked separately in [`docs/spec/CHANGELOG.md`](docs/spec/CHAN
 - Release workflow: signed Windows `.msi`/`.exe` (Azure Trusted Signing), notarised macOS `.dmg`, and Linux `.deb`/`.AppImage`/`.tar.gz`, published to a draft GitHub Release.
 - `cargo xtask` helpers: `check-blocking`, `record-fixtures`, `package`, and `dist`.
 - Platform bootstrap scripts (`scripts/bootstrap.sh`, `scripts/bootstrap.ps1`) and app icons.
+- Windows installer built with Inno Setup: per-user by default (all users with `/ALLUSERS`), x64 and arm64. It replaces the MSI and NSIS packages (REL-020…027).
+- In-app update checks against GitHub Releases. You can turn them off in Settings (UPD-001…012).
+- Release automation with release-plz: a release PR with the version bump and changelog, then a `vX.Y.Z` tag when it merges. PR titles are checked for conventional commits (REL-010, REL-011).
+- winget manifests for `PavelPurma.Dockering` and a workflow that submits every stable release (REL-040, REL-041).
+- New app icon (REL-050).
 
 [Unreleased]: https://github.com/pavel-purma/dockering/commits/main
