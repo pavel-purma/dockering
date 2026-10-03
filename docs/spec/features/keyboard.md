@@ -99,6 +99,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-072 | Forms (Run image, Create volume, Add engine, Settings): every field is reachable in visual order. Repeating rows (ports, env, mounts) support `Mod+Shift+Enter` (add row) and `Mod+Shift+Backspace` (remove row), which don't collide with text-editing chords or with `Mod+Enter` = submit/confirm (KBD-071). Each row also has Tab-reachable add/remove buttons. File pickers open with `Enter` / `Space`. |
 | KBD-073 | Menus, popovers, and selects: arrows navigate, `Enter` / `Space` activate, `Esc` closes and returns focus to the invoker. Type-ahead selects items. |
 | KBD-074 | Notifications (toasts): `Mod+Shift+N` focuses the newest notification. Its actions (*Copy details*, *Retry*) are Tab-reachable, and `Esc` dismisses it. Toasts with actions don't auto-dismiss while focused. |
+| KBD-076 | Updates: *Check for Updates*, *Restart to Update* (enabled only when an update is ready), and *View Release Notes* are command-palette entries with no default chord. The status-bar update button is reachable through the status-bar focus region (`F6`). On macOS, *Check for Updates…* is also in the app menu (SHL-020). |
 | KBD-075 | Engine switcher and Settings → Engines: all engine actions (Rescan, Test, Start & connect, Remove) are reachable with Tab, arrows, and `Enter`. |
 
 ## Customisation (v1 scope)

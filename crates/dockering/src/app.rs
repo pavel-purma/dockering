@@ -26,7 +26,7 @@ pub struct Boot {
     pub demo: bool,
 }
 
-/// Linux `app_id` / Wayland (SHL-023).
+/// Linux `app_id` / Wayland (SHL-023) and the Windows AppUserModelID (REL-023).
 pub const APP_ID: &str = "dev.dockering.Dockering";
 
 /// App-level setup shared by `run` and view tests: globals, theme, keymap, ticker.
@@ -115,6 +115,9 @@ pub fn run(boot: Boot) {
         .with_quit_mode(QuitMode::LastWindowClosed);
     let shutdown_hub = hub.clone();
     app.run(move |cx| {
+        // Windows AppUserModelID: matches the installer's Start Menu shortcut so taskbar
+        // pinning and grouping line up (REL-023).
+        cx.set_app_identity(APP_ID, s::APP_NAME);
         gpui_kit::init(cx);
         init(hub.clone(), config, demo, cx);
         menus::set_app_menus(cx);

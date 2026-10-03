@@ -25,11 +25,13 @@
 | `cargo-nextest` | `cargo nextest run` | `cargo install cargo-nextest --locked` |
 | `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
 | `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
-| `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` | `cargo install cargo-packager --locked --version 0.11.8` |
+| `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux) | `cargo install cargo-packager --locked --version 0.11.8` |
+| `release-plz` *(planned, REL-010)* | Release PRs and tags (CI); locally only for `release-plz update --dry-run` previews | `cargo install release-plz --locked` |
+| Inno Setup **6.3+** (`ISCC.exe`) *(planned, REL-020)* | `cargo xtask package` on Windows | Preinstalled on GitHub Windows runners (⚠ verify, spike S-9) · `winget install JRSoftware.InnoSetup` |
 
-cargo-packager downloads WiX 3 / NSIS (Windows) and linuxdeploy (AppImage) on first use. WiX 3 can't target ARM64, so `aarch64-pc-windows-msvc` ships an NSIS `.exe` instead of an `.msi`.
+cargo-packager downloads WiX 3 / NSIS (Windows) and linuxdeploy (AppImage) on first use. WiX 3 can't target ARM64, so `aarch64-pc-windows-msvc` ships an NSIS `.exe` instead of an `.msi`. *(Planned: Windows moves to one Inno Setup installer for both architectures and drops WiX/NSIS, per [distribution.md](features/distribution.md) REL-020 and ADR-0006.)*
 
-**Release signing secrets** live only in the GitHub environment `release`. Steps are skipped when the secrets are absent, which gives an unsigned build.
+**Release signing secrets** live only in the GitHub environment `release`. Steps are skipped when the secrets are absent, which gives an unsigned build. *(Planned, REL-031: the Windows provider is chosen by the repo variable `WINDOWS_SIGNING` = `signpath` | `azure` | `none`. SignPath adds `SIGNPATH_API_TOKEN`, the updater adds `UPDATE_SIGNING_KEY` (UPD-003), and winget adds `WINGET_TOKEN` (REL-041). An unsigned **stable** tag fails the release.)*
 Windows: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
 
@@ -49,7 +51,11 @@ macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE
 | `test` | ubuntu-24.04, windows-2025, macos-15 | `cargo nextest run --workspace` (unit, contract with fixtures, gpui `TestAppContext` view tests) |
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
 | `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package |
-| `release` | on tag `v*` | Build all, sign, upload artifacts to a GitHub Release |
+| `release` | on tag `v*` | Build all, sign, upload artifacts to a GitHub Release. *(Planned: verify → package/sign → update manifest → attest → draft; [distribution.md](features/distribution.md) REL-010…013.)* |
+| `installer` / `installer-smoke` *(planned)* | windows-2025, push to `main` | Build the Inno installer (x64, arm64); silent install → `--version` → uninstall (REL-014) |
+| `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
+| `release-plz` *(planned)* | push to `main` / `release/*` | `release-pr`: open or update the release PR (version + changelog). `release`: after a release PR merges, create the `v*` tag, which starts `release` (REL-010/011) |
+| `pr-title` *(planned)* | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that release-plz reads) |
 | `wslc-abi-watch` | weekly schedule, ubuntu-24.04 | `cargo xtask wslc-abi-check latest`. If the latest `microsoft/WSL` release changed `wslc.idl`, open an issue (20 §5.7). |
 
 Caching: `Swatinem/rust-cache`. Linux runners install the prerequisites above.
@@ -58,22 +64,24 @@ Caching: `Swatinem/rust-cache`. Linux runners install the prerequisites above.
 
 | OS | Artifacts | Signing |
 |---|---|---|
-| Windows | `.msi` (WiX) + portable `.zip` | Authenticode (Azure Trusted Signing). **Required for public releases**: unsigned binaries that spawn hidden `wsl.exe` processes and create named pipes trigger SmartScreen and Defender heuristics. Nightly/dev builds may be unsigned. |
+| Windows | `.msi` (WiX) + portable `.zip`. *Planned:* `Dockering-Setup-<arch>.exe` (Inno) + `Dockering-<arch>.zip` (REL-012/020) | Authenticode (Azure Trusted Signing; *planned:* pluggable, SignPath Foundation for the public launch, REL-030/031). **Required for public releases**: unsigned binaries that spawn hidden `wsl.exe` processes and create named pipes trigger SmartScreen and Defender heuristics. Nightly/dev builds may be unsigned. |
 | macOS | `.dmg` with `Dockering.app` (per-arch, universal2 later) | Developer ID + **notarisation required for public releases** (Gatekeeper on macOS 15+ blocks un-notarised apps for normal users) |
 | Linux | `.AppImage`, `.deb`, `.tar.gz` (Flatpak post-v1) | — |
 
-App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 16…1024).
+App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 16…1024). *Planned:* a new "Stacked D" icon generated from SVG masters by `cargo xtask icons` (REL-050/051).
 
 ## Licensing (REL-001…)
 
-- **REL-001** Project licence: **MIT OR Apache-2.0** (dual), in `LICENSE-MIT` / `LICENSE-APACHE`. (Change before the first public commit if desired.)
+- **REL-001** Project licence: **MIT**, in `LICENSE` (changed from MIT OR Apache-2.0 on 2026-10-03, before any public release). Dependencies keep their own licences; their notices are in `THIRD_PARTY_LICENSES.html` (REL-002).
 - **REL-002** Third-party notices are generated by `cargo about` into `THIRD_PARTY_LICENSES.html`, bundled with every package, and shown in Settings → Diagnostics → Licences (SET-060). Assets need their own notices (Lucide icons: ISC). The vendored `wslc.idl` copies keep their MIT header and are listed.
 - **REL-003** `cargo deny` allowlist: MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2/3-Clause, ISC, Zlib, Unicode-3.0, MPL-2.0, CC0-1.0, OpenSSL (only if ring/aws-lc requires it). Any GPL/AGPL/LGPL dependency fails CI. Zed's `terminal` and `terminal_view` crates are GPL and must not be copied (reference only).
 
 ## Updates
 
-No auto-update and no update check in v1 (NFR-023, no telemetry/network). Releases go out through GitHub Releases and OS package managers (winget, Homebrew cask, and Flathub post-v1).
+Releases go out through GitHub Releases and OS package managers (winget; Homebrew cask and Flathub post-v1).
+
+[distribution.md](features/distribution.md) UPD-001…012, ADR-0006: an opt-out updater, compiled into public release builds only (`--features updater` when `PUBLIC_RELEASES=true`). It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
 
 ## Versioning
 
-SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`.
+SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`. release-plz computes the next version from conventional commits and writes the changelog in a release PR (REL-010/011).

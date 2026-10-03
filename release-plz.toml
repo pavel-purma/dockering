@@ -1,0 +1,99 @@
+# release-plz configuration (REL-010, REL-011). Reference: https://release-plz.dev/docs/config
+#
+# Git-only mode: the last released version comes from `v*` tags; nothing is published to crates.io.
+# All workspace crates share one version (`version.workspace = true`), so they form one
+# `version_group`: a `feat:` in any crate bumps the app. Only `dockering` gets a changelog section
+# and the `vX.Y.Z` tag. release-plz creates the tag only; `release.yml` (started by the tag push)
+# builds, signs, and uploads the assets to a draft GitHub Release.
+#
+# Checked with release-plz 0.3.169 on 2026-10-03: a `feat(update)` commit in dk-update plus a
+# `fix(ui)` commit in dockering → every crate 0.1.0 → 0.2.0, one CHANGELOG.md section with
+# "Added" and "Fixed".
+
+[workspace]
+git_only = true                         # versions come from v* tags; `cargo publish` is skipped
+git_tag_name = "v{{ version }}"
+git_tag_enable = false                  # only `dockering` is tagged (below)
+git_release_enable = false              # release.yml creates the draft release with signed assets
+changelog_update = false                # only `dockering` writes CHANGELOG.md (below)
+release_always = false                  # tag only when a release PR is merged
+semver_check = false                    # an application, no public library API
+features_always_increment_minor = true  # feat: → 0.(x+1).0 while in 0.x
+pr_name = "chore(release): v{{ version }}"
+pr_labels = ["release"]
+
+[[package]]
+name = "dockering"
+version_group = "app"
+git_tag_enable = true
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+  "dk-core",
+  "dk-hub",
+  "dk-engine-docker",
+  "dk-engine-wslc",
+  "dk-wsl",
+  "dk-terminal",
+  "dk-update",
+]
+
+[[package]]
+name = "dk-core"
+version_group = "app"
+
+[[package]]
+name = "dk-hub"
+version_group = "app"
+
+[[package]]
+name = "dk-engine-docker"
+version_group = "app"
+
+[[package]]
+name = "dk-engine-wslc"
+version_group = "app"
+
+[[package]]
+name = "dk-wsl"
+version_group = "app"
+
+[[package]]
+name = "dk-terminal"
+version_group = "app"
+
+[[package]]
+name = "dk-update"
+version_group = "app"
+
+[[package]]
+name = "xtask"                           # build tooling, never released
+release = false
+
+[changelog]
+# Keep a Changelog sections. The `<!-- n -->` prefixes fix the section order (groups are
+# otherwise sorted alphabetically) and are stripped in `body`.
+protect_breaking_commits = true         # a breaking `chore!:`/`docs!:` still shows up
+sort_commits = "oldest"
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Added" },
+  { message = "^(perf|refactor)", group = "<!-- 1 -->Changed" },
+  { message = "^revert", group = "<!-- 1 -->Changed" },
+  { message = "^fix", group = "<!-- 2 -->Fixed" },
+  { message = "^(docs|test|chore|ci|style|build)", skip = true },
+  { message = ".*", group = "<!-- 1 -->Changed" },
+]
+body = """
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{ commit.scope }})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}{%- if commit.links %} ({% for link in commit.links %}[{{ link.text }}]({{ link.href }}) {% endfor -%}){% endif %}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}
+{% endif -%}
+{% endfor -%}
+{% endfor %}
+"""

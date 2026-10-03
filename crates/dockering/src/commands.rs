@@ -59,6 +59,8 @@ pub enum When {
     // ── container detail (wip/detail) ──
     /// The container detail page (any tab).
     ContainerDetail,
+    /// A verified update is ready to install (KBD-076).
+    UpdateReady,
 }
 
 /// Context passed to availability checks.
@@ -69,6 +71,8 @@ pub struct CommandContext {
     /// M6: the sidebar page of the current route, and whether it is a detail page.
     pub page: Option<crate::nav::Page>,
     pub on_detail: bool,
+    /// KBD-076: *Restart to update* is offered only then.
+    pub update_ready: bool,
 }
 
 pub struct CommandSpec {
@@ -162,6 +166,27 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     c!(s::CMD_ABOUT, About, General, Always),
     c!(s::CMD_OPEN_LOGS_FOLDER, OpenLogsFolder, General, Always),
+    c!(
+        s::CMD_CHECK_FOR_UPDATES,
+        CheckForUpdates,
+        General,
+        Always,
+        &["update", "upgrade", "version"]
+    ),
+    c!(
+        s::CMD_RESTART_TO_UPDATE,
+        RestartToUpdate,
+        General,
+        UpdateReady,
+        &["update", "install"]
+    ),
+    c!(
+        s::CMD_VIEW_RELEASE_NOTES,
+        ViewReleaseNotes,
+        General,
+        Always,
+        &["changelog", "what's new"]
+    ),
     c!(s::CMD_QUIT, Quit, General, Always, &["exit"]),
     c!(
         s::CMD_TOGGLE_THEME,
@@ -542,7 +567,7 @@ fn resource_when(when: When, cx: &CommandContext) -> bool {
         }
         When::ResourcePages => matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)),
         When::ContainerDetail => page == Some(Page::Containers) && cx.on_detail,
-        When::Always | When::Engine | When::ContainersPage => false,
+        When::Always | When::Engine | When::ContainersPage | When::UpdateReady => false,
     }
 }
 
@@ -552,6 +577,7 @@ impl CommandSpec {
             When::Always => true,
             When::Engine => cx.has_engine,
             When::ContainersPage => cx.has_engine && cx.on_containers,
+            When::UpdateReady => cx.update_ready,
             other => cx.has_engine && resource_when(other, cx),
         }
     }

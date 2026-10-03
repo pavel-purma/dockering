@@ -89,6 +89,7 @@ fn main() -> ExitCode {
         factories,
         discover_on_start: true,
         worker_threads: 3,
+        demo: args.demo,
     }) {
         Ok(hub) => hub,
         Err(err) => {

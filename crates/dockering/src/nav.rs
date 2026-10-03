@@ -74,18 +74,20 @@ pub enum SettingsSection {
     Logs,
     Terminal,
     Stats,
+    Updates,
     Diagnostics,
     Keyboard,
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 8] = [
+    pub const ALL: [SettingsSection; 9] = [
         SettingsSection::General,
         SettingsSection::Engines,
         SettingsSection::Containers,
         SettingsSection::Logs,
         SettingsSection::Terminal,
         SettingsSection::Stats,
+        SettingsSection::Updates,
         SettingsSection::Diagnostics,
         SettingsSection::Keyboard,
     ];
@@ -97,6 +99,7 @@ impl SettingsSection {
             SettingsSection::Logs => "Logs",
             SettingsSection::Terminal => "Terminal",
             SettingsSection::Stats => "Stats",
+            SettingsSection::Updates => "Updates",
             SettingsSection::Diagnostics => "Diagnostics",
             SettingsSection::Keyboard => "Keyboard",
         }
@@ -112,6 +115,7 @@ impl SettingsSection {
             SettingsSection::Logs => IconName::FileText,
             SettingsSection::Terminal => IconName::SquareTerminal,
             SettingsSection::Stats => IconName::ChartPie,
+            SettingsSection::Updates => IconName::Redo,
             SettingsSection::Diagnostics => IconName::Info,
             SettingsSection::Keyboard => IconName::ALargeSmall,
         }

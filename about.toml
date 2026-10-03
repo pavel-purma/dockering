@@ -24,7 +24,7 @@ targets = [
 ignore-build-dependencies = false
 ignore-dev-dependencies = true
 ignore-transitive-dependencies = false
-# Our own workspace crates are publish = false and covered by LICENSE-MIT/LICENSE-APACHE.
+# Our own workspace crates are publish = false and covered by LICENSE (MIT).
 private = { ignore = true }
 
 # Per-crate acceptances mirror the `exceptions` in deny.toml (REL-003). Keep both in sync.

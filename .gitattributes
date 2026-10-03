@@ -7,6 +7,7 @@
 *.ico binary
 *.icns binary
 *.bin binary
+*.bmp binary
 
 # Recorded engine output must stay byte-exact (no EOL conversion on any checkout).
 crates/*/tests/fixtures/** -text

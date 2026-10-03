@@ -24,7 +24,7 @@ description = "Native desktop client for container engines"
 longDescription = "Dockering is a fast, native desktop client for Docker, Docker inside WSL distros, and WSL containers (WSLC)."
 homepage = "https://github.com/pavel-purma/dockering"
 authors = ["Dockering contributors"]
-copyright = "Copyright (c) 2026 Dockering contributors. Licensed under MIT OR Apache-2.0."
+copyright = "Copyright (c) 2026 Dockering contributors. Licensed under the MIT License."
 category = "DeveloperTool"
 
 binaries = [{ path = "dockering", main = true }]
@@ -46,8 +46,7 @@ icons = [
 # REL-002: licence texts and third-party notices ship inside every package.
 resources = [
   { src = "../THIRD_PARTY_LICENSES.html", target = "THIRD_PARTY_LICENSES.html" },
-  { src = "../LICENSE-MIT", target = "LICENSE-MIT" },
-  { src = "../LICENSE-APACHE", target = "LICENSE-APACHE" },
+  { src = "../LICENSE", target = "LICENSE" },
 ]
 
 [macos]

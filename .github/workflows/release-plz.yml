@@ -1,0 +1,99 @@
+# Release automation with release-plz (REL-010, REL-011, REL-013).
+#
+# `release-pr` opens or updates ONE release PR `chore(release): vX.Y.Z` on every push (version bump,
+# Cargo.lock, CHANGELOG.md section). `release` runs on the same pushes but only acts when the push
+# is the merge of a release PR (`release_always = false` in release-plz.toml): it creates the tag
+# `vX.Y.Z`, which starts release.yml. release-plz never creates the GitHub Release itself.
+#
+# The release-bot GitHub App token is used instead of GITHUB_TOKEN so that the release PR runs CI
+# and the tag push starts release.yml. App permissions: Contents + Pull requests read/write.
+# Repository secrets (not an environment: GitHub Free can't use environments in private repos):
+# RELEASE_BOT_APP_ID (the App ID or Client ID; both are accepted as `client-id`),
+# RELEASE_BOT_PRIVATE_KEY.
+# Without them, both jobs emit a notice and skip.
+name: Release-plz
+
+on:
+  push:
+    branches: [main, "release/*"]
+
+# The release-bot App token does the writing; GITHUB_TOKEN needs nothing beyond read.
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.98"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-pr:
+    name: release PR
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      # Mapped here so `if: env.X != ''` can gate steps.
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+    steps:
+      - name: Release bot configured?
+        if: env.RELEASE_BOT_APP_ID == ''
+        run: echo "::notice::RELEASE_BOT_APP_ID is not set (repository secret); skipping the release PR."
+      - name: Release bot token
+        id: app
+        if: env.RELEASE_BOT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        if: env.RELEASE_BOT_APP_ID != ''
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app.outputs.token }}
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
+        if: env.RELEASE_BOT_APP_ID != ''
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: release-plz release-pr
+        if: env.RELEASE_BOT_APP_ID != ''
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
+
+  release:
+    name: release (tag)
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
+    steps:
+      - name: Release bot configured?
+        if: env.RELEASE_BOT_APP_ID == ''
+        run: echo "::notice::RELEASE_BOT_APP_ID is not set (repository secret); skipping the release."
+      - name: Release bot token
+        id: app
+        if: env.RELEASE_BOT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        if: env.RELEASE_BOT_APP_ID != ''
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app.outputs.token }}
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
+        if: env.RELEASE_BOT_APP_ID != ''
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: release-plz release
+        if: env.RELEASE_BOT_APP_ID != ''
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}

@@ -1,0 +1,55 @@
+# PR titles must be conventional commits (REL-010): main uses squash merges, so the PR title becomes
+# the commit message that release-plz reads to compute the version and changelog (REL-011).
+# Scopes follow CLAUDE.md "Commit style" plus the distribution scopes.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-title:
+    name: conventional commit title
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            chore
+            ci
+            style
+            build
+            revert
+          scopes: |
+            core
+            hub
+            docker
+            wsl
+            wslc
+            terminal
+            ui
+            containers
+            images
+            volumes
+            networks
+            settings
+            keyboard
+            ci
+            docs
+            spec
+            release
+            update
+            installer
+            deps
+          requireScope: false

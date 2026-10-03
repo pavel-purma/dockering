@@ -21,6 +21,7 @@ The v1 implementation is merged on `main`. Every feature spec is `implemented` e
 | M6 Images, volumes, networks | done | |
 | M7 WSL distros | done | |
 | M8 WSLC (COM + CLI) | done | `run_image` over COM returns 501 until `CreateContainer` is verified |
+| M10 Distribution (post-v1) | in-progress | [windows-distribution](features/windows-distribution.md): CI installer, release flow, Inno installer, signing, winget, updater, icon. Public-only steps wait for the public launch (REL-060) |
 | M9 Settings, polish, packaging | done, except release-only items | Open: signing/notarisation secrets in the `release` environment; CI runs on real runners (incl. the self-hosted `wsl` runner); the [release checklist](release-checklist.md) on 3 OSes; the keyboard-only walkthrough (KBD-090) on macOS, on Linux, and with a Czech layout |
 
 ## 0. Summary of key decisions

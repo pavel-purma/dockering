@@ -6,12 +6,14 @@ mod engine_store;
 mod resource;
 mod terminals;
 mod ticker;
+mod updates;
 
 pub use engine_list::{EngineListEvent, EngineListStore};
 pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
 pub use terminals::{ParkedSessions, TerminalRegistry};
 pub use ticker::Ticker;
+pub use updates::{ManualCheck, UpdateStore};
 
 use dk_hub::{Config, HubHandle, UiState};
 use gpui_kit::{App, Global};
@@ -66,5 +68,6 @@ impl AppState {
 /// Registers the globals. Used by `app::run` and by view tests.
 pub fn install(hub: HubHandle, config: Config, demo: bool, cx: &mut App) {
     cx.set_global(Hub(hub.clone()));
+    UpdateStore::install(hub.clone(), cx);
     cx.set_global(AppState { hub, config, demo });
 }
