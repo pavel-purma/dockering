@@ -62,7 +62,7 @@ rand = "0.9"
 alacritty_terminal = "0.26.0"
 portable-pty = "0.9.0"
 windows = "0.61.3"
-windows-sys = "0.59"
+windows-sys = "0.61"
 
 # dev
 proptest = "1.10"
