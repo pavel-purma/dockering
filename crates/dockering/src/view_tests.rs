@@ -348,8 +348,9 @@ fn con_004_filter_clicks_work_after_clicking_header_background(cx: &mut TestAppC
     let running = visual
         .debug_bounds("filter-running")
         .expect("filter rendered");
+    let all = visual.debug_bounds("filter-all").expect("filter rendered");
     // Empty header space: left of the filters, below the title.
-    let blank = gpui_kit::point(running.origin.x - gpui_kit::px(40.), running.center().y);
+    let blank = gpui_kit::point(all.origin.x - gpui_kit::px(40.), all.center().y);
     assert!(header.contains(&blank));
     visual.simulate_click(blank, Default::default());
     cx.run_until_parked();

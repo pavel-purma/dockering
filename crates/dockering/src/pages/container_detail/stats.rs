@@ -22,7 +22,6 @@ use futures::StreamExt;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::chart::{AreaChart, LineChart};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow};
 use gpui_kit::component::{ActiveTheme, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -37,6 +36,7 @@ use crate::actions::stats as act;
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
+use crate::ui::segmented::{Segment, Segmented};
 
 /// Max points per chart series (STA-003).
 pub const MAX_POINTS: usize = 300;
@@ -726,15 +726,14 @@ impl Render for StatsTab {
             .on_action(cx.listener(|this, _: &act::PrevWindow, _, cx| this.step_window(-1, cx)))
             .on_action(cx.listener(|this, _: &act::NextWindow, _, cx| this.step_window(1, cx)))
             .child(
-                TabBar::new("stats-window-tabs")
-                    .segmented()
+                Segmented::new("stats-window-tabs")
                     .small()
-                    .selected_index(self.window.ix())
-                    .on_click(cx.listener(|this, ix: &usize, w, cx| {
+                    .selected(self.window.ix())
+                    .on_select(cx.listener(|this, ix: &usize, w, cx| {
                         this.set_window(StatsWindow::ALL[*ix], cx);
                         w.focus(&this.window_focus, cx);
                     }))
-                    .children(StatsWindow::ALL.iter().map(|w| Tab::new().label(w.label()))),
+                    .segments(StatsWindow::ALL.iter().map(|w| Segment::new(w.label()))),
             );
         let totals = last.as_ref().map(|l| {
             s::stats_totals(
