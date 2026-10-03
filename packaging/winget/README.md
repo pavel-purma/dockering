@@ -48,7 +48,7 @@ Do this after the first **signed, public, stable** release (REL-060). Confirm th
    `manifests/PavelPurma.Dockering.locale.en-US.yaml`:
    - Publisher `Pavel Purma`
    - PackageName `Dockering`
-   - License `MIT OR Apache-2.0`
+   - License `MIT`
    - ShortDescription "Fast, native desktop client for Docker, Docker in WSL, and WSL containers."
    - Tags `docker`, `containers`, `wsl`, `devtools`
    - Moniker `dockering`

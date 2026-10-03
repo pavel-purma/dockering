@@ -331,8 +331,7 @@ fn portable_archive(
     let file_name = bin_path.file_name().context("binary has no file name")?;
     let mut files: Vec<(PathBuf, PathBuf)> = vec![
         (bin_path.to_path_buf(), stage.join(file_name)),
-        (root.join("LICENSE-MIT"), stage.join("LICENSE-MIT")),
-        (root.join("LICENSE-APACHE"), stage.join("LICENSE-APACHE")),
+        (root.join("LICENSE"), stage.join("LICENSE")),
         (
             root.join("THIRD_PARTY_LICENSES.html"),
             stage.join("THIRD_PARTY_LICENSES.html"),
@@ -471,7 +470,7 @@ fn inno_installer(
     fs::create_dir_all(&stage)?;
     let file_name = bin_path.file_name().context("binary has no file name")?;
     fs::copy(bin_path, stage.join(file_name))?;
-    for f in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.html"] {
+    for f in ["LICENSE", "THIRD_PARTY_LICENSES.html"] {
         fs::copy(root.join(f), stage.join(f)).with_context(|| format!("copying {f}"))?;
     }
 

@@ -2,6 +2,8 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · licensing · REL-001: the project licence is **MIT** only (`LICENSE`), replacing MIT OR Apache-2.0. `LICENSE-APACHE` removed; packages, the installer, and winget updated. Dependency licences are unchanged: `THIRD_PARTY_LICENSES.html` (REL-002) still lists them, and the `cargo deny` allowlist (REL-003) still accepts Apache-2.0 for dependencies.
+
 - 2026-10-03 · release · **Private phase.** Until REL-060, releases are unsigned internal drafts of any version; the signed-stable guard (REL-031) and attestations (REL-013) apply only when `PUBLIC_RELEASES=true`. release-plz uses repository secrets (GitHub Free has no environments for private repos). `docs/release.md` gains the private-phase flow, the per-release checklist steps, the exact required-check names, and the pre-release recipe (`release-plz set-version` doesn't suit this workspace). `THIRD_PARTY_LICENSES.html` regenerated. · [plan](../plan/features/windows-distribution.md)
 
 - 2026-10-03 · release/distribution · Second review pass: UPD-003 signer pin uses subject + issuer DN and fails closed on an invalid running-exe signature, and `apply` re-verifies the installer; UPD-007 pending update survives restarts and the setting being off, every check re-fetches the manifest, all-users relaunch is de-elevated via Explorer; UPD-008 release notes on toast click; UPD-012 downloads under data-local; REL-013 secrets scoped to their steps; REL-032 expected signer subject + strict update-key check; Inno `VersionInfoVersion` accepts pre-release versions; `DisabledReason` (Policy/Setting/Unavailable) drives Settings › Updates. · [plan](../plan/features/windows-distribution.md)

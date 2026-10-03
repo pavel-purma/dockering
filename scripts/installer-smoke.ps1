@@ -35,7 +35,7 @@ function Install([string] $what) {
 }
 
 Install 'install'
-foreach ($f in 'dockering.exe', 'LICENSE-MIT', 'LICENSE-APACHE', 'THIRD_PARTY_LICENSES.html', 'unins000.exe') {
+foreach ($f in 'dockering.exe', 'LICENSE', 'THIRD_PARTY_LICENSES.html', 'unins000.exe') {
     if (-not (Test-Path (Join-Path $dir $f))) { Fail "missing $f in $dir" }
 }
 $reported = & (Join-Path $dir 'dockering.exe') --version

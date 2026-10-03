@@ -48,7 +48,7 @@ fn main() {
         ("OriginalFilename", "dockering.exe"),
         (
             "LegalCopyright",
-            "Copyright (c) 2026 Dockering contributors. MIT OR Apache-2.0.",
+            "Copyright (c) 2026 Dockering contributors. MIT License.",
         ),
         ("FileVersion", version.as_str()),
         ("ProductVersion", version.as_str()),

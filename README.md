@@ -155,7 +155,7 @@ details, including signing and the go-public checklist. PR titles use
 
 ## License
 
-Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Licensed under the [MIT License](LICENSE).
 Third-party notices: [THIRD_PARTY_LICENSES.html](THIRD_PARTY_LICENSES.html).
 
 ## Contributing with agents

@@ -452,7 +452,7 @@ sign release assets locally from the draft and re-upload them (a documented manu
 1. `winget install Komac` (or `wingetcreate`).
 2. `komac new PavelPurma.Dockering --version 0.2.0 --urls https://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-Setup-x64.exe https://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-Setup-arm64.exe`
    Komac detects `inno` and both scopes. Fill in Publisher `Pavel Purma`, PackageName `Dockering`,
-   License `MIT OR Apache-2.0`, ShortDescription (§A4 tagline), Tags `docker, containers, wsl, devtools`,
+   License `MIT`, ShortDescription (§A4 tagline), Tags `docker, containers, wsl, devtools`,
    Moniker `dockering`, `ReleaseNotesUrl`.
 3. Check the locale manifest. Make sure `UpgradeBehavior: install` and that both `Scope: user` and
    `machine` entries exist (Inno's `/CURRENTUSER` vs `/ALLUSERS`).
