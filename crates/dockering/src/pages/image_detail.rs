@@ -16,12 +16,13 @@ use gpui_kit::{
 
 use crate::actions::res::{CopyDigest, ReplaceRoute, TagImage};
 use crate::actions::{detail, image, list};
+use crate::assets::Lucide;
 use crate::nav::{ContainerTab, ImageTab, Route};
 use crate::pages::images::dialogs::{RunDialog, TagDialog};
 use crate::pages::images::model::{ImageRow, rows as image_rows};
 use crate::pages::resources::detail::{
-    InspectView, LinkList, Loaded, bool_value, gone_banner, header, header_action, kv_section,
-    lines_value, map_value, mono_value, route_link, step_tab, tab_bar, text_value,
+    InspectView, LinkList, Loaded, TabSpec, bool_value, gone_banner, header, header_action,
+    kv_section, lines_value, map_value, mono_value, route_link, step_tab, tab_bar, text_value,
 };
 use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
@@ -37,12 +38,12 @@ pub const TABS: [ImageTab; 4] = [
     ImageTab::Inspect,
 ];
 
-fn tab_label(t: ImageTab) -> &'static str {
+fn tab_spec(t: ImageTab) -> TabSpec {
     match t {
-        ImageTab::Overview => s::TAB_OVERVIEW,
-        ImageTab::Layers => s::TAB_LAYERS,
-        ImageTab::UsedBy => s::TAB_USED_BY,
-        ImageTab::Inspect => s::TAB_INSPECT,
+        ImageTab::Overview => TabSpec::new(s::TAB_OVERVIEW, IconName::LayoutDashboard),
+        ImageTab::Layers => TabSpec::new(s::TAB_LAYERS, Lucide::Layers),
+        ImageTab::UsedBy => TabSpec::new(s::TAB_USED_BY, Lucide::Boxes),
+        ImageTab::Inspect => TabSpec::new(s::TAB_INSPECT, Lucide::Braces),
     }
 }
 
@@ -575,10 +576,10 @@ impl Render for ImageDetailPage {
         let gone = self.details.is_gone();
         let ro = self.read_only(cx) || gone;
         let enabled = self.enabled_tabs(cx);
-        let labels: Vec<(&'static str, bool)> = TABS
+        let tabs: Vec<TabSpec> = TABS
             .iter()
             .zip(&enabled)
-            .map(|(t, e)| (tab_label(*t), !*e))
+            .map(|(t, e)| tab_spec(*t).disabled(!*e))
             .collect();
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let this = cx.entity().downgrade();
@@ -644,7 +645,6 @@ impl Render for ImageDetailPage {
                     ),
                     header_action("img-delete", s::DELETE, None, Box::new(list::Delete), ro),
                 ],
-                window,
                 cx,
             ))
             .when(gone, |this| {
@@ -652,7 +652,7 @@ impl Render for ImageDetailPage {
             })
             .child(tab_bar(
                 &self.tabs_focus,
-                &labels,
+                tabs,
                 selected,
                 move |ix, window, cx| {
                     this.update(cx, |p, cx| {
@@ -662,7 +662,6 @@ impl Render for ImageDetailPage {
                     })
                     .ok();
                 },
-                window,
                 cx,
             ))
             .child(
@@ -678,7 +677,7 @@ impl Render for ImageDetailPage {
 
 /// Short helper for tests: the tab's label.
 pub fn label_of(t: ImageTab) -> &'static str {
-    tab_label(t)
+    tab_spec(t).label
 }
 
 #[allow(dead_code)]

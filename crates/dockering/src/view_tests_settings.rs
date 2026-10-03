@@ -19,6 +19,7 @@ use crate::nav::{Page, Route, SettingsSection};
 use crate::pages::settings::controls::{BoolKey, Key};
 use crate::pages::settings::{AddEngineDialog, SettingsPage};
 use crate::shell::ShellPage;
+use crate::shell::app_shell::SidebarEntry;
 use crate::state::AppState;
 use crate::strings as s;
 use crate::testing::{Harness, Setup, start, start_with_factories};
@@ -48,6 +49,11 @@ fn open(h: &Harness, cx: &mut TestAppContext, section: SettingsSection) -> Entit
     settings_page(h, cx).expect("settings page")
 }
 
+/// The shell sidebar: the settings section nav (SET-080).
+fn sidebar(h: &Harness, cx: &mut TestAppContext) -> gpui_kit::FocusHandle {
+    h.read(cx, |s, _, _| s.sidebar_focus().clone())
+}
+
 fn config(cx: &mut TestAppContext) -> dk_hub::Config {
     cx.read(|cx| AppState::config(cx).clone())
 }
@@ -56,10 +62,15 @@ fn hub_config(h: &Harness) -> dk_hub::Config {
     h.hub.config().get()
 }
 
+/// Runs an engine row command the way its button does: dispatched from the settings page's
+/// root (focus may be in the shell sidebar, outside the page, SET-080).
 fn engine_op(h: &Harness, cx: &mut TestAppContext, id: &str, op: EngineOpKind) {
     let id: gpui_kit::SharedString = id.to_owned().into();
+    let page = settings_page(h, cx)
+        .expect("settings page")
+        .read_with(cx, |p, _| p.focus().clone());
     h.update(cx, |_, window, cx| {
-        window.dispatch_action(Box::new(EngineOp { id, op }), cx)
+        page.dispatch_action(&EngineOp { id, op }, window, cx)
     });
     h.draw(cx);
 }
@@ -187,10 +198,57 @@ fn kbd_024_mod_comma_opens_settings_with_nav_focus(cx: &mut TestAppContext) {
             section: SettingsSection::General
         }
     );
-    let page = settings_page(&h, cx).expect("settings mounted");
-    h.wait_until(cx, "nav focused", |window, cx| {
-        page.read(cx).nav_focus().is_focused(window)
+    // SET-080: the section nav is the shell sidebar, cursor on the active section.
+    settings_page(&h, cx).expect("settings mounted");
+    let nav = sidebar(&h, cx);
+    h.wait_until(cx, "nav focused", |window, _| nav.is_focused(window));
+    assert_eq!(
+        h.read(cx, |s, _, cx| s.sidebar_entries(cx)[s.sidebar_cursor()]
+            .clone()),
+        SidebarEntry::Section(SettingsSection::General)
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn set_080_settings_sidebar_back_returns_to_app_page(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::GoImages), cx)
     });
+    h.wait_until(cx, "images", |_, cx| {
+        *h.shell.read(cx).route() == Route::Images
+    });
+    open(&h, cx, SettingsSection::Logs);
+    // Settings mode: Back to the last app page, then every section (same nav component).
+    let entries = h.read(cx, |s, _, cx| s.sidebar_entries(cx));
+    assert_eq!(entries[0], SidebarEntry::Back(Route::Images));
+    assert_eq!(
+        entries[1..].to_vec(),
+        SettingsSection::ALL
+            .iter()
+            .map(|s| SidebarEntry::Section(*s))
+            .collect::<Vec<_>>()
+    );
+    let nav = sidebar(&h, cx);
+    h.focus(cx, &nav);
+    h.press(cx, "home");
+    assert_eq!(h.read(cx, |s, _, _| s.sidebar_cursor()), 0);
+    // Home lands on Back: the route stays on the section.
+    assert_eq!(
+        h.read(cx, |s, _, _| s.route().clone()),
+        Route::Settings {
+            section: SettingsSection::Logs
+        }
+    );
+    h.press(cx, "enter");
+    h.wait_until(cx, "back on images", |_, cx| {
+        *h.shell.read(cx).route() == Route::Images
+    });
+    // Outside Settings the sidebar lists the main pages again.
+    let entries = h.read(cx, |s, _, cx| s.sidebar_entries(cx));
+    assert!(entries.iter().all(|e| matches!(e, SidebarEntry::Page(_))));
     h.shutdown();
 }
 
@@ -199,7 +257,7 @@ fn set_route_section_arrows_and_back_forward(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     let page = open(&h, cx, SettingsSection::General);
-    let nav = cx.read(|cx| page.read(cx).nav_focus().clone());
+    let nav = sidebar(&h, cx);
     h.focus(cx, &nav);
     // Arrows move between sections in place (no history entry).
     h.press(cx, "down");
@@ -218,7 +276,13 @@ fn set_route_section_arrows_and_back_forward(cx: &mut TestAppContext) {
         cx.read(|cx| page.read(cx).section()),
         SettingsSection::Keyboard
     );
+    // Home lands on *Back* (SET-080): the section stays; the next arrow shows General.
     h.press(cx, "home");
+    assert_eq!(
+        cx.read(|cx| page.read(cx).section()),
+        SettingsSection::Keyboard
+    );
+    h.press(cx, "down");
     assert_eq!(
         cx.read(|cx| page.read(cx).section()),
         SettingsSection::General
@@ -1004,7 +1068,7 @@ fn set_070_keyboard_section_lists_bindings(cx: &mut TestAppContext) {
         crate::keymap::reference_rows(crate::keymap::Os::current())
     );
     // Mod+F filters the list (KBD-025 on this page).
-    let nav = cx.read(|cx| page.read(cx).nav_focus().clone());
+    let nav = sidebar(&h, cx);
     h.focus(cx, &nav);
     h.press(cx, "ctrl-f");
     h.type_text(cx, "palette");
@@ -1016,8 +1080,8 @@ fn set_070_keyboard_section_lists_bindings(cx: &mut TestAppContext) {
 
 // ── KBD-092: Tab reaches every control of each section, in order, without traps ──────
 
-fn tab_walk(h: &Harness, cx: &mut TestAppContext, page: &Entity<SettingsPage>) -> usize {
-    let nav = cx.read(|cx| page.read(cx).nav_focus().clone());
+fn tab_walk(h: &Harness, cx: &mut TestAppContext, _page: &Entity<SettingsPage>) -> usize {
+    let nav = sidebar(h, cx);
     h.focus(cx, &nav);
     let mut seen = Vec::new();
     for _ in 0..200 {

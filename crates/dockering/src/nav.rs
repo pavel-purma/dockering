@@ -104,6 +104,22 @@ impl SettingsSection {
             SettingsSection::Keyboard => "Keyboard",
         }
     }
+
+    /// The section's sidebar icon (SET-080).
+    pub fn icon(self) -> gpui_kit::component::IconName {
+        use gpui_kit::component::IconName;
+        match self {
+            SettingsSection::General => IconName::Settings2,
+            SettingsSection::Engines => IconName::Frame,
+            SettingsSection::Containers => IconName::Inspector,
+            SettingsSection::Logs => IconName::FileText,
+            SettingsSection::Terminal => IconName::SquareTerminal,
+            SettingsSection::Stats => IconName::ChartPie,
+            SettingsSection::Updates => IconName::Redo,
+            SettingsSection::Diagnostics => IconName::Info,
+            SettingsSection::Keyboard => IconName::ALargeSmall,
+        }
+    }
 }
 
 /// Exactly the routes of spec 30 §2.

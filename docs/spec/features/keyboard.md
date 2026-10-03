@@ -16,7 +16,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 |---|---|
 | KBD-001 | **Full operability.** Every interactive element (button, link, tab, menu, input, checkbox, table row, group row, chart window selector, dialog control) MUST be focusable and activatable from the keyboard. Any mouse-only feature is a bug. |
 | KBD-002 | **Everything is an action.** Every user command is a GPUI `Action` (registered with `actions!` / `#[derive(Action)]`) dispatched in a `key_context`. Buttons, menus, the command palette, and shortcuts all invoke the same action. No logic lives only in click handlers. |
-| KBD-003 | **Visible focus.** The focused element always shows a focus ring drawn with the theme's `ring` colour, at ≥ 3:1 contrast in light and dark themes. Focus is never invisible. |
+| KBD-003 | **No focus rings.** Focused controls draw no ring or accent border (theme `focus_ring = false`, `ring` = the input border colour). Keyboard position stays visible through the controls' own state: the table cursor row, the sidebar cursor tint, the text caret, and open menus. (Revised 2026-10-02: shortcuts are the goal, not a focus-ring-driven keyboard-only UI.) |
 | KBD-004 | **Logical Tab order.** `Tab` / `Shift+Tab` cycle focus *within the current region* in visual order (left→right, top→bottom), using `tab_index` / `tab_stop`. Rows inside a table are **not** separate Tab stops: the table is one stop with arrow-key navigation inside it (roving focus). |
 | KBD-005 | **Regions (landmarks).** The window has four focus regions: *Title bar*, *Sidebar*, *Content*, and *Status bar*. The page header/toolbar and the detail tab bar belong to *Content* and are reached with `Tab` inside it. On Settings routes the *Sidebar* region holds the settings section nav (SET-080). `F6` / `Shift+F6` cycle between regions. Each region remembers its last-focused child. |
 | KBD-006 | **Escape semantics**, in priority order: close the open popup or menu → close the dialog → clear the search field when it's focused and non-empty → clear the multi-selection → return focus from the content to the page's primary list. `Esc` never navigates back (that's `Alt+←`). |
@@ -127,7 +127,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | ID | Tests / evidence |
 |---|---|
 | KBD-001, 002 | `a11y_every_action_bound_or_in_palette` (all actions reachable); buttons and menus dispatch actions (`OnRow`, `EngineOp`, …) |
-| KBD-003 | `focus_ring` helper with the theme `ring` token; contrast checked in the light/dark screenshot review (release checklist) |
+| KBD-003 | `theme.rs` sets `focus_ring = false` and `ring = input`; no app element draws a `ring` border |
 | KBD-004 | `ListTable > DataTable` `tab`/`shift-tab` overrides; `a11y_tab_walk_reaches_all_interactive_settings` |
 | KBD-005 | `kbd_005_f6_cycles_regions` |
 | KBD-006 | `kbd_006_escape_priority_order` |
@@ -184,5 +184,4 @@ No digit chords are used for sorting (layout safety, KBD-083).
 - **KBD-092:** the Tab-walk reachability test covers the Settings page only. Lists, detail pages, and dialogs are covered by the KBD-091 keystroke tests and the KBD-090 walkthrough, not by a Tab-walk harness. *Follow-up:* extend `tab_walk` to every page.
 - **KBD-090:** the keyboard-only walkthrough is a release-checklist item. Still due on macOS, on Linux, and with a Czech layout. No recorded checklist run exists in the repo yet.
 - **KBD-073:** type-ahead inside menus and selects is whatever GPUI Kit `PopupMenu`/`Select` provide. It isn't verified.
-- **KBD-003:** focus-ring contrast (≥ 3:1) isn't measured automatically. It's part of the light/dark screenshot review.
 - **Column headers** (sorting) aren't Tab stops. Sorting from the keyboard uses `Mod+Shift+O` (see *List pages*).

@@ -208,7 +208,6 @@ impl Render for ConfirmView {
                             cx.listener(|this, _: &gpui_kit::KeyDownEvent, window, cx| {
                                 this.cancel(window, cx)
                             }),
-                            window,
                             cx,
                         ))
                         .child(focus_wrap(
@@ -229,7 +228,6 @@ impl Render for ConfirmView {
                             cx.listener(|this, _: &gpui_kit::KeyDownEvent, window, cx| {
                                 this.confirm(window, cx)
                             }),
-                            window,
                             cx,
                         )),
                 ),

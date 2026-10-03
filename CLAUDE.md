@@ -20,7 +20,7 @@ Either follow the spec, or update the spec first through the `feature-planning` 
 - **Store task handles.** `gpui::Task`s live on the entity that owns them. Use `.detach()` only for fire-and-forget actions that report through a notification.
 - **Guard stale results** with a revision or request id before applying async results.
 - **Layering** (ADR-0001): `dk-core` has no tokio, bollard, or GPUI. Only `dockering` and `dk-terminal` use GPUI Kit. The UI never names tokio types.
-- **Keyboard-first UI** (`docs/spec/features/keyboard.md`): everything must work without a mouse. Every command is a GPUI `Action` with a binding in `keymap.rs` or a command-palette entry, has a visible focus ring, and restores focus correctly.
+- **Keyboard shortcuts** (`docs/spec/features/keyboard.md`): almost every action is reachable by a shortcut. Every command is a GPUI `Action` with a binding in `keymap.rs` or a command-palette entry, and restores focus correctly. No focus rings or accent focus borders (KBD-003).
 - **GPUI Kit first.** Use GPUI Kit components and theme tokens. Write custom elements only when no component exists, and note it in the PR.
 - **Capability gating.** Any op that isn't universal is checked against `Capabilities` in the UI. Never branch UI behaviour on `EngineKind` (ENG-030). New runtimes plug in as an `EngineFactory` crate (spec 21 §0/§8). Apple `container` is reserved but deferred (ADR-0005).
 - **No shell interpolation.** Child processes get argv vectors. Validate ids and names (NFR-022).

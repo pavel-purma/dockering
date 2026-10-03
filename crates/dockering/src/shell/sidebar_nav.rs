@@ -2,8 +2,10 @@
 //! GPUI Kit `SidebarMenuItem` paints hover and the active page with the same token, so the
 //! selected page doesn't stand out. Here hover is a quiet neutral tint, and the active page
 //! gets an accent tint and an accent icon. The keyboard cursor (sidebar region focused)
-//! draws the focus ring on the item itself, not around the whole region, so focus never
-//! changes the sidebar's size (KBD-003).
+//! gets the hover tint; nothing draws a focus ring.
+//!
+//! The same items render the main pages and, on Settings routes, *Back to <Page>* plus the
+//! settings sections (SET-080), so both menus look and behave alike.
 
 use gpui_kit::component::sidebar::SidebarItem;
 use gpui_kit::component::tooltip::Tooltip;
@@ -14,34 +16,43 @@ use gpui_kit::{
 };
 
 use crate::actions::Navigate;
-use crate::nav::Page;
+use crate::nav::Route;
 use crate::theme::accent_text;
 
-/// One sidebar page entry.
+/// One sidebar entry: a page, a settings section, or *Back*.
 #[derive(Clone)]
 pub struct NavItem {
-    pub page: Page,
+    pub label: SharedString,
+    /// Where a click navigates.
+    pub route: Route,
     pub icon: Icon,
     pub count: Option<usize>,
-    /// The current route's page.
+    /// The current route's entry.
     pub active: bool,
     /// The keyboard cursor while the sidebar region has focus.
     pub cursor: bool,
 }
 
-/// The list of [`NavItem`]s rendered as one sidebar section.
+/// The [`NavItem`]s of one sidebar, in groups. A group may carry a heading (styled like a
+/// GPUI Kit `SidebarGroup` label); collapsed, headings become a thin divider.
 #[derive(Clone)]
 pub struct NavMenu {
-    items: Vec<NavItem>,
+    groups: Vec<(Option<SharedString>, Vec<NavItem>)>,
     collapsed: bool,
 }
 
 impl NavMenu {
     pub fn new(items: Vec<NavItem>) -> Self {
         Self {
-            items,
+            groups: vec![(None, items)],
             collapsed: false,
         }
+    }
+
+    /// Appends a group under `heading`.
+    pub fn group(mut self, heading: impl Into<SharedString>, items: Vec<NavItem>) -> Self {
+        self.groups.push((Some(heading.into()), items));
+        self
     }
 }
 
@@ -56,35 +67,51 @@ impl Collapsible for NavMenu {
 }
 
 impl SidebarItem for NavMenu {
-    fn render(
-        self,
-        id: impl Into<ElementId>,
-        _window: &mut Window,
-        cx: &mut App,
-    ) -> impl IntoElement {
+    fn render(self, id: impl Into<ElementId>, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let collapsed = self.collapsed;
-        v_flex().id(id.into()).gap_0p5().children(
-            self.items
-                .into_iter()
-                .enumerate()
-                .map(|(ix, item)| render_item(ix, item, collapsed, cx)),
-        )
+        let heading_fg = cx.theme().sidebar_foreground.opacity(0.7);
+        let divider = cx.theme().sidebar_border;
+        let mut children = Vec::new();
+        let mut ix = 0;
+        for (heading, items) in self.groups {
+            if let Some(heading) = heading {
+                children.push(if collapsed {
+                    div().my_1().mx_2().h(px(1.)).bg(divider).into_any_element()
+                } else {
+                    h_flex()
+                        .mt_2()
+                        .px_2()
+                        .h_8()
+                        .text_xs()
+                        .text_color(heading_fg)
+                        .child(heading)
+                        .into_any_element()
+                });
+            }
+            for item in items {
+                children.push(render_item(ix, item, collapsed, cx));
+                ix += 1;
+            }
+        }
+        v_flex().id(id.into()).gap_0p5().children(children)
     }
 }
 
 fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit::AnyElement {
     let theme = cx.theme();
     let accent = accent_text(theme.is_dark());
-    let label: SharedString = item.page.label().into();
-    let route = item.page.route();
+    let label = item.label.clone();
+    let route = item.route.clone();
+    let hover_bg = theme.sidebar_accent;
+    // The keyboard cursor reads like hover: no ring, no border.
     let (bg, fg) = if item.active {
         (theme.primary.opacity(0.16), theme.foreground)
+    } else if item.cursor {
+        (hover_bg, theme.foreground)
     } else {
         (transparent_black(), theme.muted_foreground)
     };
-    let hover_bg = theme.sidebar_accent;
     let hover_fg = theme.foreground;
-    let ring = theme.ring;
     let badge_bg = if item.active {
         theme.primary.opacity(0.22)
     } else {
@@ -114,13 +141,6 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
         .cursor_pointer()
         .bg(bg)
         .text_color(fg)
-        // Always 1 px, transparent unless it's the cursor: focus never shifts layout.
-        .border_1()
-        .border_color(if item.cursor {
-            ring
-        } else {
-            transparent_black()
-        })
         .when(item.active, |this| {
             this.font_weight(gpui_kit::FontWeight::MEDIUM)
         })
@@ -147,7 +167,7 @@ fn render_item(ix: usize, item: NavItem, collapsed: bool, cx: &App) -> gpui_kit:
             this.tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
         })
         // A mouse click navigates without moving focus into the sidebar region, so the
-        // new page takes focus (KBD-007) and no focus ring appears on the sidebar.
+        // new page takes focus (KBD-007) and no cursor appears on the sidebar.
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .on_click(move |_, window, cx| {
             window.dispatch_action(

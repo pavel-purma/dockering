@@ -4,12 +4,11 @@
 
 use dk_hub::{DisabledReason, UpdateCheck, UpdateStatus};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, IntoElement, SharedString, Window, div};
+use gpui_kit::{AnyElement, Context, IntoElement, SharedString, div};
 
 use super::SettingsPage;
 use super::controls::BoolKey;
@@ -28,11 +27,7 @@ enum Mode {
     Normal,
 }
 
-pub(super) fn blocks(
-    this: &mut SettingsPage,
-    _window: &mut Window,
-    cx: &mut Context<SettingsPage>,
-) -> Vec<AnyElement> {
+pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> Vec<AnyElement> {
     let store = UpdateStore::global(cx);
     let status = store
         .as_ref()
@@ -70,7 +65,7 @@ pub(super) fn blocks(
         .disabled(checking || mode != Mode::Normal)
         .tooltip_with_action(s::CMD_CHECK_FOR_UPDATES, &CheckForUpdates, None)
         .debug_selector(|| "upd-check-now".into())
-        .on_click(super::dispatch_here(&this.nav_focus, CheckForUpdates));
+        .on_click(super::dispatch_here(&this.focus, CheckForUpdates));
 
     let result: Option<(SharedString, bool)> = match &manual {
         Some(ManualCheck::Done(UpdateCheck::UpToDate)) => Some((s::UPD_UP_TO_DATE.into(), false)),
@@ -164,19 +159,13 @@ pub(super) fn blocks(
             .ghost()
             .icon(IconName::ExternalLink)
             .label(s::CMD_VIEW_RELEASE_NOTES)
-            .on_click(super::dispatch_here(&this.nav_focus, ViewReleaseNotes))
+            .on_click(super::dispatch_here(&this.focus, ViewReleaseNotes))
             .into_any_element(),
         None,
         cx,
     ));
 
-    vec![
-        GroupBox::new()
-            .outline()
-            .title(s::UPD_GROUP)
-            .child(v_flex().gap_3().children(rows))
-            .into_any_element(),
-    ]
+    vec![crate::ui::section(s::UPD_GROUP, v_flex().gap_3().children(rows), cx).into_any_element()]
 }
 
 fn note(text: &'static str, cx: &Context<SettingsPage>) -> AnyElement {

@@ -424,12 +424,7 @@ impl AddEngineDialog {
         cx.notify();
     }
 
-    fn render_field(
-        &self,
-        f: &dk_core::ConfigField,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_field(&self, f: &dk_core::ConfigField, cx: &mut Context<Self>) -> AnyElement {
         let key = (self.kind, f.key.clone());
         let error = self.errors.get(&f.key).map(|e| SharedString::from(*e));
         let control: AnyElement = match &f.kind {
@@ -513,7 +508,6 @@ impl AddEngineDialog {
                 )
                 .into_any_element()
         };
-        let _ = window;
         if matches!(f.kind, ConfigFieldKind::Bool) {
             // The switch carries its own label.
             return v_flex()
@@ -640,7 +634,6 @@ impl Render for AddEngineDialog {
                 move |_, _, cx| {
                     t2.update(cx, |d, cx| d.run_test(cx)).ok();
                 },
-                window,
                 cx,
             ))
             .child(div().flex_1())
@@ -651,7 +644,6 @@ impl Render for AddEngineDialog {
                     .label(s::CANCEL)
                     .on_click(|_, window, cx| close(window, cx)),
                 |_, window, cx| close(window, cx),
-                window,
                 cx,
             ))
             .when(failed, |this| {
@@ -667,7 +659,6 @@ impl Render for AddEngineDialog {
                     move |_, window, cx| {
                         a2.update(cx, |d, cx| d.save(true, window, cx)).ok();
                     },
-                    window,
                     cx,
                 ))
             })
@@ -690,7 +681,6 @@ impl Render for AddEngineDialog {
                 move |_, window, cx| {
                     s2.update(cx, |d, cx| d.save(false, window, cx)).ok();
                 },
-                window,
                 cx,
             ));
         let mut body = form_root("add-engine-dialog", cx);
@@ -714,7 +704,7 @@ impl Render for AddEngineDialog {
                     None,
                     cx,
                 ))
-                .children(fields.iter().map(|f| self.render_field(f, window, cx)));
+                .children(fields.iter().map(|f| self.render_field(f, cx)));
         }
         body.children(self.render_test(cx))
             .children(form_error(form_err, cx))

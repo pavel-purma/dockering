@@ -5,8 +5,9 @@
 - **Plan:** no per-feature plan; built in milestone M9 of the [v1 plan](../../plan/README.md)
 
 Settings is a full page (route `Settings { section }`, so deep links and back/forward work). The
-section nav is the **app sidebar in Settings mode** (SET-080): the page draws no column of its own.
-The content column holds GPUI Kit primitives: `GroupBox` groups with
+section nav is the **app sidebar in Settings mode** (SET-080): the page draws no column of its own; its
+content column is capped at 900 px and centred in the space right of the sidebar.
+The content column holds titled sections (`ui::section`, spec 30 §4) with
 `Switch`, `NumberInput`, `Input`, and `Select` controls, plus inline validation messages.
 
 The GPUI Kit `Settings` container is **not** used. Its virtualised page list drops off-screen
@@ -24,7 +25,7 @@ per row.
 | Terminal | SET-040 | Font family · Font size · Default shell · Scrollback lines · External terminal command (TRM-009; must contain `{cmd}`, validated inline) |
 | Stats | SET-050 | History window (default 15 min, 1–60) · CPU % relative to all cores |
 | Diagnostics | SET-060 | Log level (Info/Debug; **applies on restart**, because the tracing filter is installed once at startup; `RUST_LOG` overrides it) · Open logs folder · Copy diagnostics · per-engine transport, version, and note (ENG-110) · Version / licences (REL-002) |
-| Navigation | SET-080 | *(planned, [plan](../../plan/features/ui-tabs-settings-nav.md))* On a Settings route the app sidebar shows a *Back to <Page>* item (returns to the last non-Settings route; the start page if none) followed by one item per section, rendered with the same nav item component as the main menu (hover tint, accent active item, count-less). Opening Settings focuses the sidebar with the cursor on the active section. `↑/↓/Home/End` move the cursor and show that section in place (no history entry); `Enter`/`Space` on a section enter its first control, on *Back* they navigate. A click on a section pushes its route. |
+| Navigation | SET-080 | On a Settings route the app sidebar shows a *Back to <Page>* item (returns to the last non-Settings route; the start page if none) followed by one item per section, rendered with the same nav item component as the main menu (hover tint, accent active item, count-less); the sections sit under a *Settings* heading. After an engine switch *Back* points at the parent list of a detail route; when the Networks page is hidden it falls back to Containers. Opening Settings focuses the sidebar with the cursor on the active section. `↑/↓/Home/End` move the cursor and show that section in place (no history entry); `Enter`/`Space` on a section enter its first control, on *Back* they navigate. A click on a section pushes its route. |
 | Updates | SET-090 | *Check for updates automatically* (default on) · current version · last checked + result · *Check now* (inline result) · *View release notes*. Disabled with a note when a policy or `DOCKERING_DISABLE_UPDATES` turns updates off. In builds without the `updater` feature the section says *Updates aren't available in this build* and *Check now* is disabled. See [distribution.md](distribution.md) UPD-009. |
 | Keyboard | SET-070 | Read-only keymap view (the same as the shortcut reference, KBD-022). Rebinding is reserved for post-v1 (KBD-081). |
 
@@ -38,6 +39,7 @@ per row.
 | SET-030/040/050 | `set_030_040_050_numbers_text_and_switches_persist`, `set_040_font_size_accepts_decimals`, `set_050_history_window_1_to_60_minutes` |
 | SET-060 | `set_060_copy_diagnostics_to_clipboard`, `set_060_log_level_persists`, `rel_002_licences_are_embedded` |
 | SET-070 | `set_070_keyboard_section_lists_bindings` |
+| SET-080 | `set_080_settings_sidebar_back_returns_to_app_page`, `set_route_section_arrows_and_back_forward`, `kbd_024_mod_comma_opens_settings_with_nav_focus` |
 | Route, Tab order | `set_route_section_arrows_and_back_forward`, `kbd_024_mod_comma_opens_settings_with_nav_focus`, `a11y_tab_walk_reaches_all_interactive_settings` |
 
 ## Known gaps (v1)

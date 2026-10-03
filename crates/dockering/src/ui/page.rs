@@ -14,7 +14,7 @@ pub trait PageView {
     }
 
     /// Escape chain step 3 (KBD-006): clear a focused, non-empty search. Returns true if handled.
-    fn clear_search_if_focused(&mut self, _window: &mut Window, _cx: &mut App) -> bool {
+    fn clear_search_if_focused(&mut self, _: &mut Window, _: &mut App) -> bool {
         false
     }
 }

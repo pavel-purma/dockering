@@ -246,6 +246,95 @@ fn kbd_034_space_toggles_selection(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// SHL-005: the header's summary (`8 running · 4 stopped`) gives way to the selection
+/// actions as soon as one row is checked, and comes back when the selection clears.
+#[gpui_kit::test]
+fn shl_005_selection_actions_replace_summary(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let rendered = |cx: &mut TestAppContext, selector: &'static str| {
+        h.draw(cx);
+        gpui_kit::VisualTestContext::from_window(h.any_window(), cx)
+            .debug_bounds(selector)
+            .is_some()
+    };
+    assert!(rendered(cx, "page-summary"));
+    assert!(!rendered(cx, "selection-actions"));
+    h.focus_table(cx);
+    h.select_row(cx, &id_of("redis"));
+    h.press(cx, "space");
+    assert!(
+        rendered(cx, "selection-actions"),
+        "one checked row is enough"
+    );
+    assert!(!rendered(cx, "page-summary"));
+    h.press(cx, "escape");
+    assert!(rendered(cx, "page-summary"));
+    assert!(!rendered(cx, "selection-actions"));
+    h.shutdown();
+}
+
+/// SHL-005: a single checked row is what *Stop* in the selection actions acts on, not the
+/// cursor row.
+#[gpui_kit::test]
+fn shl_005_bulk_stop_acts_on_one_checked_row(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let redis = id_of("redis");
+    h.focus_table(cx);
+    h.select_row(cx, &redis);
+    h.press(cx, "space");
+    h.select_row(cx, &id_of("billing-svc"));
+    h.engine.clear_calls();
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::list::BulkStop), cx)
+    });
+    h.wait_until(cx, "stop called", |_, _| {
+        !h.engine.calls_to("stop").is_empty()
+    });
+    let stops = h.engine.calls_to("stop");
+    assert_eq!(stops.len(), 1);
+    assert_eq!(stops[0].arg, redis);
+    h.shutdown();
+}
+
+/// SHL-005: a mouse click on a row checkbox checks it (without focusing the table first);
+/// the select-all checkbox in the table header checks every visible row, and a second click
+/// clears the selection.
+#[gpui_kit::test]
+fn shl_005_header_checkbox_selects_all(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    let selected = |cx: &mut TestAppContext| {
+        cx.read(|cx| page.read(cx).table().read(cx).model(cx).selected().len())
+    };
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let row = visual
+        .debug_bounds("row-check-1")
+        .expect("row checkbox rendered");
+    visual.simulate_click(row.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(selected(cx), 1, "row checkbox click");
+    visual.simulate_click(row.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(selected(cx), 0, "second click unchecks");
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let header = visual
+        .debug_bounds("select-all")
+        .expect("select-all checkbox rendered");
+    visual.simulate_click(header.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(selected(cx), 12, "every container");
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    visual.simulate_click(header.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(selected(cx), 0);
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn kbd_030_s_starts_stopped_container(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());

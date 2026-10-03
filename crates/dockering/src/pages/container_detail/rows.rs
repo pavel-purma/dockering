@@ -5,7 +5,7 @@
 //! (image, volume, network, port), and `Space` reveals or hides a masked value (CDT-010).
 //!
 //! Sections are rebuilt from the inspect data on every render (cheap) and rendered with
-//! GPUI Kit `GroupBox` + `DescriptionList` (key/value) or the Kit `Table` (tabular data).
+//! a [`crate::ui::section`] heading + `DescriptionList` (key/value) or the Kit `Table`.
 //! The cursor and the revealed set are kept by row *key*, so a refresh never moves them
 //! (KBD-007, SHL-004).
 
@@ -13,10 +13,8 @@ use std::cell::Cell as StdCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::description_list::{DescriptionItem, DescriptionList};
-use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::table::{Table, TableBody, TableCell, TableHead, TableHeader, TableRow};
 use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -27,6 +25,7 @@ use gpui_kit::{
 
 use crate::actions::rows;
 use crate::strings as s;
+use crate::ui::menu::TrackBounds as _;
 use crate::ui::notify;
 
 /// Key context of a rows panel (bindings in `keymap.rs`).
@@ -315,7 +314,6 @@ pub fn render<V: 'static>(
         .track_scroll(&state.scroll)
         .p_1()
         .rounded(cx.theme().radius)
-        .map(|el| crate::ui::focus_ring(el, focused, cx))
         .on_action(cx.listener(move |v, _: &rows::Up, _, cx| up(v, cx)))
         .on_action(cx.listener(move |v, _: &rows::Down, _, cx| down(v, cx)))
         .on_action(cx.listener(move |v, _: &rows::PageUp, _, cx| pg_up(v, cx)))
@@ -372,10 +370,6 @@ fn render_section<V: 'static>(
     cx: &mut Context<V>,
     access: fn(&mut V) -> &mut RowsState,
 ) -> AnyElement {
-    let title = div()
-        .text_sm()
-        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-        .child(section.title.clone());
     let body: AnyElement = if section.rows.is_empty() {
         div()
             .text_sm()
@@ -433,11 +427,8 @@ fn render_section<V: 'static>(
             }
         }
     };
-    GroupBox::new()
+    crate::ui::section(section.title.clone(), body, cx)
         .id(section.id)
-        .outline()
-        .title(title)
-        .child(body)
         .into_any_element()
 }
 
@@ -528,7 +519,7 @@ fn cell_element<V: 'static>(
         .child(content)
         .when(highlight, move |el| {
             // Keep the cursor row in view (KBD-031-style) after keyboard moves.
-            el.on_prepaint(move |bounds, window, _| {
+            el.on_bounds(move |bounds, window, _| {
                 if !reveal.replace(false) {
                     return;
                 }

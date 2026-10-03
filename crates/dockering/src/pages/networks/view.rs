@@ -1,16 +1,16 @@
-//! The Networks page (NET-001…005): toolbar (search, overflow), the `ListTable`, delete
-//! (confirm; `NETWORK_MGMT`; never the built-in networks) and prune. `C` copies the id, `Del`
-//! deletes, `Enter` opens the detail. Creating/connecting networks is out of scope (NET-005).
+//! The Networks page (NET-001…005): header (title, overflow; search, selection actions), the
+//! `ListTable`, delete (confirm; `NETWORK_MGMT`; never the built-in networks) and prune. `C`
+//! copies the id, `Del` deletes, `Enter` opens the detail. Creating/connecting networks is out
+//! of scope (NET-005).
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use dk_core::{Capabilities, ContainerSummary, EngineId, NetworkSummary};
 use futures::FutureExt;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::v_flex;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
@@ -20,7 +20,6 @@ use gpui_kit::{
 use super::model::{self, NetworkRow};
 use super::row::{NetworksDelegate, columns};
 use crate::actions::{Navigate, OnRow, RowCommand, SortByColumn, list};
-use crate::keymap::ctx;
 use crate::nav::{NetworkTab, Route};
 use crate::pages::resources::chrome;
 use crate::pages::resources::ops::{self as rops, summarize};
@@ -28,7 +27,8 @@ use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive};
 use crate::ui::list_table::{ListEvent, ListTable};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::{PageView, RoutedPage};
 
@@ -205,6 +205,16 @@ impl NetworksPage {
             .collect()
     }
 
+    /// The checked rows, for the selection actions (SHL-005).
+    fn selection_targets(&self, cx: &App) -> Vec<NetworkRow> {
+        let t = self.table.read(cx);
+        let m = t.model(cx);
+        m.selection_targets()
+            .iter()
+            .filter_map(|k| m.find_item(k).cloned())
+            .collect()
+    }
+
     fn on_search_event(
         &mut self,
         _: &Entity<InputState>,
@@ -237,12 +247,7 @@ impl NetworksPage {
         cx: &mut Context<Self>,
         build: impl FnOnce(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
-        let b = self.overflow_bounds;
-        let pos = if b.size.width > px(0.) {
-            point(b.origin.x - px(180.), b.origin.y + b.size.height + px(4.))
-        } else {
-            point(px(640.), px(110.))
-        };
+        let pos = MenuAnchor::below_or(self.overflow_bounds, point(px(640.), px(110.)));
         let restore = self.table.focus_handle(cx);
         self.menu = Some(KeyMenu::open(
             pos,
@@ -279,20 +284,28 @@ impl NetworksPage {
     }
 
     /// NET-002: built-in networks and engines without `NETWORK_MGMT` can't delete.
-    fn deletable(&self, cx: &App) -> Vec<NetworkRow> {
+    fn deletable(&self, targets: Vec<NetworkRow>, cx: &App) -> Vec<NetworkRow> {
         if self.read_only(cx) || !self.can_manage(cx) {
             return Vec::new();
         }
-        self.targets(cx)
-            .into_iter()
-            .filter(|r| !r.builtin)
-            .collect()
+        targets.into_iter().filter(|r| !r.builtin).collect()
     }
 
     fn on_delete(&mut self, _: &list::Delete, window: &mut Window, cx: &mut Context<Self>) {
-        let targets = self.deletable(cx);
+        let targets = self.targets(cx);
+        self.confirm_delete(targets, window, cx);
+    }
+
+    fn confirm_delete(
+        &mut self,
+        targets: Vec<NetworkRow>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let any_builtin = targets.iter().any(|r| r.builtin);
+        let targets = self.deletable(targets, cx);
         if targets.is_empty() {
-            if self.targets(cx).iter().any(|r| r.builtin) {
+            if any_builtin {
                 notify::info(window, cx, s::BUILTIN_NETWORK);
             }
             return;
@@ -420,52 +433,39 @@ impl NetworksPage {
         }
     }
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let res = self.store.read(cx).resource(Collection::Networks);
         let count = self.networks(cx).len();
         let this = cx.entity().downgrade();
-        v_flex()
-            .id("networks-toolbar")
-            .key_context(ctx::TOOLBAR)
-            .gap_2()
-            .px_4()
-            .pt_3()
-            .pb_2()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(chrome::title_row(
-                        s::PAGE_NETWORKS,
-                        s::total_count(s::NETWORK, count),
-                        res.loading,
-                        cx,
-                    ))
-                    .child(div().flex_1())
-                    .child(chrome::search_box(&self.search))
-                    .child(
-                        chrome::overflow_trigger(
-                            "networks-overflow",
-                            &self.overflow_focus,
-                            move |window, cx| {
-                                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
-                            },
-                            window,
-                            cx,
-                        )
-                        .on_prepaint({
-                            let this = cx.entity().downgrade();
-                            move |b, _, cx| {
-                                this.update(cx, |p, _| p.overflow_bounds = b).ok();
-                            }
-                        }),
-                    ),
-            )
-            .into_any_element()
+        let overflow = chrome::overflow_trigger(
+            "networks-overflow",
+            &self.overflow_focus,
+            move |window, cx| {
+                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
+            },
+            cx,
+        )
+        .on_bounds({
+            let this = cx.entity().downgrade();
+            move |b, _, cx| {
+                this.update(cx, |p, _| p.overflow_bounds = b).ok();
+            }
+        })
+        .into_any_element();
+        let selected = self.table.read(cx).model(cx).selected().len();
+        let delete_disabled = self.read_only(cx) || !self.can_manage(cx);
+        chrome::page_header(
+            "networks-toolbar",
+            s::PAGE_NETWORKS,
+            res.loading,
+            [],
+            &self.search,
+            s::total_count(s::NETWORK, count),
+            chrome::selection_actions(selected, Vec::new(), delete_disabled, cx),
+            overflow,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -497,10 +497,8 @@ impl PageView for NetworksPage {
 impl RoutedPage for NetworksPage {}
 
 impl Render for NetworksPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
-        let selected = self.table.read(cx).model(cx).selected().len();
-        let bulk = chrome::bulk_bar(selected, self.read_only(cx) || !self.can_manage(cx), cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let res = self.store.read(cx).resource(Collection::Networks);
         let has_data = self.store.read(cx).networks.data().is_some();
         let body = chrome::list_body(
@@ -511,6 +509,7 @@ impl Render for NetworksPage {
             self.table.clone().into_any_element(),
             cx,
         );
+        // The page `⋮` ends the header (right of the search row): Shift+Tab lands on it.
         let prev = self.overflow_focus.clone();
         self.table
             .update(cx, |t, _| t.set_tab_neighbours(Some(prev), None));
@@ -521,13 +520,13 @@ impl Render for NetworksPage {
             .on_action(cx.listener(Self::on_delete))
             .on_action(cx.listener(Self::on_prune))
             .on_action(cx.listener(|this, _: &list::BulkDelete, window, cx| {
-                this.on_delete(&list::Delete, window, cx)
+                let targets = this.selection_targets(cx);
+                this.confirm_delete(targets, window, cx)
             }))
             .on_action(cx.listener(Self::on_row))
             .on_action(cx.listener(Self::on_sort_by))
             .on_action(cx.listener(Self::on_sort_menu))
             .child(toolbar)
-            .children(bulk)
             .child(div().flex_1().min_h_0().child(body))
             .when_some(self.menu.as_ref(), |this, m| this.child(m.render()))
     }

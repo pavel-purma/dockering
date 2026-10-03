@@ -46,8 +46,7 @@ impl PageView for PlaceholderPage {
 }
 
 impl Render for PlaceholderPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let focused = self.focus.is_focused(window);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id("placeholder-page")
             .size_full()
@@ -76,7 +75,6 @@ impl Render for PlaceholderPage {
                     .track_focus(&self.focus)
                     .p_3()
                     .rounded(cx.theme().radius)
-                    .map(|el| crate::ui::focus_ring(el, focused, cx))
                     .text_color(cx.theme().muted_foreground)
                     .child(self.body.clone()),
             )

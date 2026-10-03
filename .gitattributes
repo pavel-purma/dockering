@@ -1,6 +1,18 @@
-# Recorded engine output must stay byte-exact (no CRLF conversion on Windows checkouts).
+# Every text file is LF in the repo and in the working tree on every OS,
+# regardless of the user's core.autocrlf setting.
+* text=auto eol=lf
+
+# Binary assets.
+*.png binary
+*.ico binary
+*.icns binary
+*.bin binary
+*.bmp binary
+
+# Recorded engine output must stay byte-exact (no EOL conversion on any checkout).
 crates/*/tests/fixtures/** -text
 crates/*/fixtures/** -text
 *.snap -text
-# Shell scripts must keep LF so bash works on Windows/WSL checkouts.
-*.sh text eol=lf
+
+# Attribute files themselves are plain text even inside byte-exact fixture dirs.
+**/.gitattributes text eol=lf

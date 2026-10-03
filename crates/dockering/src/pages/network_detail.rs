@@ -14,10 +14,11 @@ use gpui_kit::{
 
 use crate::actions::res::ReplaceRoute;
 use crate::actions::{Navigate, detail, list};
+use crate::assets::Lucide;
 use crate::nav::{ContainerTab, NetworkTab, Route};
 use crate::pages::resources::detail::{
-    InspectView, LinkList, Loaded, bool_value, gone_banner, header, header_action, kv_section,
-    lines_value, map_value, mono_value, route_link, step_tab, tab_bar, text_value,
+    InspectView, LinkList, Loaded, TabSpec, bool_value, gone_banner, header, header_action,
+    kv_section, lines_value, map_value, mono_value, route_link, step_tab, tab_bar, text_value,
 };
 use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
@@ -32,11 +33,11 @@ pub const TABS: [NetworkTab; 3] = [
     NetworkTab::Inspect,
 ];
 
-fn tab_label(t: NetworkTab) -> &'static str {
+fn tab_spec(t: NetworkTab) -> TabSpec {
     match t {
-        NetworkTab::Overview => s::TAB_OVERVIEW,
-        NetworkTab::Containers => s::TAB_CONTAINERS,
-        NetworkTab::Inspect => s::TAB_INSPECT,
+        NetworkTab::Overview => TabSpec::new(s::TAB_OVERVIEW, IconName::LayoutDashboard),
+        NetworkTab::Containers => TabSpec::new(s::TAB_CONTAINERS, Lucide::Boxes),
+        NetworkTab::Inspect => TabSpec::new(s::TAB_INSPECT, Lucide::Braces),
     }
 }
 
@@ -376,8 +377,7 @@ impl Render for NetworkDetailPage {
         let name = self.name();
         let builtin = self.details.data().is_some_and(|d| d.summary.is_builtin());
         let can_delete = self.can_delete(cx);
-        let labels: Vec<(&'static str, bool)> =
-            TABS.iter().map(|t| (tab_label(*t), false)).collect();
+        let tabs: Vec<TabSpec> = TABS.iter().map(|t| tab_spec(*t)).collect();
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let this = cx.entity().downgrade();
         let body = match self.tab {
@@ -428,7 +428,6 @@ impl Render for NetworkDetailPage {
                         !can_delete,
                     ),
                 ],
-                window,
                 cx,
             ))
             .when(gone, |this| {
@@ -436,13 +435,12 @@ impl Render for NetworkDetailPage {
             })
             .child(tab_bar(
                 &self.tabs_focus,
-                &labels,
+                tabs,
                 selected,
                 move |ix, window, cx| {
                     this.update(cx, |p, cx| p.set_tab(TABS[ix], window, cx))
                         .ok();
                 },
-                window,
                 cx,
             ))
             .child(

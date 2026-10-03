@@ -633,9 +633,7 @@ impl TerminalTab {
             .into_any_element()
     }
 
-    fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let sub_focused = self.sub_tabs_focus.is_focused(window);
-        let shell_focused = self.shell_focus.is_focused(window);
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let external = self.external_available(cx);
         let active = self.active;
         let tabs =
@@ -662,7 +660,6 @@ impl TerminalTab {
                     .id("terminal-subtabs")
                     .track_focus(&self.sub_tabs_focus)
                     .rounded(cx.theme().radius)
-                    .map(|el| crate::ui::focus_ring(el, sub_focused, cx))
                     .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, _, cx| {
                         if e.keystroke.modifiers.modified() {
                             return;
@@ -712,7 +709,6 @@ impl TerminalTab {
                     .id("terminal-shell")
                     .track_focus(&self.shell_focus)
                     .rounded(cx.theme().radius)
-                    .map(|el| crate::ui::focus_ring(el, shell_focused, cx))
                     .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, _, cx| {
                         if e.keystroke.modifiers.modified() {
                             return;
@@ -906,7 +902,7 @@ impl Render for TerminalTab {
                 })
                 .into_any_element()
         };
-        let toolbar = self.render_toolbar(window, cx);
+        let toolbar = self.render_toolbar(cx);
         v_flex()
             .id("terminal-tab")
             .size_full()

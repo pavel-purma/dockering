@@ -20,6 +20,10 @@ pub const MORE_COMMANDS: &str = "More commands";
 pub const INSECURE_TCP: &str = "Unencrypted TCP";
 pub const INSECURE_TCP_TOOLTIP: &str = "This engine is reached over plain TCP without TLS. Traffic, including credentials, is not encrypted.";
 pub const BACK: &str = "Back";
+/// The first sidebar item on Settings routes (SET-080).
+pub fn back_to(page: &str) -> String {
+    format!("Back to {page}")
+}
 pub const FORWARD: &str = "Forward";
 pub const TOGGLE_SIDEBAR: &str = "Toggle sidebar";
 

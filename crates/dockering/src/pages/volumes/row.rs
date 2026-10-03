@@ -3,20 +3,18 @@
 use std::collections::HashSet;
 
 use dk_core::format::format_size;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div};
+use gpui_kit::{AnyElement, App, IntoElement, SharedString, div};
 
 use super::model::{VolumeRow, sort_keys};
 use crate::actions::{OnRow, RowCommand, list, volume};
-use crate::assets::Lucide;
 use crate::keymap::ctx;
 use crate::pages::resources::chrome::{
-    dash, hinted, mono_cell, name_cell, row_button, skeleton_cell, text_cell,
+    dash, hinted, mono_cell, name_cell, row_menu_button, skeleton_cell, text_cell,
 };
 use crate::strings as s;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
@@ -24,7 +22,7 @@ use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::relative_time;
 
 pub mod col {
-    pub const SELECT: &str = "select";
+    pub const SELECT: &str = crate::ui::list_table::SELECT_COLUMN;
     pub const NAME: &str = super::sort_keys::NAME;
     pub const DRIVER: &str = "driver";
     pub const COMPOSE: &str = "compose";
@@ -45,7 +43,7 @@ pub fn columns() -> Vec<ColumnSpec> {
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 170.),
-        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 80.).pin_right(),
+        ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 60.).pin_right(),
     ]
 }
 
@@ -78,8 +76,6 @@ impl ListDelegate for VolumesDelegate {
         row: &ListRow<(), VolumeRow>,
         row_ix: usize,
         column: &ColumnSpec,
-        selected: bool,
-        _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
         let RowKind::Item(r) = &row.kind else {
@@ -87,17 +83,6 @@ impl ListDelegate for VolumesDelegate {
         };
         let muted = cx.theme().muted_foreground;
         match column.key {
-            col::SELECT => {
-                let key = row.key.clone();
-                Checkbox::new(("row-check", row_ix))
-                    .checked(selected)
-                    .tab_stop(false)
-                    .on_click(move |_, window, cx| {
-                        cx.stop_propagation();
-                        window.dispatch_action(on_row(&key, RowCommand::ToggleSelected), cx)
-                    })
-                    .into_any_element()
-            }
             col::NAME => h_flex()
                 .gap_1()
                 .items_center()
@@ -149,18 +134,8 @@ impl ListDelegate for VolumesDelegate {
                 let key = row.key.clone();
                 h_flex()
                     .gap_0p5()
-                    .child(row_button(
-                        ("delete", row_ix),
-                        Lucide::Trash,
-                        s::ACTION_DELETE,
-                        self.read_only,
-                        on_row(&key, RowCommand::Delete),
-                    ))
-                    .child(row_button(
+                    .child(row_menu_button(
                         ("more", row_ix),
-                        IconName::EllipsisVertical,
-                        s::MORE_ACTIONS,
-                        false,
                         on_row(&key, RowCommand::ContextMenu),
                     ))
                     .into_any_element()
@@ -176,13 +151,7 @@ impl ListDelegate for VolumesDelegate {
         }
     }
 
-    fn context_menu(
-        &self,
-        row: &ListRow<(), VolumeRow>,
-        menu: PopupMenu,
-        _window: &Window,
-        _cx: &App,
-    ) -> PopupMenu {
+    fn context_menu(&self, row: &ListRow<(), VolumeRow>, menu: PopupMenu) -> PopupMenu {
         let key = row.key.clone();
         let lk = ctx::LIST_KEYS;
         let m = hinted(
@@ -211,7 +180,7 @@ impl ListDelegate for VolumesDelegate {
         )
     }
 
-    fn render_empty(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         if self.filtered_out {
             return crate::ui::empty_state(IconName::Search, s::NO_MATCHING_VOLUMES, "", None, cx);
         }

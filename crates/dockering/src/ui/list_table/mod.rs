@@ -24,8 +24,8 @@ pub use model::{ListModel, ListNode, ListRow, RowKind, SortState};
 
 use std::ops::Range;
 
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::actions::{SelectDown, SelectPageDown, SelectPageUp, SelectUp};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::table::{
@@ -42,7 +42,10 @@ use crate::actions::{OnRow, RowCommand, list};
 use crate::keymap::ctx;
 use crate::state::AppState;
 use crate::strings as s;
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::{KeyMenu, MenuAnchor, TrackBounds as _};
+
+/// Key of the leading checkbox column; its header renders a select-all checkbox.
+pub const SELECT_COLUMN: &str = "select";
 
 /// A column definition.
 #[derive(Debug, Clone)]
@@ -117,14 +120,13 @@ pub trait ListDelegate: 'static {
 
     fn columns(&self) -> Vec<ColumnSpec>;
 
-    /// Renders one cell. `row_ix` lets cells build element ids.
+    /// Renders one cell. `row_ix` lets cells build element ids. The `select` column is
+    /// rendered by the table itself.
     fn render_cell(
         &self,
         row: &ListRow<Self::Group, Self::Item>,
         row_ix: usize,
         col: &ColumnSpec,
-        selected: bool,
-        window: &mut Window,
         cx: &mut App,
     ) -> AnyElement;
 
@@ -132,20 +134,13 @@ pub trait ListDelegate: 'static {
     fn row_text(&self, row: &ListRow<Self::Group, Self::Item>) -> String;
 
     /// The row context menu (KBD-036). Items dispatch [`OnRow`] actions.
-    fn context_menu(
-        &self,
-        row: &ListRow<Self::Group, Self::Item>,
-        menu: PopupMenu,
-        window: &Window,
-        cx: &App,
-    ) -> PopupMenu {
-        let _ = (row, window, cx);
+    fn context_menu(&self, row: &ListRow<Self::Group, Self::Item>, menu: PopupMenu) -> PopupMenu {
+        let _ = row;
         menu
     }
 
     /// Rendered when there are no rows.
-    fn render_empty(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let _ = window;
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         div()
             .size_full()
             .flex()
@@ -200,7 +195,58 @@ pub struct Adapter<D: ListDelegate> {
     cursor_bounds: std::rc::Rc<std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>>,
 }
 
+/// Bounds of the row ⋮ button that was just clicked: the row menu opens under it instead
+/// of at the cursor row (one menu open at a time, so one slot per window is enough).
+#[derive(Default)]
+pub struct RowMenuTrigger(std::cell::Cell<Option<gpui_kit::Bounds<Pixels>>>);
+
+impl gpui_kit::Global for RowMenuTrigger {}
+
+impl RowMenuTrigger {
+    /// Records the ⋮ button under the pointer; call from its click handler.
+    pub fn set(bounds: gpui_kit::Bounds<Pixels>, cx: &mut App) {
+        cx.default_global::<RowMenuTrigger>().0.set(Some(bounds));
+    }
+
+    fn take(cx: &mut App) -> Option<gpui_kit::Bounds<Pixels>> {
+        cx.default_global::<RowMenuTrigger>().0.take()
+    }
+}
+
 impl<D: ListDelegate> Adapter<D> {
+    /// A row's selection checkbox. It updates the model directly: a dispatched action goes
+    /// to the focused element, which isn't the table when the mouse is used without
+    /// focusing it first.
+    fn select_cell(
+        &self,
+        row_ix: usize,
+        key: SharedString,
+        selected: bool,
+        cx: &mut Context<TableState<Self>>,
+    ) -> AnyElement {
+        let table = cx.entity().downgrade();
+        h_flex()
+            .size_full()
+            .items_center()
+            .child(
+                Checkbox::new(("row-check", row_ix))
+                    .debug_selector(move || format!("row-check-{row_ix}"))
+                    .checked(selected)
+                    .tab_stop(false)
+                    .on_click(move |_, _, cx| {
+                        // Don't let the click open the row too.
+                        cx.stop_propagation();
+                        table
+                            .update(cx, |t, cx| {
+                                t.delegate_mut().model.toggle_selected(&key);
+                                cx.notify();
+                            })
+                            .ok();
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn sort_of(&self, key: &str) -> Option<ColumnSort> {
         match &self.model.sort {
             Some(s) if s.key == key => Some(if s.descending {
@@ -266,6 +312,55 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         cx.notify();
     }
 
+    /// The `select` column's header is a select-all checkbox (SHL-005): checked when every
+    /// visible item is selected. A click clears a non-empty selection, else selects every
+    /// visible row (KBD-038).
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let spec = &self.columns[col_ix];
+        if spec.key != SELECT_COLUMN {
+            return div()
+                .size_full()
+                .child(spec.name.clone())
+                .into_any_element();
+        }
+        let keys: Vec<SharedString> = self
+            .model
+            .rows()
+            .iter()
+            .flat_map(|r| r.item_keys())
+            .collect();
+        let all = !keys.is_empty() && keys.iter().all(|k| self.model.is_selected(k));
+        let any = !self.model.selected().is_empty();
+        let table = cx.entity().downgrade();
+        Checkbox::new("select-all")
+            .debug_selector(|| "select-all".into())
+            .checked(all)
+            .tooltip(s::CMD_SELECT_ALL)
+            .tab_stop(false)
+            .on_click(move |_, _, cx| {
+                // Don't let the header click sort or select the column.
+                cx.stop_propagation();
+                table
+                    .update(cx, |t, cx| {
+                        let m = &mut t.delegate_mut().model;
+                        if any {
+                            m.clear_selection();
+                        } else {
+                            m.select_all();
+                        }
+                        // `ListTable` sees the change through its observer and reports it.
+                        cx.notify();
+                    })
+                    .ok();
+            })
+            .into_any_element()
+    }
+
     fn render_header(
         &mut self,
         _: &mut Window,
@@ -293,17 +388,16 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
     fn render_tr(
         &mut self,
         row_ix: usize,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let key = self.model.row(row_ix).map(|r| r.key.clone());
         // The pinned cell (also reserves its width on the filler rows below the data).
         let pinned = self.pinned.as_ref().map(|col| {
-            let cell = self.model.row(row_ix).map(|row| {
-                let selected = self.model.row_selected(row);
-                self.delegate
-                    .render_cell(row, row_ix, col, selected, window, cx)
-            });
+            let cell = self
+                .model
+                .row(row_ix)
+                .map(|row| self.delegate.render_cell(row, row_ix, col, cx));
             (col.width, cell)
         });
         div()
@@ -349,13 +443,16 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         &mut self,
         row_ix: usize,
         col_ix: usize,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let (Some(row), Some(col)) = (self.model.row(row_ix), self.columns.get(col_ix)) else {
             return div().into_any_element();
         };
         let selected = self.model.row_selected(row);
+        if col.key == SELECT_COLUMN {
+            return self.select_cell(row_ix, row.key.clone(), selected, cx);
+        }
         let is_cursor = col_ix == 0 && self.model.cursor_ix() == Some(row_ix);
         let slot = self.cursor_bounds.clone();
         // Cells are rows of inline content, vertically centred (tags don't stretch).
@@ -364,12 +461,9 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
             .items_center()
             .overflow_hidden()
             .when(is_cursor, move |this| {
-                this.on_prepaint(move |b, _, _| slot.set(Some(b)))
+                this.on_bounds(move |b, _, _| slot.set(Some(b)))
             })
-            .child(
-                self.delegate
-                    .render_cell(row, row_ix, col, selected, window, cx),
-            )
+            .child(self.delegate.render_cell(row, row_ix, col, cx))
             .into_any_element()
     }
 
@@ -377,21 +471,21 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         &mut self,
         row_ix: usize,
         menu: PopupMenu,
-        window: &mut Window,
-        cx: &mut Context<TableState<Self>>,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
     ) -> PopupMenu {
         match self.model.row(row_ix) {
-            Some(row) => self.delegate.context_menu(row, menu, window, cx),
+            Some(row) => self.delegate.context_menu(row, menu),
             None => menu,
         }
     }
 
     fn render_empty(
         &mut self,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        self.delegate.render_empty(window, cx)
+        self.delegate.render_empty(cx)
     }
 
     fn loading(&self, _: &App) -> bool {
@@ -430,6 +524,8 @@ pub struct ListTable<D: ListDelegate> {
     widths_key: Option<String>,
     /// The last sort reported to the page.
     reported_sort: Option<SortState>,
+    /// The selection size last seen by the observer (header checkbox changes).
+    reported_selected: usize,
     /// Keyboard-opened row menu (KBD-036): menu, anchor position, dismiss subscription.
     key_menu: Option<KeyMenu>,
     /// Painted bounds of the list (for anchoring the keyboard menu).
@@ -493,7 +589,11 @@ impl<D: ListDelegate> ListTable<D> {
             cx.subscribe_in(&find_input, window, Self::on_find_event),
             // Header-click sorting happens inside the GPUI Kit table (perform_sort) without an
             // event; detect sort changes on notify and report them (CON-003).
-            cx.observe(&table, |this, _, cx| this.check_sort_changed(cx)),
+            // The header select-all checkbox updates the model the same way.
+            cx.observe(&table, |this, _, cx| {
+                this.check_sort_changed(cx);
+                this.check_selection_changed(cx);
+            }),
         ];
         Self {
             table,
@@ -503,6 +603,7 @@ impl<D: ListDelegate> ListTable<D> {
             prev_focus: None,
             widths_key,
             reported_sort: None,
+            reported_selected: 0,
             key_menu: None,
             bounds: gpui_kit::Bounds::default(),
             _subs: subs,
@@ -641,6 +742,14 @@ impl<D: ListDelegate> ListTable<D> {
         }
     }
 
+    fn check_selection_changed(&mut self, cx: &mut Context<Self>) {
+        let n = self.model(cx).selected().len();
+        if n != self.reported_selected {
+            self.reported_selected = n;
+            cx.emit(ListEvent::SelectionChanged);
+        }
+    }
+
     fn check_sort_changed(&mut self, cx: &mut Context<Self>) {
         let sort = self.model(cx).sort.clone();
         if sort != self.reported_sort {
@@ -658,8 +767,7 @@ impl<D: ListDelegate> ListTable<D> {
         });
     }
 
-    fn open_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = window;
+    fn open_row(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(row) = self.model(cx).row(ix).cloned() else {
             return;
         };
@@ -748,9 +856,9 @@ impl<D: ListDelegate> ListTable<D> {
         }
     }
 
-    fn on_open(&mut self, _: &list::OpenDetail, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_open(&mut self, _: &list::OpenDetail, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.model(cx).cursor_ix() {
-            self.open_row(ix, window, cx);
+            self.open_row(ix, cx);
         }
     }
 
@@ -876,12 +984,12 @@ impl<D: ListDelegate> ListTable<D> {
         self.update_model(cx, |m| m.set_cursor(Some(key)));
     }
 
-    fn on_row(&mut self, action: &OnRow, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_row(&mut self, action: &OnRow, _: &mut Window, cx: &mut Context<Self>) {
         self.focus_row(&action.row, cx);
         match action.action {
             RowCommand::Open => {
                 if let Some(ix) = self.model(cx).cursor_ix() {
-                    self.open_row(ix, window, cx);
+                    self.open_row(ix, cx);
                 }
             }
             RowCommand::ToggleGroup => {
@@ -981,24 +1089,26 @@ impl<D: ListDelegate> ListTable<D> {
         };
         let table_focus = self.table.focus_handle(cx);
         let table = self.table.clone();
-        // Position: left edge of the table, at the cursor row (36 px rows + header).
-        // Anchor below the cursor row (its first cell's painted bounds), else the table top.
-        let pos = match self.table.read(cx).delegate().cursor_bounds.get() {
-            Some(b) => gpui_kit::point(b.origin.x + px(48.), b.origin.y + b.size.height),
-            None => gpui_kit::point(
-                self.bounds.origin.x + px(56.),
-                self.bounds.origin.y + px(40.),
-            ),
+        // Under the row's ⋮ button when it was clicked; from the keyboard, below the cursor
+        // row's first cell, else the table top.
+        let pos = if let Some(b) = RowMenuTrigger::take(cx) {
+            MenuAnchor::Below(b)
+        } else {
+            match self.table.read(cx).delegate().cursor_bounds.get() {
+                Some(b) => gpui_kit::point(b.origin.x + px(48.), b.origin.y + b.size.height).into(),
+                None => gpui_kit::point(
+                    self.bounds.origin.x + px(56.),
+                    self.bounds.origin.y + px(40.),
+                )
+                .into(),
+            }
         };
         self.key_menu = Some(KeyMenu::open(
             pos,
             table_focus,
             window,
             cx,
-            move |menu, window, cx| {
-                let t = table.read(cx);
-                t.delegate().delegate.context_menu(&row, menu, window, cx)
-            },
+            move |menu, _, cx| table.read(cx).delegate().delegate.context_menu(&row, menu),
             |this: &mut Self, _| this.key_menu = None,
         ));
         cx.notify();
@@ -1016,7 +1126,7 @@ impl<D: ListDelegate> Focusable for ListTable<D> {
 }
 
 impl<D: ListDelegate> Render for ListTable<D> {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Report visible-row changes that happened during the last table render.
         let visible = self
             .table
@@ -1082,7 +1192,7 @@ impl<D: ListDelegate> Render for ListTable<D> {
                         ),
                 )
             })
-            .on_prepaint({
+            .on_bounds({
                 let this = cx.entity().downgrade();
                 move |bounds, _, cx| {
                     this.update(cx, |t, _| t.bounds = bounds).ok();

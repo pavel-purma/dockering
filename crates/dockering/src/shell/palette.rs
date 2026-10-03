@@ -5,7 +5,7 @@
 use gpui_kit::component::IconName;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
 use gpui_kit::prelude::*;
-use gpui_kit::{Action, App, Entity, Window};
+use gpui_kit::{Action, App, Entity};
 
 use crate::actions::Navigate;
 use crate::commands::{self, CommandContext};
@@ -139,7 +139,6 @@ pub fn element(
     state: &Entity<CommandState>,
     ctx: CommandContext,
     store: Option<&Entity<EngineStore>>,
-    _window: &mut Window,
     cx: &App,
 ) -> Command {
     build(state, ctx, store, cx)

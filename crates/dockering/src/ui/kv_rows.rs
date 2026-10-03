@@ -224,7 +224,7 @@ impl KvValue {
 }
 
 impl Render for KvRows {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let spec = self.spec;
         let entity = cx.entity().downgrade();
         let rows = self.rows.iter().enumerate().map(|(ix, row)| {
@@ -263,7 +263,6 @@ impl Render for KvRows {
                             })
                             .ok();
                     },
-                    window,
                     cx,
                 )
             };
@@ -334,7 +333,6 @@ impl Render for KvRows {
                 move |_, window, cx| {
                     entity.update(cx, |this, cx| this.add_row(window, cx)).ok();
                 },
-                window,
                 cx,
             )
         };

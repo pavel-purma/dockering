@@ -154,7 +154,6 @@ impl Render for PullDialog {
                 move |window, cx| {
                     this2.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }
@@ -375,7 +374,6 @@ impl Render for RunDialog {
         }
         let this = cx.entity().downgrade();
         let auto_remove = self.auto_remove;
-        let ar_focused = self.auto_remove_focus.is_focused(window);
         form_root("run-dialog", cx)
             .child(field(
                 s::CONTAINER_NAME,
@@ -399,7 +397,6 @@ impl Render for RunDialog {
                     .id("auto-remove-wrap")
                     .track_focus(&self.auto_remove_focus.clone().tab_stop(true))
                     .rounded(cx.theme().radius)
-                    .map(|el| crate::ui::focus_ring(el, ar_focused, cx))
                     .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, _, cx| {
                         if e.keystroke.key == "space" && !e.keystroke.modifiers.modified() {
                             this.auto_remove = !this.auto_remove;
@@ -428,7 +425,6 @@ impl Render for RunDialog {
                 move |window, cx| {
                     this.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }
@@ -562,7 +558,6 @@ impl Render for TagDialog {
                 move |window, cx| {
                     this.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }

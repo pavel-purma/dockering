@@ -1,6 +1,6 @@
-//! The Volumes page (VOL-001…005): toolbar (search, filter, Create, overflow), bulk bar, the
-//! `ListTable`, and the volume commands. `N` creates, `C` copies the name, `Del` deletes,
-//! `Enter` opens the detail.
+//! The Volumes page (VOL-001…005): header (title, filter, Create, overflow; search,
+//! selection actions), the `ListTable`, and the volume commands. `N` creates, `C` copies the
+//! name, `Del` deletes, `Enter` opens the detail.
 //!
 //! VOL-002: sizes and in-use counts come from `disk_usage()`, fetched lazily **on this page
 //! only**, after the list has data; cells show skeletons until it arrives. Without
@@ -12,11 +12,10 @@ use std::time::Duration;
 use dk_core::format::format_size;
 use dk_core::{Capabilities, ContainerSummary, EngineId, VolumeSummary};
 use futures::FutureExt;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{Disableable, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{Disableable, IconName, Sizable, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
@@ -35,7 +34,8 @@ use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive};
 use crate::ui::list_table::{ListEvent, ListTable};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::{PageView, RoutedPage};
 
@@ -288,6 +288,16 @@ impl VolumesPage {
             .collect()
     }
 
+    /// The checked rows, for the selection actions (SHL-005).
+    fn selection_targets(&self, cx: &App) -> Vec<VolumeRow> {
+        let t = self.table.read(cx);
+        let m = t.model(cx);
+        m.selection_targets()
+            .iter()
+            .filter_map(|k| m.find_item(k).cloned())
+            .collect()
+    }
+
     // ── search, filter, sort, menus ────────────────────────────────────────────────────
 
     fn on_search_event(
@@ -342,12 +352,7 @@ impl VolumesPage {
         cx: &mut Context<Self>,
         build: impl FnOnce(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
-        let b = self.overflow_bounds;
-        let pos = if b.size.width > px(0.) {
-            point(b.origin.x - px(180.), b.origin.y + b.size.height + px(4.))
-        } else {
-            point(px(640.), px(110.))
-        };
+        let pos = MenuAnchor::below_or(self.overflow_bounds, point(px(640.), px(110.)));
         let restore = self.table.focus_handle(cx);
         self.menu = Some(KeyMenu::open(
             pos,
@@ -405,7 +410,7 @@ impl VolumesPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let t = self.targets(cx);
+        let t = self.selection_targets(cx);
         self.confirm_delete(t, window, cx);
     }
 
@@ -570,11 +575,7 @@ impl VolumesPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let res = self.store.read(cx).resource(Collection::Volumes);
         let count = self.volumes(cx).len();
         let summary = match &self.usage {
@@ -586,68 +587,62 @@ impl VolumesPage {
         };
         let ro = self.read_only(cx);
         let this = cx.entity().downgrade();
-        v_flex()
-            .id("volumes-toolbar")
-            .key_context(ctx::TOOLBAR)
-            .gap_2()
-            .px_4()
-            .pt_3()
-            .pb_2()
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(chrome::title_row(s::PAGE_VOLUMES, summary, res.loading, cx))
-                    .child(div().flex_1())
-                    .child(chrome::search_box(&self.search))
-                    .child(chrome::filter_segment(
-                        "volume-filter",
-                        &self.filter_focus,
-                        VolumeFilter::OPTIONS,
-                        self.filter.as_str(),
-                        window,
-                        cx,
-                    ))
-                    .child(
-                        chrome::header_button(
-                            "create-volume-wrap",
-                            &self.create_focus,
-                            Button::new("create-volume")
-                                .small()
-                                .primary()
-                                .icon(IconName::Plus)
-                                .label(s::CREATE)
-                                .disabled(ro)
-                                .tooltip(crate::keymap::tooltip_for(
-                                    s::CREATE_VOLUME,
-                                    &volume::Create,
-                                    ctx::LIST_KEYS,
-                                )),
-                            Box::new(volume::Create),
-                            window,
-                            cx,
-                        )
-                        .debug_selector(|| "create-volume-trigger".into()),
-                    )
-                    .child(
-                        chrome::overflow_trigger(
-                            "volumes-overflow",
-                            &self.overflow_focus,
-                            move |window, cx| {
-                                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
-                            },
-                            window,
-                            cx,
-                        )
-                        .on_prepaint({
-                            let this = cx.entity().downgrade();
-                            move |b, _, cx| {
-                                this.update(cx, |p, _| p.overflow_bounds = b).ok();
-                            }
-                        }),
-                    ),
+        let controls = [
+            chrome::filter_segment(
+                "volume-filter",
+                &self.filter_focus,
+                VolumeFilter::OPTIONS,
+                self.filter.as_str(),
+                cx,
+            ),
+            chrome::header_button(
+                "create-volume-wrap",
+                &self.create_focus,
+                Button::new("create-volume")
+                    .small()
+                    .primary()
+                    .icon(IconName::Plus)
+                    .label(s::CREATE)
+                    .disabled(ro)
+                    .tooltip(crate::keymap::tooltip_for(
+                        s::CREATE_VOLUME,
+                        &volume::Create,
+                        ctx::LIST_KEYS,
+                    )),
+                Box::new(volume::Create),
+                cx,
             )
-            .into_any_element()
+            .debug_selector(|| "create-volume-trigger".into())
+            .into_any_element(),
+        ];
+        let overflow = chrome::overflow_trigger(
+            "volumes-overflow",
+            &self.overflow_focus,
+            move |window, cx| {
+                this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
+            },
+            cx,
+        )
+        .on_bounds({
+            let this = cx.entity().downgrade();
+            move |b, _, cx| {
+                this.update(cx, |p, _| p.overflow_bounds = b).ok();
+            }
+        })
+        .into_any_element();
+        let selected = self.table.read(cx).model(cx).selected().len();
+        chrome::page_header(
+            "volumes-toolbar",
+            s::PAGE_VOLUMES,
+            res.loading,
+            controls,
+            &self.search,
+            summary,
+            chrome::selection_actions(selected, Vec::new(), ro, cx),
+            overflow,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -679,10 +674,8 @@ impl PageView for VolumesPage {
 impl RoutedPage for VolumesPage {}
 
 impl Render for VolumesPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
-        let selected = self.table.read(cx).model(cx).selected().len();
-        let bulk = chrome::bulk_bar(selected, self.read_only(cx), cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let res = self.store.read(cx).resource(Collection::Volumes);
         let has_data = self.store.read(cx).volumes.data().is_some();
         let body = chrome::list_body(
@@ -693,6 +686,7 @@ impl Render for VolumesPage {
             self.table.clone().into_any_element(),
             cx,
         );
+        // The page `⋮` ends the header (right of the search row): Shift+Tab lands on it.
         let prev = self.overflow_focus.clone();
         self.table
             .update(cx, |t, _| t.set_tab_neighbours(Some(prev), None));
@@ -710,7 +704,6 @@ impl Render for VolumesPage {
             .on_action(cx.listener(Self::on_sort_menu))
             .on_action(cx.listener(Self::on_focus_filter))
             .child(toolbar)
-            .children(bulk)
             .child(div().flex_1().min_h_0().child(body))
             .when_some(self.menu.as_ref(), |this, m| this.child(m.render()))
     }

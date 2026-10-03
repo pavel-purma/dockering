@@ -1,5 +1,6 @@
-//! The Containers page view: toolbar (search, filter, group-by, overflow), bulk bar, the
-//! `ListTable`, and every container command (keys, buttons, menus share the same actions).
+//! The Containers page view: header (title, filter, group-by, overflow; search, selection
+//! actions), the `ListTable`, and every container command (keys, buttons, menus share the
+//! same actions).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
@@ -8,11 +9,9 @@ use dk_core::grouping::GroupBy;
 use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineId, StatsSample};
 use dk_hub::Feed;
 use futures::StreamExt;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Selectable, Sizable, h_flex, v_flex,
 };
@@ -29,13 +28,14 @@ use crate::actions::{
     GoImages, Navigate, OnRow, OpenUrl, RowCommand, SetFilter, SetGroupBy, SortByColumn, container,
     list,
 };
-use crate::keymap::ctx;
 use crate::nav::{ContainerTab, Route, group_by_from_mode, group_by_to_mode};
+use crate::pages::resources::chrome;
 use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive, should_confirm_stopped_delete};
 use crate::ui::list_table::{ListEvent, ListTable, RowKind, SortState};
-use crate::ui::menu::KeyMenu;
+use crate::ui::menu::TrackBounds as _;
+use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::widgets::{focus_wrap, port_url};
@@ -519,22 +519,13 @@ impl ContainersPage {
     // ── menus (KBD-039, Mod+Shift+O, overflow) ─────────────────────────────────────────
 
     /// Opens menus under their trigger (or under the group-by button for key-only menus).
-    fn menu_anchor(
-        &self,
-        focus: &FocusHandle,
-        _window: &Window,
-        _cx: &App,
-    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+    fn menu_anchor(&self, focus: &FocusHandle) -> MenuAnchor {
         let b = if *focus == self.overflow_focus {
             self.overflow_bounds
         } else {
             self.group_bounds
         };
-        if b.size.width > px(0.) {
-            point(b.origin.x, b.origin.y + b.size.height + px(4.))
-        } else {
-            point(px(320.), px(110.))
-        }
+        MenuAnchor::below_or(b, point(px(320.), px(110.)))
     }
 
     fn open_menu(
@@ -544,7 +535,7 @@ impl ContainersPage {
         cx: &mut Context<Self>,
         build: impl FnOnce(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
-        let pos = self.menu_anchor(&anchor, window, cx);
+        let pos = self.menu_anchor(&anchor);
         let restore = self.table.focus_handle(cx);
         self.menu = Some(KeyMenu::open(
             pos,
@@ -640,6 +631,17 @@ impl ContainersPage {
         let model = t.model(cx);
         model
             .targets()
+            .iter()
+            .filter_map(|k| model.find_item(k).cloned())
+            .collect()
+    }
+
+    /// The checked rows, for the selection actions (SHL-005).
+    fn selection_targets(&self, cx: &App) -> Vec<ContainerSummary> {
+        let t = self.table.read(cx);
+        let model = t.model(cx);
+        model
+            .selection_targets()
             .iter()
             .filter_map(|k| model.find_item(k).cloned())
             .collect()
@@ -1012,7 +1014,7 @@ impl ContainersPage {
 
     fn on_bulk_start(&mut self, _: &list::BulkStart, window: &mut Window, cx: &mut Context<Self>) {
         let t: Vec<_> = self
-            .targets(cx)
+            .selection_targets(cx)
             .into_iter()
             .filter(|c| !c.state.is_running())
             .collect();
@@ -1021,7 +1023,7 @@ impl ContainersPage {
 
     fn on_bulk_stop(&mut self, _: &list::BulkStop, window: &mut Window, cx: &mut Context<Self>) {
         let t: Vec<_> = self
-            .targets(cx)
+            .selection_targets(cx)
             .into_iter()
             .filter(|c| c.state.is_running() || c.state == ContainerState::Paused)
             .collect();
@@ -1034,7 +1036,7 @@ impl ContainersPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let t = self.targets(cx);
+        let t = self.selection_targets(cx);
         if !t.is_empty() && self.can_act(cx) {
             self.delete_targets(t, window, cx);
         }
@@ -1218,216 +1220,141 @@ impl ContainersPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let loading = self.store.read(cx).containers.is_loading();
         let filter = self.filter;
-        let filter_focused = self.filter_focus.is_focused(window);
         let group_label = match &self.group_by {
             GroupBy::Compose => s::GROUP_BY_COMPOSE.to_owned(),
             GroupBy::None => s::GROUP_BY_NONE.to_owned(),
             GroupBy::Label(k) => format!("label: {k}"),
         };
-        v_flex()
-            .id("containers-toolbar")
-            .key_context(ctx::TOOLBAR)
-            .gap_2()
-            .px_4()
-            .pt_3()
-            .pb_2()
-            .child(
+        let controls = [
+            div()
+                .id("status-filter")
+                .track_focus(&self.filter_focus)
+                .rounded(cx.theme().radius)
+                .on_key_down(cx.listener(move |this, e: &gpui_kit::KeyDownEvent, _, cx| {
+                    let ix = StatusFilter::ALL
+                        .iter()
+                        .position(|f| *f == this.filter)
+                        .unwrap_or(0);
+                    let next = match e.keystroke.key.as_str() {
+                        "left" => Some(ix.saturating_sub(1)),
+                        "right" => Some((ix + 1).min(2)),
+                        _ => None,
+                    };
+                    if let Some(n) = next {
+                        this.set_filter(StatusFilter::ALL[n], cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .child(ButtonGroup::new("filter-group").small().children(
+                    StatusFilter::ALL.iter().map(|f| {
+                        let f = *f;
+                        Button::new(f.as_str())
+                            .label(f.label())
+                            .selected(f == filter)
+                            .tab_stop(false)
+                            .on_click(move |_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(SetFilter {
+                                        filter: f.as_str().into(),
+                                    }),
+                                    cx,
+                                )
+                            })
+                    }),
+                ))
+                .into_any_element(),
+            focus_wrap(
+                "group-by-wrap",
+                &self.group_focus,
+                Button::new("group-by")
+                    .small()
+                    .outline()
+                    .label(format!("{}: {group_label}", s::GROUP_BY))
+                    .dropdown_caret(true)
+                    .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx)),
+                |_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx),
+                cx,
+            )
+            .on_bounds({
+                let this = cx.entity().downgrade();
+                move |b, _, cx| {
+                    this.update(cx, |p, _| p.group_bounds = b).ok();
+                }
+            })
+            .into_any_element(),
+        ];
+        let overflow = focus_wrap(
+            "overflow-wrap",
+            &self.overflow_focus,
+            Button::new("containers-overflow")
+                .small()
+                .ghost()
+                .icon(IconName::EllipsisVertical)
+                .tooltip(s::MORE_ACTIONS)
+                .on_click(cx.listener(|this, _, window, cx| this.on_overflow(window, cx))),
+            {
+                let this = cx.entity().downgrade();
+                move |_, window, cx| {
+                    this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
+                }
+            },
+            cx,
+        )
+        .on_bounds({
+            let this = cx.entity().downgrade();
+            move |b, _, cx| {
+                this.update(cx, |p, _| p.overflow_bounds = b).ok();
+            }
+        })
+        .into_any_element();
+        let ro = self.read_only(cx);
+        let selected = self.table.read(cx).model(cx).selected().len();
+        // SHL-005: Start / Stop / Delete over the selection, next to the search.
+        let selection = chrome::selection_actions(
+            selected,
+            vec![
+                Button::new("bulk-start")
+                    .small()
+                    .label(s::ACTION_START)
+                    .disabled(ro)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStart), cx)),
+                Button::new("bulk-stop")
+                    .small()
+                    .label(s::ACTION_STOP)
+                    .disabled(ro)
+                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStop), cx)),
+            ],
+            ro,
+            cx,
+        );
+        chrome::page_header(
+            "containers-toolbar",
+            s::PAGE_CONTAINERS,
+            loading,
+            controls,
+            &self.search,
+            s::containers_counts(self.running, self.stopped),
+            selection,
+            overflow,
+            cx,
+        )
+        .when(self.label_prompt, |this| {
+            this.child(
                 h_flex()
-                    .gap_3()
-                    .items_center()
+                    .gap_2()
+                    .child(div().text_sm().child(s::GROUP_BY_LABEL))
                     .child(
                         div()
-                            .text_xl()
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(s::PAGE_CONTAINERS),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(s::containers_counts(self.running, self.stopped)),
-                    )
-                    .when(loading, |this| this.child(Spinner::new().small()))
-                    .child(div().flex_1())
-                    .child(
-                        div().w(px(240.)).child(
-                            Input::new(&self.search)
-                                .small()
-                                .cleanable(true)
-                                .prefix(gpui_kit::component::Icon::new(IconName::Search).small()),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .id("status-filter")
-                            .track_focus(&self.filter_focus)
-                            .rounded(cx.theme().radius)
-                            .map(|el| crate::ui::focus_ring(el, filter_focused, cx))
-                            .on_key_down(cx.listener(
-                                move |this, e: &gpui_kit::KeyDownEvent, _, cx| {
-                                    let ix = StatusFilter::ALL
-                                        .iter()
-                                        .position(|f| *f == this.filter)
-                                        .unwrap_or(0);
-                                    let next = match e.keystroke.key.as_str() {
-                                        "left" => Some(ix.saturating_sub(1)),
-                                        "right" => Some((ix + 1).min(2)),
-                                        _ => None,
-                                    };
-                                    if let Some(n) = next {
-                                        this.set_filter(StatusFilter::ALL[n], cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .child(ButtonGroup::new("filter-group").small().children(
-                                StatusFilter::ALL.iter().map(|f| {
-                                    let f = *f;
-                                    Button::new(f.as_str())
-                                        .label(f.label())
-                                        .selected(f == filter)
-                                        .tab_stop(false)
-                                        .on_click(move |_, window, cx| {
-                                            window.dispatch_action(
-                                                Box::new(SetFilter {
-                                                    filter: f.as_str().into(),
-                                                }),
-                                                cx,
-                                            )
-                                        })
-                                }),
-                            )),
-                    )
-                    .child(
-                        focus_wrap(
-                            "group-by-wrap",
-                            &self.group_focus,
-                            Button::new("group-by")
-                                .small()
-                                .outline()
-                                .label(format!("{}: {group_label}", s::GROUP_BY))
-                                .dropdown_caret(true)
-                                .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(list::GroupBy), cx)
-                                }),
-                            |_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx),
-                            window,
-                            cx,
-                        )
-                        .on_prepaint({
-                            let this = cx.entity().downgrade();
-                            move |b, _, cx| {
-                                this.update(cx, |p, _| p.group_bounds = b).ok();
-                            }
-                        }),
-                    )
-                    .child(
-                        focus_wrap(
-                            "overflow-wrap",
-                            &self.overflow_focus,
-                            Button::new("containers-overflow")
-                                .small()
-                                .ghost()
-                                .icon(IconName::EllipsisVertical)
-                                .tooltip(s::MORE_ACTIONS)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.on_overflow(window, cx)),
-                                ),
-                            {
-                                let this = cx.entity().downgrade();
-                                move |_, window, cx| {
-                                    this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
-                                }
-                            },
-                            window,
-                            cx,
-                        )
-                        .on_prepaint({
-                            let this = cx.entity().downgrade();
-                            move |b, _, cx| {
-                                this.update(cx, |p, _| p.overflow_bounds = b).ok();
-                            }
-                        }),
+                            .w(px(240.))
+                            .child(Input::new(&self.group_key_input).small()),
                     ),
             )
-            .when(self.label_prompt, |this| {
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().text_sm().child(s::GROUP_BY_LABEL))
-                        .child(
-                            div()
-                                .w(px(240.))
-                                .child(Input::new(&self.group_key_input).small()),
-                        ),
-                )
-            })
-            .into_any_element()
-    }
-
-    fn render_bulk_bar(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
-        let n = self.table.read(cx).model(cx).selected().len();
-        if n < 2 {
-            return None;
-        }
-        let ro = self.read_only(cx);
-        Some(
-            h_flex()
-                .id("bulk-bar")
-                .mx_4()
-                .mb_2()
-                .px_3()
-                .py_1()
-                .gap_2()
-                .items_center()
-                .rounded(cx.theme().radius)
-                .bg(cx.theme().accent)
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .child(s::selected_count(n)),
-                )
-                .child(div().flex_1())
-                .child(
-                    Button::new("bulk-start")
-                        .small()
-                        .label(s::ACTION_START)
-                        .disabled(ro)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStart), cx)),
-                )
-                .child(
-                    Button::new("bulk-stop")
-                        .small()
-                        .label(s::ACTION_STOP)
-                        .disabled(ro)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStop), cx)),
-                )
-                .child(
-                    Button::new("bulk-delete")
-                        .small()
-                        .danger()
-                        .label(s::ACTION_DELETE)
-                        .disabled(ro)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkDelete), cx)),
-                )
-                .child(
-                    Button::new("bulk-clear")
-                        .small()
-                        .ghost()
-                        .label(s::CLEAR_SELECTION)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(list::ClearSelection), cx)),
-                )
-                .into_any_element(),
-        )
+        })
+        .into_any_element()
     }
 
     fn render_body(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -1478,11 +1405,11 @@ impl PageView for ContainersPage {
 }
 
 impl Render for ContainersPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
-        let bulk = self.render_bulk_bar(cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let body = self.render_body(cx);
         // Tab order: toolbar controls → table (one stop) → out (KBD-004).
+        // The page `⋮` ends the header (right of the search row): Shift+Tab lands on it.
         let prev = self.overflow_focus.clone();
         self.table
             .update(cx, |t, _| t.set_tab_neighbours(Some(prev), None));
@@ -1512,7 +1439,6 @@ impl Render for ContainersPage {
             .on_action(cx.listener(Self::on_focus_filter))
             .on_action(cx.listener(|_, _: &GoImages, _, cx| cx.propagate()))
             .child(toolbar)
-            .children(bulk)
             .child(div().flex_1().min_h_0().child(body))
             .when_some(self.menu.as_ref(), |this, m| this.child(m.render()))
     }

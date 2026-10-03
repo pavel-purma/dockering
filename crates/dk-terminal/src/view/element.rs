@@ -600,7 +600,7 @@ fn register_mouse_listeners(view: &Entity<TerminalView>, hitbox: &Hitbox, window
         }
     });
     let v = view.clone();
-    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
         if phase == DispatchPhase::Bubble {
             v.update(cx, |view, cx| view.mouse_up(event, cx));
         }
@@ -827,7 +827,7 @@ impl TerminalView {
     }
 
     pub(crate) fn metrics(&mut self, window: &Window, cx: &App) -> CellMetrics {
-        let family = super::font_family(&self.config, window, cx);
+        let family = super::font_family(&self.config, cx);
         let key = (family.to_string(), self.config.font_size.max(4.0).to_bits());
         if let Some(metrics) = &self.cell_metrics
             && metrics.key == key

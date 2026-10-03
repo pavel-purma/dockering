@@ -8,7 +8,7 @@ One file per feature or change, created by the `feature-planning` skill
 |---|---|---|---|
 | [keyboard-navigation](keyboard-navigation.md) | [keyboard.md](../../spec/features/keyboard.md) | M2 foundation, then every UI milestone | in-progress (open: KBD-090 release walkthrough, KBD-092 Tab-walk beyond Settings) |
 | [windows-distribution](windows-distribution.md) | [distribution.md](../../spec/features/distribution.md), [50-build-and-release.md](../../spec/50-build-and-release.md) | M10 Distribution | in-progress (public-launch tasks 13 automation, 16 open) |
-| [ui-tabs-settings-nav](ui-tabs-settings-nav.md) | [30-ui-shell.md](../../spec/30-ui-shell.md), [settings.md](../../spec/features/settings.md) | post-v1 UI polish | draft |
+| [ui-tabs-settings-nav](ui-tabs-settings-nav.md) | [30-ui-shell.md](../../spec/30-ui-shell.md), [settings.md](../../spec/features/settings.md) | post-v1 UI polish | done |
 
 The other v1 features (engines, containers, container detail/logs/terminal/stats, images, volumes,
 networks, settings) were built straight from the milestone tables in [../README.md](../README.md)
