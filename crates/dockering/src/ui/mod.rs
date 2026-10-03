@@ -11,6 +11,7 @@
 //! | [`page`] | The `Page` trait (`primary_focus`, search focus, refresh) |
 //! | [`breadcrumb`] | Detail-page breadcrumb |
 //! | [`action_icons`] | Start/stop row buttons: chalk icon, filled on hover |
+//! | [`segmented`] | The app's segmented control: tabs and filters (SHL-025) |
 
 pub mod action_icons;
 pub mod breadcrumb;
@@ -19,6 +20,7 @@ pub mod list_table;
 pub mod menu;
 pub mod notify;
 pub mod page;
+pub mod segmented;
 pub mod states;
 pub mod status_chip;
 pub mod widgets;

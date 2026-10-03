@@ -33,7 +33,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
 | Page header | `v_flex` of two rows: the title on the left and the view controls (filters, group-by, page buttons) on the right; then the search `Input` on the left and, on the right, the summary counts (or the selection actions while rows are checked, SHL-005) followed by the page `⋮`. A small gap separates the header from the table | `chrome::page_header` |
 | Lists | `DataTable` (`TableState` + `TableDelegate`) | Grouped containers: the delegate flattens a tree into rows with `depth` and `expanded`, and renders a disclosure chevron in column 0 (CON-011) |
-| Detail pages | `TabBar::segmented()` + `Tab` (icon + label) | SHL-025 |
+| Detail pages | `ui::segmented::Segmented` (icon + label), built on GPUI Kit base `Tabs`/`Tab` | SHL-025 |
 | Key/value panels | `DescriptionList` under a section heading | `ui::section` |
 | Charts | `AreaChart`, `LineChart` | |
 | Raw JSON | `Input` in multi-line code-editor mode, read-only, with JSON syntax highlighting (`highlighter`) | |
@@ -49,7 +49,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 - **SHL-021** Windows/Linux: no menu bar. The same commands are in the title-bar overflow menu (`Alt` focuses it) and in the command palette.
 - **SHL-022** Single instance per user. A second launch focuses the existing window and exits (10 §7).
 - **SHL-023** Linux: a `.desktop` file and Wayland `app_id` = `dev.dockering.Dockering`, so the dock/taskbar icon matches.
-- **SHL-025** Detail tabs are a segmented control (GPUI Kit `TabBar::segmented()`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Inner tab bars (Stats window, terminal sessions) keep their own style.
+- **SHL-025** Detail tabs are a segmented control (`ui::segmented::Segmented`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Every segmented control in the app uses the same component and style: detail tabs, inner tab bars (Stats window, terminal sessions, shell picker) and list filters (CON-004, KBD-039). The selected segment must stand out clearly. In light mode it is a raised white pill (thin border, soft shadow) on a slightly darker trough. In dark mode it is a lighter pill on the trough.
 - **SHL-024** UI language is **English only** in v1. All strings go through one module (`strings.rs`) so they can be localised later. OS high-contrast settings: the System theme follows the OS light/dark setting. A dedicated high-contrast theme is post-v1. UI zoom is `Mod+=` / `Mod+-` / `Mod+0` (scales the rem size).
 
 ## 2. Navigation model

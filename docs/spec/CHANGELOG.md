@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · ui · SHL-025: one segmented control everywhere (`ui::segmented`, a custom element on GPUI Kit base `Tabs`/`Tab`, because the kit `TabBar` paints its selection with the window background). Detail tabs, Stats window, terminal sessions/shell and the list filters (Containers/Images/Volumes, which were `ButtonGroup`s) share it. Light mode raises the selected segment as a white pill (thin border, soft shadow) on a slightly darker trough. Dark mode lifts it to a lighter pill. Clicking a filter segment focuses the filter control (CON-004).
 - 2026-10-03 · docker · `DISK_USAGE` is advertised only at negotiated API ≥ 1.52: bollard 0.21 drops the legacy `/system/df` shape, so older daemons (e.g. Docker 28, API 1.48) reported all sizes as 0. Below 1.52 `disk_usage` returns `Unsupported` and Volumes/Images use their fallbacks (spec 21 §2/§6, VOL-002, IMG-003).
 - 2026-10-03 · ci · `ci.yml` runs again on push to `main` and on pull requests (reverts the manual-only change; Actions minutes are free for the public repo); packaging runs on `main` only. Dependabot version updates for `cargo` and `github-actions` (REL-060).
 - 2026-10-03 · ui · Start/stop (Containers) and Run (Images) row icons fill with their chalk colour while hovered (`ui::action_icons`); checkbox and Name columns pinned left on every list (GPUI Kit fixed columns); checkboxes inset 6 px; Volumes status: *In use* pill + "by N containers" text (VOL-001).
