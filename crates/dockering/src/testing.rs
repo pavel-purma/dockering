@@ -186,6 +186,7 @@ impl Harness {
     }
 
     /// Sends a keystroke to the focused element (GPUI key dispatch + bindings).
+    /// Write Mod as `secondary-` (`cmd` on macOS); `ctrl-` is only for true Ctrl chords.
     pub fn press(&self, cx: &mut TestAppContext, keys: &str) {
         for k in keys.split(' ') {
             let ks = gpui_kit::Keystroke::parse(k).expect("valid keystroke");

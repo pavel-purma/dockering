@@ -179,7 +179,7 @@ fn set_input(
     })
     .unwrap();
     h.draw(cx);
-    h.press(cx, "ctrl-a");
+    h.press(cx, "secondary-a");
     h.type_text(cx, &text);
     h.draw(cx);
 }
@@ -191,7 +191,7 @@ fn kbd_024_mod_comma_opens_settings_with_nav_focus(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-,");
+    h.press(cx, "secondary-,");
     assert_eq!(
         h.read(cx, |s, _, _| s.route().clone()),
         Route::Settings {
@@ -341,7 +341,7 @@ fn set_001_theme_applies_live_and_persists(cx: &mut TestAppContext) {
         "persisted through ConfigHandle"
     );
     // The title-bar toggle updates the select (one source of truth).
-    h.press(cx, "ctrl-shift-l");
+    h.press(cx, "secondary-shift-l");
     h.draw(cx);
     let shown = cx.read(|cx| {
         page.read(cx)
@@ -370,7 +370,7 @@ fn set_001_networks_page_hidden_from_sidebar(cx: &mut TestAppContext) {
     let pages = h.read(cx, |s, _, cx| s.sidebar_pages(cx));
     assert!(!pages.contains(&Page::Networks), "{pages:?}");
     // Mod+4 is a no-op while hidden.
-    h.press(cx, "ctrl-4");
+    h.press(cx, "secondary-4");
     assert!(matches!(
         h.read(cx, |s, _, _| s.route().clone()),
         Route::Settings { .. }
@@ -432,7 +432,7 @@ fn set_020_group_by_default_affects_containers_page(cx: &mut TestAppContext) {
     h.update(cx, |_, window, cx| {
         page.update(cx, |p, cx| p.set_choice(Key::GroupBy, 1, window, cx))
     });
-    h.press(cx, "ctrl-1");
+    h.press(cx, "secondary-1");
     let containers = h.wait_containers(cx);
     assert_eq!(
         cx.read(|cx| containers.read(cx).group_by().clone()),
@@ -488,7 +488,7 @@ fn set_020_cpu_columns_toggle_live(cx: &mut TestAppContext) {
         page.update(cx, |p, cx| p.set_bool(BoolKey::ShowStats, true, cx))
     });
     assert!(hub_config(&h).containers.show_cpu_mem_columns);
-    h.press(cx, "ctrl-1");
+    h.press(cx, "secondary-1");
     let containers = h.wait_containers(cx);
     h.wait_until(cx, "stats columns", |_, cx| {
         containers.read(cx).table().read(cx).delegate(cx).show_stats
@@ -826,7 +826,7 @@ fn eng_105_add_engine_test_then_save(cx: &mut TestAppContext) {
     // Save is disabled until a test passed.
     assert!(!cx.read(|cx| dialog.read(cx).can_save(cx)));
     // Mod+Enter: tests first (no successful test yet).
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "test ok", |_, cx| {
         matches!(
             dialog.read(cx).test_state(),
@@ -835,7 +835,7 @@ fn eng_105_add_engine_test_then_save(cx: &mut TestAppContext) {
     });
     assert!(cx.read(|cx| dialog.read(cx).can_save(cx)));
     // Mod+Enter again: saves.
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "engine added", |_, cx| {
         h.shell
             .read(cx)
@@ -974,7 +974,7 @@ fn eng_104_remove_manual_engine_confirms(cx: &mut TestAppContext) {
             .is_some()),
         "nothing removed before confirming"
     );
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "removed", |_, cx| {
         h.shell
             .read(cx)
@@ -1070,7 +1070,7 @@ fn set_070_keyboard_section_lists_bindings(cx: &mut TestAppContext) {
     // Mod+F filters the list (KBD-025 on this page).
     let nav = sidebar(&h, cx);
     h.focus(cx, &nav);
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     h.type_text(cx, "palette");
     h.draw(cx);
     let visible = cx.read(|cx| page.read(cx).shortcuts().read(cx).visible_rows().len());
@@ -1153,7 +1153,7 @@ fn kbd_071_add_engine_from_palette_escape_closes(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     open(&h, cx, SettingsSection::Engines);
-    h.press(cx, "ctrl-shift-p");
+    h.press(cx, "secondary-shift-p");
     h.type_text(cx, "Add engine");
     h.press(cx, "enter");
     h.wait_until(cx, "dialog open", |window, cx| {

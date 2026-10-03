@@ -129,7 +129,7 @@ fn img_002_filters_and_search(cx: &mut TestAppContext) {
     assert_eq!(row_keys(&page, cx).len(), all - used);
     cx.update(|cx| page.update(cx, |p, cx| p.set_filter(ImageFilter::All, cx)));
     // Search (debounced, SHL-006).
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     h.type_text(cx, "postgres");
     h.wait_until(cx, "search applied", |_, cx| {
         page.read(cx).table().read(cx).model(cx).rows().len() == 1
@@ -200,7 +200,7 @@ fn img_003_prune_confirm_shows_reclaimable(cx: &mut TestAppContext) {
     );
     // Mod+Enter confirms.
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "prune called", |_, _| {
         !h.engine.calls_to("prune_images").is_empty()
     });
@@ -219,7 +219,7 @@ fn img_006_delete_in_use_offers_force(cx: &mut TestAppContext) {
     h.press(cx, "delete");
     assert!(h.has_dialog(cx), "delete confirms (SHL-002)");
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "remove called", |_, _| {
         !h.engine.calls_to("remove_image").is_empty()
     });
@@ -230,7 +230,7 @@ fn img_006_delete_in_use_offers_force(cx: &mut TestAppContext) {
     });
     h.draw(cx);
     h.engine.clear_calls();
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "forced remove", |_, _| {
         !h.engine.calls_to("remove_image").is_empty()
     });
@@ -382,13 +382,13 @@ fn img_005_run_dialog_runs_and_navigates(cx: &mut TestAppContext) {
     h.type_text(cx, "6380");
     h.press(cx, "tab");
     h.type_text(cx, "6379");
-    h.press(cx, "ctrl-shift-enter");
+    h.press(cx, "secondary-shift-enter");
     assert_eq!(
         cx.read(|cx| ports.read(cx).len()),
         2,
         "Mod+Shift+Enter adds a row"
     );
-    h.press(cx, "ctrl-shift-backspace");
+    h.press(cx, "secondary-shift-backspace");
     assert_eq!(
         cx.read(|cx| ports.read(cx).len()),
         1,
@@ -397,13 +397,13 @@ fn img_005_run_dialog_runs_and_navigates(cx: &mut TestAppContext) {
     let env = cx.read(|cx| dialog.read(cx).env().clone());
     let env_add = cx.read(|cx| env.read(cx).add_focus().clone());
     h.focus(cx, &env_add);
-    h.press(cx, "ctrl-shift-enter");
+    h.press(cx, "secondary-shift-enter");
     h.type_text(cx, "MODE");
     h.press(cx, "tab");
     h.type_text(cx, "fast");
     cx.update(|cx| dialog.update(cx, |d, cx| d.set_auto_remove(true, cx)));
     h.engine.clear_calls();
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "run_image called", |_, _| {
         !h.engine.calls_to("run_image").is_empty()
     });
@@ -652,11 +652,11 @@ fn vol_004_create_volume_with_n(cx: &mut TestAppContext) {
     let labels = cx.read(|cx| dialog.read(cx).labels().clone());
     let add = cx.read(|cx| labels.read(cx).add_focus().clone());
     h.focus(cx, &add);
-    h.press(cx, "ctrl-shift-enter");
+    h.press(cx, "secondary-shift-enter");
     h.type_text(cx, "team");
     h.press(cx, "tab");
     h.type_text(cx, "core");
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "create called", |_, _| {
         !h.engine.calls_to("create_volume").is_empty()
     });
@@ -684,7 +684,7 @@ fn vol_005_delete_and_prune(cx: &mut TestAppContext) {
     h.press(cx, "delete");
     assert!(h.has_dialog(cx));
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "old-cache gone", |_, cx| {
         page.read(cx).rows().iter().all(|r| r.name != "old-cache")
     });
@@ -694,7 +694,7 @@ fn vol_005_delete_and_prune(cx: &mut TestAppContext) {
     });
     assert!(h.has_dialog(cx));
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "prune called", |_, _| {
         !h.engine.calls_to("prune_volumes").is_empty()
     });
@@ -713,7 +713,7 @@ fn vol_005_in_use_delete_fails_with_containers(cx: &mut TestAppContext) {
     });
     h.press(cx, "delete");
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "remove attempted", |_, _| {
         !h.engine.calls_to("remove_volume").is_empty()
     });
@@ -835,7 +835,7 @@ fn net_002_delete_custom_network_needs_network_mgmt(cx: &mut TestAppContext) {
     h.press(cx, "delete");
     assert!(h.has_dialog(cx));
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "legacy-net removed", |_, cx| {
         page.read(cx).rows().iter().all(|r| r.name != "legacy-net")
     });
@@ -872,7 +872,7 @@ fn net_004_prune_unused_networks(cx: &mut TestAppContext) {
     });
     assert!(h.has_dialog(cx));
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "prune_networks", |_, _| {
         !h.engine.calls_to("prune_networks").is_empty()
     });
@@ -923,7 +923,7 @@ fn net_001_hidden_networks_page(cx: &mut TestAppContext) {
     );
     h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-4");
+    h.press(cx, "secondary-4");
     assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Containers);
     h.shutdown();
 }
@@ -936,7 +936,7 @@ fn kbd_020_palette_go_to_volume_opens_detail(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-shift-p");
+    h.press(cx, "secondary-shift-p");
     h.type_text(cx, "Go to volume: scratch");
     cx.run_until_parked();
     h.press(cx, "enter");
@@ -1001,7 +1001,7 @@ fn kbd_008_g_u_n_ignored_in_search_inputs(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     let page = images_page(&h, cx);
     focus_images_table(&h, &page, cx);
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     h.type_text(cx, "gun");
     h.draw(cx);
     assert!(
