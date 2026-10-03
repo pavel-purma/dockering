@@ -266,7 +266,7 @@ impl Event {
         let h = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }?;
         OwnedHandle::new(h)
             .map(Self)
-            .ok_or_else(windows::core::Error::from_win32)
+            .ok_or_else(windows::core::Error::from_thread)
     }
     pub fn set(&self) {
         // SAFETY: valid event handle owned by `self`.

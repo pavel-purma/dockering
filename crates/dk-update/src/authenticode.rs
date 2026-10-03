@@ -56,6 +56,8 @@ pub fn signer_subject(path: &Path) -> Result<Option<String>, UpdateError> {
 }
 
 /// Embedded Authenticode signature state of a file.
+// Off Windows, `imp` only ever returns `None`.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Signature {
     /// No embedded signature at all.
