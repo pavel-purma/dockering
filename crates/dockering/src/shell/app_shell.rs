@@ -44,6 +44,7 @@ use crate::state::{
 };
 use crate::strings as s;
 use crate::theme;
+use crate::ui::dispatch;
 use crate::ui::menu::TrackBounds as _;
 use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
@@ -282,16 +283,16 @@ impl AppShell {
             && AppState::hub(cx).mark_update_notified(&version)
         {
             // One action button (GPUI Kit); clicking the toast body opens the release notes.
+            // Toasts render outside the shell: their clicks dispatch from the shell root.
+            let root = self.root_focus.clone();
             let note = Notification::info(s::upd_ready(&version))
-                .on_click(|_, window, cx| window.dispatch_action(Box::new(ViewReleaseNotes), cx))
-                .action(|_, _, _| {
+                .on_click(dispatch::on_click(&root, Box::new(ViewReleaseNotes)))
+                .action(move |_, _, _| {
                     Button::new("upd-restart-now")
                         .small()
                         .primary()
                         .label(s::UPD_RESTART_NOW)
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(RestartToUpdate), cx)
-                        })
+                        .on_click(dispatch::on_click(&root, Box::new(RestartToUpdate)))
                 });
             window.push_notification(note, cx);
         }
@@ -373,7 +374,10 @@ impl AppShell {
                 .icon(IconName::Redo)
                 .label(s::upd_restart(version, *needs_elevation))
                 .tooltip_with_action(s::CMD_RESTART_TO_UPDATE, &RestartToUpdate, None)
-                .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx))
+                .on_click(dispatch::on_click(
+                    &self.status_focus,
+                    Box::new(RestartToUpdate),
+                ))
                 .into_any_element(),
             UpdateStatus::Available {
                 version,
@@ -402,7 +406,10 @@ impl AppShell {
                     .icon(IconName::TriangleAlert)
                     .label(s::UPD_CHECK_FAILED.trim_end_matches(':').to_owned())
                     .tooltip(message.clone())
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(CheckForUpdates), cx))
+                    .on_click(dispatch::on_click(
+                        &self.status_focus,
+                        Box::new(CheckForUpdates),
+                    ))
                     .into_any_element()
             }
             _ => return None,
@@ -1365,6 +1372,7 @@ impl AppShell {
                     .child(
                         h_flex()
                             .id("engine-switcher-button")
+                            .debug_selector(|| "engine-switcher-button".into())
                             .occlude()
                             .track_focus(&self.switcher_btn_focus)
                             .gap_2()
@@ -1375,9 +1383,10 @@ impl AppShell {
                             .border_1()
                             .border_color(cx.theme().border)
                             .cursor_pointer()
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(EngineSwitcher), cx)
-                            })
+                            .on_click(dispatch::on_click(
+                                &self.title_focus,
+                                Box::new(EngineSwitcher),
+                            ))
                             .on_key_down(cx.listener(
                                 |_, e: &gpui_kit::KeyDownEvent, window, cx| {
                                     if matches!(e.keystroke.key.as_str(), "enter" | "space") {
@@ -1435,7 +1444,10 @@ impl AppShell {
                                     .small()
                                     .icon(IconName::RefreshCw)
                                     .tooltip_with_action(s::REFRESH, &Refresh, None)
-                                    .on_click(|_, w, cx| w.dispatch_action(Box::new(Refresh), cx)),
+                                    .on_click(dispatch::on_click(
+                                        &self.title_focus,
+                                        Box::new(Refresh),
+                                    )),
                             )
                             .child(
                                 Button::new("title-theme")
@@ -1447,9 +1459,10 @@ impl AppShell {
                                         IconName::Moon
                                     })
                                     .tooltip_with_action(s::TOGGLE_THEME, &ToggleTheme, None)
-                                    .on_click(|_, w, cx| {
-                                        w.dispatch_action(Box::new(ToggleTheme), cx)
-                                    }),
+                                    .on_click(dispatch::on_click(
+                                        &self.title_focus,
+                                        Box::new(ToggleTheme),
+                                    )),
                             )
                             .child(
                                 Button::new("title-settings")
@@ -1457,9 +1470,10 @@ impl AppShell {
                                     .small()
                                     .icon(IconName::Settings)
                                     .tooltip_with_action(s::OPEN_SETTINGS, &OpenSettings, None)
-                                    .on_click(|_, w, cx| {
-                                        w.dispatch_action(Box::new(OpenSettings), cx)
-                                    }),
+                                    .on_click(dispatch::on_click(
+                                        &self.title_focus,
+                                        Box::new(OpenSettings),
+                                    )),
                             )
                             .when(!cfg!(target_os = "macos"), |this| {
                                 // SHL-021: Alt focuses the overflow menu button on Windows/Linux.
@@ -1659,13 +1673,13 @@ impl AppShell {
             return v.into_any_element();
         }
         if list.is_empty() {
-            return engine_views::first_run(cx);
+            return engine_views::first_run(&self.content_focus, cx);
         }
         let Some(status) = list.active().cloned() else {
             if list.none_usable() {
-                return engine_views::first_run(cx);
+                return engine_views::first_run(&self.content_focus, cx);
             }
-            return engine_views::no_active_engine();
+            return engine_views::no_active_engine(&self.content_focus);
         };
         match &status.state {
             EngineState::Connected | EngineState::Degraded => {
@@ -1682,7 +1696,7 @@ impl AppShell {
                     .into_any_element()
             }
             EngineState::Connecting => crate::ui::skeleton_rows(8, 5),
-            _ => engine_views::disconnected_page(&status, cx),
+            _ => engine_views::disconnected_page(&status, &self.content_focus, cx),
         }
     }
 

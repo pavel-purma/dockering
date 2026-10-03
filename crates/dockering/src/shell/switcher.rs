@@ -18,6 +18,7 @@ use crate::actions::{ManageEngines, Rescan, switcher};
 use crate::keymap::ctx;
 use crate::state::EngineListStore;
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
 
 /// Icon per kind — labels/icons are the only place `EngineKind` is matched (ENG-030).
@@ -310,7 +311,7 @@ impl Render for EngineSwitcher {
                             .ghost()
                             .icon(IconName::RefreshCw)
                             .label(s::RESCAN)
-                            .on_click(|_, window, cx| window.dispatch_action(Box::new(Rescan), cx)),
+                            .on_click(dispatch::on_click(&self.focus, Box::new(Rescan))),
                     )
                     .child(
                         Button::new("switcher-manage")
@@ -318,9 +319,7 @@ impl Render for EngineSwitcher {
                             .ghost()
                             .icon(IconName::Settings)
                             .label(s::MANAGE_ENGINES)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(ManageEngines), cx)
-                            }),
+                            .on_click(dispatch::on_click(&self.focus, Box::new(ManageEngines))),
                     ),
             )
     }

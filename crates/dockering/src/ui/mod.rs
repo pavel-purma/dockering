@@ -11,10 +11,12 @@
 //! | [`page`] | The `Page` trait (`primary_focus`, search focus, refresh) |
 //! | [`breadcrumb`] | Detail-page breadcrumb |
 //! | [`action_icons`] | Start/stop row buttons: chalk icon, filled on hover |
+//! | [`dispatch`] | Click handlers that dispatch from the clicked control, not from focus (KBD-002) |
 
 pub mod action_icons;
 pub mod breadcrumb;
 pub mod confirm;
+pub mod dispatch;
 pub mod list_table;
 pub mod menu;
 pub mod notify;

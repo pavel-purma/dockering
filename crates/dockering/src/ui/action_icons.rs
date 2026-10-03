@@ -8,9 +8,10 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::{Disableable, Icon, IconName, Sizable};
 use gpui_kit::prelude::*;
-use gpui_kit::{Action, App, ElementId, SharedString, div, svg};
+use gpui_kit::{Action, App, ElementId, FocusHandle, SharedString, div, svg};
 
 use crate::assets::Lucide;
+use crate::ui::dispatch;
 use crate::ui::status_chip::{Tone, chalk};
 
 /// Lucide `play`, filled.
@@ -52,14 +53,15 @@ impl StateIcon {
 
 /// An xsmall ghost row button with a [`StateIcon`]: chalk outline at rest, filled while
 /// hovered. Disabled buttons keep the kit's plain disabled icon. Not a Tab stop (the table
-/// is one stop, KBD-004); the click doesn't open the row.
+/// is one stop, KBD-004); the click dispatches `action` from `origin` (KBD-002) and doesn't
+/// open the row.
 pub fn state_button(
     id: impl Into<ElementId>,
     group: impl Into<SharedString>,
     icon: StateIcon,
     tooltip: impl Into<SharedString>,
     disabled: bool,
-    action: Box<dyn Action>,
+    (origin, action): (&FocusHandle, Box<dyn Action>),
     cx: &App,
 ) -> Button {
     let group: SharedString = group.into();
@@ -69,10 +71,7 @@ pub fn state_button(
         .tooltip(tooltip)
         .disabled(disabled)
         .tab_stop(false)
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            window.dispatch_action(action.boxed_clone(), cx)
-        });
+        .on_click(dispatch::on_click_stop(origin, action));
     if disabled {
         return button.icon(icon.outline());
     }

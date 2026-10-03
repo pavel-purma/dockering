@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · ui/keyboard · Fix: after the engine switcher was dismissed by a click on the title bar, the group-by, sort, ⋮ and row menus (and other header/row buttons) stopped responding. Clicks dispatched their action from keyboard focus, which the switcher returned to its title-bar button, outside the page. KBD-002 now requires pointer clicks to dispatch from the clicked control (`ui::dispatch`: `on_click`, `DispatchAnchor`); every click site moved to it, and the Settings-only `dispatch_here` workaround delegates to it. Test `kbd_007_header_menus_open_after_switcher_dismissed_by_title_click`.
 - 2026-10-03 · docker · `DISK_USAGE` is advertised only at negotiated API ≥ 1.52: bollard 0.21 drops the legacy `/system/df` shape, so older daemons (e.g. Docker 28, API 1.48) reported all sizes as 0. Below 1.52 `disk_usage` returns `Unsupported` and Volumes/Images use their fallbacks (spec 21 §2/§6, VOL-002, IMG-003).
 - 2026-10-03 · ci · `ci.yml` runs again on push to `main` and on pull requests (reverts the manual-only change; Actions minutes are free for the public repo); packaging runs on `main` only. Dependabot version updates for `cargo` and `github-actions` (REL-060).
 - 2026-10-03 · ui · Start/stop (Containers) and Run (Images) row icons fill with their chalk colour while hovered (`ui::action_icons`); checkbox and Name columns pinned left on every list (GPUI Kit fixed columns); checkboxes inset 6 px; Volumes status: *In use* pill + "by N containers" text (VOL-001).

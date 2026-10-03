@@ -327,7 +327,7 @@ impl NetworkDetailPage {
                 (
                     route.clone(),
                     vec![
-                        route_link(("net-container", ix), c.name.clone(), route),
+                        route_link(("net-container", ix), c.name.clone(), route, cx),
                         opt(&c.ipv4),
                         opt(&c.ipv6),
                         opt(&c.mac),
@@ -394,10 +394,13 @@ impl Render for NetworkDetailPage {
             .on_action(cx.listener(Self::on_prev_tab))
             .on_action(cx.listener(Self::on_copy_id))
             .on_action(cx.listener(Self::on_delete))
-            .child(breadcrumb(vec![
-                Crumb::link(s::PAGE_NETWORKS, Route::Networks),
-                Crumb::here(name.clone()),
-            ]))
+            .child(breadcrumb(
+                vec![
+                    Crumb::link(s::PAGE_NETWORKS, Route::Networks),
+                    Crumb::here(name.clone()),
+                ],
+                cx,
+            ))
             .child(header(
                 &self.header_focus,
                 name,
@@ -419,6 +422,7 @@ impl Render for NetworkDetailPage {
                         Some(IconName::Copy),
                         Box::new(list::CopyId),
                         false,
+                        &self.header_focus,
                     ),
                     header_action(
                         "net-delete",
@@ -426,6 +430,7 @@ impl Render for NetworkDetailPage {
                         None,
                         Box::new(list::Delete),
                         !can_delete,
+                        &self.header_focus,
                     ),
                 ],
                 cx,

@@ -47,6 +47,7 @@ use crate::state::{AppState, EngineStore};
 use crate::strings as s;
 use crate::ui::breadcrumb::{Crumb, breadcrumb};
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive, should_confirm_stopped_delete};
+use crate::ui::dispatch;
 use crate::ui::menu::TrackBounds as _;
 use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
@@ -640,7 +641,7 @@ impl ContainerDetailPage {
                     .small()
                     .label(format!("{} ↗", c.image))
                     .tooltip(s::OPEN_IMAGE)
-                    .on_click(move |_, w, cx| w.dispatch_action(Box::new(nav.clone()), cx)),
+                    .on_click(dispatch::on_click(&self.image_focus, Box::new(nav))),
                 move |_, w, cx| w.dispatch_action(Box::new(nav2.clone()), cx),
                 cx,
             )
@@ -669,17 +670,15 @@ impl ContainerDetailPage {
                 .xsmall()
                 .icon(IconName::Copy)
                 .tooltip_with_action(s::COPY_ID, &list::CopyId, Some(ctx::DETAIL_HEADER))
-                .on_click(move |_, w, cx| {
-                    w.dispatch_action(
-                        Box::new(crate::actions::CopyText {
-                            text: copy_text.clone(),
-                        }),
-                        cx,
-                    )
-                }),
+                .on_click(dispatch::on_click(
+                    &self.copy_focus,
+                    Box::new(crate::actions::CopyText { text: copy_text }),
+                )),
             |_, w, cx| w.dispatch_action(Box::new(list::CopyId), cx),
             cx,
         );
+        // Header clicks dispatch from the breadcrumb's focus node, inside this page (KBD-002).
+        let origin = self.breadcrumb_focus.clone();
         let action_btn = |id: &'static str,
                           icon: gpui_kit::component::Icon,
                           label: &'static str,
@@ -695,7 +694,7 @@ impl ContainerDetailPage {
                 .loading(loading)
                 .disabled(disabled)
                 .tooltip_with_action(label, action.as_ref(), Some(ctx::DETAIL_HEADER))
-                .on_click(move |_, w, cx| w.dispatch_action(a.boxed_clone(), cx))
+                .on_click(dispatch::on_click(&origin, a))
         };
         let more_focus_ring = self.more_focus.clone();
         let actions = h_flex()
@@ -764,7 +763,7 @@ impl ContainerDetailPage {
                     .tooltip_with_action(s::ACTION_DELETE, &list::Delete, Some(ctx::DETAIL_HEADER))
                     .loading(busy("delete"))
                     .disabled(ro || summary.is_none())
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::Delete), cx)),
+                    .on_click(dispatch::on_click(&origin, Box::new(list::Delete))),
             );
         let _ = caps;
 
@@ -784,7 +783,7 @@ impl ContainerDetailPage {
                             cx.stop_propagation();
                         }
                     })
-                    .child(breadcrumb(crumbs)),
+                    .child(breadcrumb(crumbs, cx)),
             )
             .child(
                 h_flex()
@@ -839,14 +838,12 @@ impl ContainerDetailPage {
                         Button::new("detail-back-to-list")
                             .small()
                             .label(s::BACK_TO_LIST)
-                            .on_click(|_, w, cx| {
-                                w.dispatch_action(
-                                    Box::new(Navigate {
-                                        route: Route::Containers,
-                                    }),
-                                    cx,
-                                )
-                            }),
+                            .on_click(dispatch::on_click(
+                                &self.breadcrumb_focus,
+                                Box::new(Navigate {
+                                    route: Route::Containers,
+                                }),
+                            )),
                     ),
                 )
             })

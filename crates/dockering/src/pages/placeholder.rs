@@ -61,6 +61,7 @@ impl Render for PlaceholderPage {
                             None => Crumb::here(l.clone()),
                         })
                         .collect(),
+                    cx,
                 ))
             })
             .child(

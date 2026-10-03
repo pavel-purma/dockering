@@ -17,6 +17,7 @@ use crate::keymap::ctx;
 use crate::pages::resources::chrome::{hinted, mono_cell, name_cell, row_menu_button, text_cell};
 use crate::strings as s;
 use crate::ui::action_icons::{StateIcon, state_button};
+use crate::ui::dispatch::DispatchAnchor;
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::{copy_id, relative_time};
@@ -130,20 +131,24 @@ impl ListDelegate for ImagesDelegate {
                     return Spinner::new().small().into_any_element();
                 }
                 let key = row.key.clone();
+                let anchor = DispatchAnchor::new(cx);
                 h_flex()
+                    .relative()
                     .gap_0p5()
+                    .child(anchor.element())
                     .child(state_button(
                         ("run", row_ix),
                         format!("row-run-{row_ix}"),
                         StateIcon::Start,
                         s::RUN,
                         self.read_only,
-                        Box::new(RunRow { row: key.clone() }),
+                        (anchor.handle(), Box::new(RunRow { row: key.clone() })),
                         cx,
                     ))
                     .child(row_menu_button(
                         ("more", row_ix),
                         on_row(&key, RowCommand::ContextMenu),
+                        cx,
                     ))
                     .into_any_element()
             }

@@ -1037,3 +1037,47 @@ fn kbd_026_f5_refetches_everything(cx: &mut TestAppContext) {
     });
     h.shutdown();
 }
+
+/// Pointer commands resolve where the user clicked, not wherever keyboard focus was left
+/// (KBD-007). Opening the engine switcher with the mouse and dismissing it with a click on
+/// the title bar used to leave focus in the title bar; header buttons dispatch their action
+/// from the focused element, so the group-by menu and the row ⋮ menu stopped opening.
+#[gpui_kit::test]
+fn kbd_007_header_menus_open_after_switcher_dismissed_by_title_click(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    let click = |cx: &mut TestAppContext, selector: &'static str, dx: f32| {
+        h.draw(cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+        let b = visual
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} rendered"));
+        let at = gpui_kit::point(b.center().x + gpui_kit::px(dx), b.center().y);
+        visual.simulate_click(at, Default::default());
+        cx.run_until_parked();
+    };
+    let switcher_click_away = |cx: &mut TestAppContext| {
+        click(cx, "engine-switcher-button", 0.);
+        assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+        // Empty title-bar space left of the switcher button.
+        click(cx, "engine-switcher-button", -260.);
+        assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    };
+
+    switcher_click_away(cx);
+    click(cx, "group-by", 0.);
+    assert!(
+        cx.read(|cx| page.read(cx).menu_open()),
+        "group-by menu opens after the switcher was dismissed"
+    );
+    h.press(cx, "escape");
+    assert!(!cx.read(|cx| page.read(cx).menu_open()));
+
+    switcher_click_away(cx);
+    click(cx, "row-more-1", 0.);
+    assert!(
+        cx.read(|cx| page.read(cx).table().read(cx).key_menu_open()),
+        "row ⋮ menu opens after the switcher was dismissed"
+    );
+    h.shutdown();
+}

@@ -638,7 +638,7 @@ impl VolumesPage {
             controls,
             &self.search,
             summary,
-            chrome::selection_actions(selected, Vec::new(), ro, cx),
+            chrome::selection_actions(selected, Vec::new(), ro, &self.overflow_focus, cx),
             overflow,
             cx,
         )

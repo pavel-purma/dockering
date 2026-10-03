@@ -20,6 +20,7 @@ use crate::assets::Lucide;
 use crate::pages::resources::chrome::{name_cell, row_menu_button};
 use crate::strings as s;
 use crate::ui::action_icons::{StateIcon, state_button};
+use crate::ui::dispatch::{self, DispatchAnchor};
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::status_chip::{container_chip, health_chip, status_without_health};
 use crate::ui::widgets::{OverflowSet, port_link, port_url, relative_time};
@@ -152,6 +153,8 @@ impl ContainersDelegate {
         let key: SharedString = c.id.clone().into();
         let running = c.state.is_running() || c.state == ContainerState::Paused;
         let disabled = self.read_only;
+        let anchor = DispatchAnchor::new(cx);
+        let origin = anchor.handle().clone();
         let btn = |id: &'static str,
                    icon: gpui_kit::component::Icon,
                    tip: &'static str,
@@ -164,21 +167,20 @@ impl ContainersDelegate {
                 .tooltip(tip)
                 .disabled(disabled)
                 .tab_stop(false)
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    window.dispatch_action(
-                        Box::new(OnRow {
-                            row: key.clone(),
-                            action: cmd,
-                        }),
-                        cx,
-                    )
-                })
+                .on_click(dispatch::on_click_stop(
+                    &origin,
+                    Box::new(OnRow {
+                        row: key,
+                        action: cmd,
+                    }),
+                ))
         };
         // Fixed slots so the icons line up across rows: start/stop, restart, ⋮. Delete
         // lives in the ⋮ menu and the selection actions.
         h_flex()
+            .relative()
             .gap_0p5()
+            .child(anchor.element())
             .child({
                 let (id, icon, tip, cmd) = if running {
                     ("stop", StateIcon::Stop, s::ACTION_STOP, RowCommand::Stop)
@@ -196,10 +198,13 @@ impl ContainersDelegate {
                     icon,
                     tip,
                     disabled,
-                    Box::new(OnRow {
-                        row: key.clone(),
-                        action: cmd,
-                    }),
+                    (
+                        &origin,
+                        Box::new(OnRow {
+                            row: key.clone(),
+                            action: cmd,
+                        }),
+                    ),
                     cx,
                 )
             })
@@ -219,6 +224,7 @@ impl ContainersDelegate {
                     row: key,
                     action: RowCommand::ContextMenu,
                 }),
+                cx,
             ))
             .into_any_element()
     }
@@ -235,11 +241,12 @@ impl ContainersDelegate {
         }
         let disabled = self.read_only;
         let any_running = info.group.aggregate.running > 0;
+        let anchor = DispatchAnchor::new(cx);
+        let origin = anchor.handle().clone();
         let btn = |id: &'static str,
                    icon: gpui_kit::component::Icon,
                    tip: &'static str,
                    cmd: RowCommand| {
-            let key = key.clone();
             Button::new((id, row_ix))
                 .ghost()
                 .xsmall()
@@ -247,21 +254,20 @@ impl ContainersDelegate {
                 .tooltip(tip)
                 .disabled(disabled)
                 .tab_stop(false)
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    window.dispatch_action(
-                        Box::new(OnRow {
-                            row: key.clone(),
-                            action: cmd,
-                        }),
-                        cx,
-                    )
-                })
+                .on_click(dispatch::on_click_stop(
+                    &origin,
+                    Box::new(OnRow {
+                        row: key.clone(),
+                        action: cmd,
+                    }),
+                ))
         };
         // Same slots as member rows: start/stop all, restart all, ⋮ (start all for a
         // partly running group and delete all are in the ⋮ menu).
         h_flex()
+            .relative()
             .gap_0p5()
+            .child(anchor.element())
             .child({
                 let (id, icon, tip, cmd) = if any_running {
                     (
@@ -284,10 +290,13 @@ impl ContainersDelegate {
                     icon,
                     tip,
                     disabled,
-                    Box::new(OnRow {
-                        row: key.clone(),
-                        action: cmd,
-                    }),
+                    (
+                        &origin,
+                        Box::new(OnRow {
+                            row: key.clone(),
+                            action: cmd,
+                        }),
+                    ),
                     cx,
                 )
             })
@@ -303,6 +312,7 @@ impl ContainersDelegate {
                     row: key.clone(),
                     action: RowCommand::ContextMenu,
                 }),
+                cx,
             ))
             .into_any_element()
     }

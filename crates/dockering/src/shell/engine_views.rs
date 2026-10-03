@@ -6,14 +6,15 @@ use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, div, px};
+use gpui_kit::{AnyElement, App, FocusHandle, IntoElement, div, px};
 
 use crate::actions::{EngineSwitcher, Rescan, RetryEngine, StartEngine};
 use crate::strings as s;
+use crate::ui::dispatch;
 
 /// Full-page alert for Disconnected/Failed/Stopped (SHL-013, ENG-107). Last-known data is
 /// not shown so the user can't act on stale ids.
-pub fn disconnected_page(status: &EngineStatus, cx: &App) -> AnyElement {
+pub fn disconnected_page(status: &EngineStatus, origin: &FocusHandle, cx: &App) -> AnyElement {
     let (message, hint, retry_in) = match &status.state {
         EngineState::Failed { error, retry_in_ms } => (
             error.to_string(),
@@ -64,9 +65,7 @@ pub fn disconnected_page(status: &EngineStatus, cx: &App) -> AnyElement {
                                 Button::new("start-engine")
                                     .primary()
                                     .label(s::START_AND_CONNECT)
-                                    .on_click(|_, w, cx| {
-                                        w.dispatch_action(Box::new(StartEngine), cx)
-                                    }),
+                                    .on_click(dispatch::on_click(origin, Box::new(StartEngine))),
                             )
                         })
                         .child(
@@ -74,15 +73,13 @@ pub fn disconnected_page(status: &EngineStatus, cx: &App) -> AnyElement {
                                 .when(!stopped, |b| b.primary())
                                 .icon(IconName::RefreshCw)
                                 .label(s::RETRY)
-                                .on_click(|_, w, cx| w.dispatch_action(Box::new(RetryEngine), cx)),
+                                .on_click(dispatch::on_click(origin, Box::new(RetryEngine))),
                         )
                         .child(
                             Button::new("switch-engine")
                                 .label(s::SWITCH_ENGINE)
                                 .tooltip_with_action(s::SWITCH_ENGINE, &EngineSwitcher, None)
-                                .on_click(|_, w, cx| {
-                                    w.dispatch_action(Box::new(EngineSwitcher), cx)
-                                }),
+                                .on_click(dispatch::on_click(origin, Box::new(EngineSwitcher))),
                         ),
                 ),
         )
@@ -97,7 +94,7 @@ pub fn degraded_banner() -> AnyElement {
 }
 
 /// First run / no engine (ENG-111): per-OS guidance, Rescan, Add engine….
-pub fn first_run(cx: &App) -> AnyElement {
+pub fn first_run(origin: &FocusHandle, cx: &App) -> AnyElement {
     v_flex()
         .id("first-run")
         .size_full()
@@ -137,21 +134,17 @@ pub fn first_run(cx: &App) -> AnyElement {
                         .primary()
                         .icon(IconName::RefreshCw)
                         .label(s::RESCAN)
-                        .on_click(|_, w, cx| w.dispatch_action(Box::new(Rescan), cx)),
+                        .on_click(dispatch::on_click(origin, Box::new(Rescan))),
                 )
-                .child(
-                    Button::new("first-run-add")
-                        .label(s::ADD_ENGINE)
-                        .on_click(|_, w, cx| {
-                            w.dispatch_action(Box::new(crate::actions::settings::AddEngine), cx)
-                        }),
-                ),
+                .child(Button::new("first-run-add").label(s::ADD_ENGINE).on_click(
+                    dispatch::on_click(origin, Box::new(crate::actions::settings::AddEngine)),
+                )),
         )
         .into_any_element()
 }
 
 /// Engines exist but none is active.
-pub fn no_active_engine() -> AnyElement {
+pub fn no_active_engine(origin: &FocusHandle) -> AnyElement {
     v_flex()
         .id("no-active-engine")
         .size_full()
@@ -169,7 +162,7 @@ pub fn no_active_engine() -> AnyElement {
             Button::new("pick-engine")
                 .primary()
                 .label(s::SWITCH_ENGINE)
-                .on_click(|_, w, cx| w.dispatch_action(Box::new(EngineSwitcher), cx)),
+                .on_click(dispatch::on_click(origin, Box::new(EngineSwitcher))),
         )
         .into_any_element()
 }

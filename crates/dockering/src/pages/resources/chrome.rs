@@ -19,6 +19,7 @@ use gpui_kit::{
 
 use crate::actions::{SetFilter, SortByColumn, list};
 use crate::strings as s;
+use crate::ui::dispatch;
 use crate::ui::list_table::{ColumnSpec, RowMenuTrigger, SortState};
 use crate::ui::menu::TrackBounds as _;
 use crate::ui::widgets::focus_wrap;
@@ -45,6 +46,7 @@ pub fn filter_segment(
     current: &'static str,
     cx: &App,
 ) -> AnyElement {
+    let origin = focus.clone();
     div()
         .id(id)
         .track_focus(focus)
@@ -79,14 +81,12 @@ pub fn filter_segment(
                         .label(*label)
                         .selected(value == current)
                         .tab_stop(false)
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(SetFilter {
-                                    filter: value.into(),
-                                }),
-                                cx,
-                            )
-                        })
+                        .on_click(dispatch::on_click(
+                            &origin,
+                            Box::new(SetFilter {
+                                filter: value.into(),
+                            }),
+                        ))
                 })),
         )
         .into_any_element()
@@ -104,7 +104,7 @@ pub fn header_button(
     focus_wrap(
         id,
         focus,
-        button.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
+        button.on_click(dispatch::on_click(focus, action)),
         move |_, window, cx| window.dispatch_action(on_key.boxed_clone(), cx),
         cx,
     )
@@ -195,6 +195,7 @@ pub fn selection_actions(
     selected: usize,
     leading: Vec<Button>,
     delete_disabled: bool,
+    origin: &FocusHandle,
     cx: &App,
 ) -> Option<AnyElement> {
     if selected == 0 {
@@ -220,14 +221,14 @@ pub fn selection_actions(
                     .label(s::ACTION_DELETE)
                     .disabled(delete_disabled)
                     .tooltip_with_action(s::CMD_BULK_DELETE, &list::BulkDelete, None)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkDelete), cx)),
+                    .on_click(dispatch::on_click(origin, Box::new(list::BulkDelete))),
             )
             .child(
                 Button::new("bulk-clear")
                     .small()
                     .ghost()
                     .label(s::CLEAR_SELECTION)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::ClearSelection), cx)),
+                    .on_click(dispatch::on_click(origin, Box::new(list::ClearSelection))),
             )
             .into_any_element(),
     )
@@ -324,12 +325,23 @@ pub fn hinted(
 
 /// The row ⋮ button (`OnRow` → `ContextMenu`). The row menu it opens is anchored under it
 /// ([`RowMenuTrigger`]); `Button` can't report its bounds, so a wrapper measures it.
-pub fn row_menu_button(id: impl Into<gpui_kit::ElementId>, action: Box<dyn Action>) -> AnyElement {
+pub fn row_menu_button(
+    id: impl Into<gpui_kit::ElementId>,
+    action: Box<dyn Action>,
+    cx: &App,
+) -> AnyElement {
+    let id = id.into();
+    let anchor = dispatch::DispatchAnchor::new(cx);
+    let origin = anchor.handle().clone();
+    let selector = format!("row-{id}");
     let bounds = std::rc::Rc::new(std::cell::Cell::new(gpui_kit::Bounds::default()));
     let slot = bounds.clone();
     div()
+        .relative()
+        .child(anchor.element())
         .child(
             Button::new(id)
+                .debug_selector(move || selector)
                 .ghost()
                 .xsmall()
                 .icon(IconName::EllipsisVertical)
@@ -339,7 +351,7 @@ pub fn row_menu_button(id: impl Into<gpui_kit::ElementId>, action: Box<dyn Actio
                     // Don't let the click open the row too.
                     cx.stop_propagation();
                     RowMenuTrigger::set(bounds.get(), cx);
-                    window.dispatch_action(action.boxed_clone(), cx)
+                    dispatch::dispatch_from(&origin, action.as_ref(), window, cx)
                 }),
         )
         .on_bounds(move |b, _, _| slot.set(b))

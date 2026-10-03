@@ -327,7 +327,7 @@ impl VolumeDetailPage {
                 (
                     route.clone(),
                     vec![
-                        route_link(("used-by", ix), c.name.clone(), route),
+                        route_link(("used-by", ix), c.name.clone(), route, cx),
                         mono_value(c.detail.clone().unwrap_or_default(), cx),
                         div()
                             .text_xs()
@@ -399,10 +399,13 @@ impl Render for VolumeDetailPage {
             .on_action(cx.listener(Self::on_prev_tab))
             .on_action(cx.listener(Self::on_copy_id))
             .on_action(cx.listener(Self::on_delete))
-            .child(breadcrumb(vec![
-                Crumb::link(s::PAGE_VOLUMES, Route::Volumes),
-                Crumb::here(self.name.clone()),
-            ]))
+            .child(breadcrumb(
+                vec![
+                    Crumb::link(s::PAGE_VOLUMES, Route::Volumes),
+                    Crumb::here(self.name.clone()),
+                ],
+                cx,
+            ))
             .child(header(
                 &self.header_focus,
                 self.name.clone(),
@@ -424,8 +427,16 @@ impl Render for VolumeDetailPage {
                         Some(IconName::Copy),
                         Box::new(list::CopyId),
                         false,
+                        &self.header_focus,
                     ),
-                    header_action("vol-delete", s::DELETE, None, Box::new(list::Delete), ro),
+                    header_action(
+                        "vol-delete",
+                        s::DELETE,
+                        None,
+                        Box::new(list::Delete),
+                        ro,
+                        &self.header_focus,
+                    ),
                 ],
                 cx,
             ))

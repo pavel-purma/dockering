@@ -33,6 +33,7 @@ use crate::pages::resources::chrome;
 use crate::state::{AppState, Collection, EngineStore, EngineStoreEvent};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive, should_confirm_stopped_delete};
+use crate::ui::dispatch;
 use crate::ui::list_table::{ListEvent, ListTable, RowKind, SortState};
 use crate::ui::menu::TrackBounds as _;
 use crate::ui::menu::{KeyMenu, MenuAnchor};
@@ -191,6 +192,11 @@ impl ContainersPage {
 
     pub fn group_by(&self) -> &GroupBy {
         &self.group_by
+    }
+
+    /// A header menu (group-by, sort, overflow) is open.
+    pub fn menu_open(&self) -> bool {
+        self.menu.is_some()
     }
 
     pub fn pending(&self) -> &HashSet<String> {
@@ -1259,14 +1265,12 @@ impl ContainersPage {
                             .label(f.label())
                             .selected(f == filter)
                             .tab_stop(false)
-                            .on_click(move |_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(SetFilter {
-                                        filter: f.as_str().into(),
-                                    }),
-                                    cx,
-                                )
-                            })
+                            .on_click(dispatch::on_click(
+                                &self.filter_focus,
+                                Box::new(SetFilter {
+                                    filter: f.as_str().into(),
+                                }),
+                            ))
                     }),
                 ))
                 .into_any_element(),
@@ -1274,12 +1278,16 @@ impl ContainersPage {
                 "group-by-wrap",
                 &self.group_focus,
                 Button::new("group-by")
+                    .debug_selector(|| "group-by".into())
                     .small()
                     .outline()
                     .label(format!("{}: {group_label}", s::GROUP_BY))
                     .dropdown_caret(true)
                     .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.group_focus,
+                        Box::new(list::GroupBy),
+                    )),
                 |_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx),
                 cx,
             )
@@ -1325,14 +1333,21 @@ impl ContainersPage {
                     .small()
                     .label(s::ACTION_START)
                     .disabled(ro)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStart), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.overflow_focus,
+                        Box::new(list::BulkStart),
+                    )),
                 Button::new("bulk-stop")
                     .small()
                     .label(s::ACTION_STOP)
                     .disabled(ro)
-                    .on_click(|_, w, cx| w.dispatch_action(Box::new(list::BulkStop), cx)),
+                    .on_click(dispatch::on_click(
+                        &self.overflow_focus,
+                        Box::new(list::BulkStop),
+                    )),
             ],
             ro,
+            &self.overflow_focus,
             cx,
         );
         chrome::page_header(
