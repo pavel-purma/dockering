@@ -138,7 +138,7 @@ mod service {
     use std::time::Duration;
 
     use dk_core::{EngineError, EngineResult};
-    use dk_update::source::asset_file_name;
+    use dk_update::source::release_asset_name;
     use dk_update::{InstallKind, PlatformAsset, UpdateError, UpdateSource};
     use tokio::sync::watch;
     use tokio_util::sync::CancellationToken;
@@ -162,7 +162,8 @@ mod service {
         pub(crate) running_exe: Option<PathBuf>,
         /// Verified installer ready to run: (path, version).
         pub(crate) ready: Mutex<Option<(PathBuf, String)>>,
-        /// Manual check request id; results of superseded checks are dropped (UPD-011).
+        /// Id of the latest *manual* check; a manual check superseded by a newer one returns
+        /// `Cancelled` (UPD-011). Automatic checks don't touch it.
         pub(crate) request: std::sync::atomic::AtomicU64,
         /// Serialises check + download.
         pub(crate) busy: tokio::sync::Mutex<()>,
@@ -304,18 +305,25 @@ mod service {
                 return Ok(UpdateCheck::Disabled);
             }
         }
-        let request = u.request.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        use std::sync::atomic::Ordering::SeqCst;
+        let request = manual.then(|| u.request.fetch_add(1, SeqCst) + 1);
+        let superseded = || request.is_some_and(|r| u.request.load(SeqCst) != r);
         let _busy = u.busy.lock().await;
-        if manual && u.request.load(std::sync::atomic::Ordering::SeqCst) != request {
+        if superseded() {
             // A newer manual check superseded this one (UPD-011).
             return Err(EngineError::Cancelled);
         }
+        if !manual && lock(&u.schedule).as_ref().is_none_or(|t| t.is_cancelled()) {
+            // Turned off while this automatic check waited.
+            return Ok(UpdateCheck::Disabled);
+        }
+        // A verified installer is already waiting: nothing to fetch.
         if let Some((_, version)) = lock(&u.ready).clone() {
             return Ok(UpdateCheck::Available { version });
         }
         u.set(UpdateStatus::Checking);
         let result = check_inner(inner, u).await;
-        let stale = manual && u.request.load(std::sync::atomic::Ordering::SeqCst) != request;
+        let stale = superseded();
         let summary = match &result {
             Ok(UpdateCheck::UpToDate) => "up to date".to_owned(),
             Ok(UpdateCheck::Available { version }) => format!("{version} available"),
@@ -327,21 +335,20 @@ mod service {
             s.updates.last_check = checked_at.clone();
             s.updates.last_result = Some(summary);
         });
+        // `Checking`/`Downloading` never outlive the check (a failed download must not leave
+        // "Downloading… n%" behind). `Available`/`Ready` set by `check_inner` stay.
+        let in_flight = matches!(
+            *u.status.borrow(),
+            UpdateStatus::Checking | UpdateStatus::Downloading { .. }
+        );
         match &result {
-            Err(e) if manual && !stale => u.set(UpdateStatus::Error {
+            Err(e) if manual && !stale && in_flight => u.set(UpdateStatus::Error {
                 message: e.to_string(),
             }),
-            Err(_) | Ok(UpdateCheck::UpToDate) | Ok(UpdateCheck::Disabled) => {
-                if !matches!(
-                    *u.status.borrow(),
-                    UpdateStatus::Available { .. } | UpdateStatus::Ready { .. }
-                ) {
-                    u.set(UpdateStatus::Idle {
-                        last_check: checked_at,
-                    });
-                }
-            }
-            Ok(UpdateCheck::Available { .. }) => {}
+            _ if in_flight => u.set(UpdateStatus::Idle {
+                last_check: checked_at,
+            }),
+            _ => {}
         }
         if stale {
             return Err(EngineError::Cancelled);
@@ -368,10 +375,19 @@ mod service {
             return Ok(UpdateCheck::Available { version });
         }
         let path = download(inner, u, &version, &asset).await?;
-        if let Some(exe) = &u.running_exe {
-            dk_update::authenticode::check_installer(&path, exe).inspect_err(|_| {
-                let _ = std::fs::remove_file(&path);
-            })?;
+        if let Some(exe) = u.running_exe.clone() {
+            // WinVerifyTrust blocks (and may build a certificate chain): keep it off the
+            // runtime's worker threads.
+            let installer = path.clone();
+            let trust = tokio::task::spawn_blocking(move || {
+                dk_update::authenticode::check_installer(&installer, &exe)
+            })
+            .await
+            .map_err(|e| UpdateError::Io(e.to_string()))?;
+            if let Err(e) = trust {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(e);
+            }
         }
         *lock(&u.ready) = Some((path, version.clone()));
         u.set(UpdateStatus::Ready {
@@ -391,7 +407,7 @@ mod service {
         let root = updates_dir(inner);
         dk_update::cleanup::cleanup(&root, Some(version)).await;
         let dir = root.join(version);
-        let name = asset_file_name(asset)?;
+        let name = release_asset_name(&asset.url, version)?;
         let existing = dir.join(&name);
         if dk_update::verify::verify_file(&existing, &asset.sha256, asset.size)
             .await

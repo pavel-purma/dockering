@@ -2,6 +2,8 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · release/distribution · **implemented** (status in-progress until the public launch). Spec reconciled to the build: REL-011 release-plz `version_group` over all crates (verified by dry run); REL-022 the uninstaller removes the current user's data only; UPD-001 asset URLs pinned to this repo and version; UPD-005 *Check now* still works with only the setting off; UPD-007 all-users updates elevate through `runas` before the app quits; UPD-009/SET-090 section between Stats and Diagnostics, shown with a note (not hidden) in builds without the updater; UPD-010 exact CDN hosts; UPD-012 downloads under the data dir. Verification table and known gaps added. Spike S-9 results in the plan. · [plan](../plan/features/windows-distribution.md)
+
 - 2026-10-02 · release · **planned (revised)** the release flow uses **release-plz**. REL-010: an always-open release PR is merged, and release-plz then tags through a GitHub App token, which starts `release.yml`. REL-011: version and changelog come from conventional commits (git-only mode, only `dockering` is released, Keep a Changelog groups); this replaces `cargo xtask release prepare`. REL-013: the tag ruleset allows the release-bot App. REL-060: squash merges and a PR-title check. Spec 50 adds the `release-plz` and `pr-title` workflows. · [plan](../plan/features/windows-distribution.md)
 
 - 2026-10-02 · release/distribution · **planned** new feature spec `distribution.md`:

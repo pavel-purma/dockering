@@ -217,6 +217,7 @@ jobs:
           output-artifact-directory: target/dist/${{ matrix.target }}
 
       - name: Verify Windows signatures (REL-032)
+        id: verify-signatures
         if: runner.os == 'Windows' && env.SIGNING != 'none'
         shell: pwsh
         run: |
@@ -252,12 +253,15 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
 
+      # Only a successful signature check counts (REL-031): a skipped signing step leaves "false".
       - name: Record whether Windows binaries are signed
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          VERIFIED: ${{ steps.verify-signatures.outcome }}
         run: |
           signed=false
-          if [[ "$SIGNING" != none && ( -n "$AZURE_CLIENT_ID" || -n "$SIGNPATH_API_TOKEN" ) ]]; then signed=true; fi
+          if [[ "$VERIFIED" == success ]]; then signed=true; fi
           echo "$signed" > "target/dist/$TARGET/.signed"
       - uses: actions/upload-artifact@v7
         with:
@@ -297,7 +301,10 @@ jobs:
         if: needs.verify.outputs.prerelease != 'true'
         shell: bash
         run: |
-          for f in artifacts/release-*windows*/.signed; do
+          shopt -s nullglob
+          markers=(artifacts/release-*windows*/.signed)
+          [[ ${#markers[@]} -eq 2 ]] || { echo "::error::expected 2 Windows signing markers, found ${#markers[@]}"; exit 1; }
+          for f in "${markers[@]}"; do
             [[ "$(cat "$f")" == true ]] || { echo "::error::unsigned Windows build ($f) on a stable tag; set WINDOWS_SIGNING and its secrets, or tag a pre-release"; exit 1; }
           done
       - name: Update manifest (UPD-002) + minisign (UPD-003)

@@ -1,12 +1,12 @@
 //! Updater UI view tests (UPD-008, UPD-009, SET-090, KBD-076). Statuses are injected into the
 //! `UpdateStore`; the hub side is covered by `dk-hub`'s `updates_tests`.
 
-use dk_hub::{UpdateCheck, UpdateStatus};
+use dk_hub::UpdateStatus;
 use gpui_kit::component::WindowExt;
 use gpui_kit::{Entity, TestAppContext};
 
 use crate::nav::SettingsSection;
-use crate::state::{AppState, ManualCheck, UpdateStore};
+use crate::state::{AppState, UpdateStore};
 use crate::testing::{Harness, Setup, start};
 
 fn store(cx: &mut TestAppContext) -> Entity<UpdateStore> {
@@ -135,8 +135,12 @@ fn set_090_updates_section_states(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+// With the `updater` feature this would hit the network; it only checks the no-updater build.
+#[cfg(not(feature = "updater"))]
 #[gpui_kit::test]
 fn set_090_manual_check_without_updater_reports_disabled(cx: &mut TestAppContext) {
+    use crate::state::ManualCheck;
+    use dk_hub::UpdateCheck;
     // Test builds have no `updater` feature: the hub answers Disabled, never errors.
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
@@ -148,12 +152,10 @@ fn set_090_manual_check_without_updater_reports_disabled(cx: &mut TestAppContext
     h.wait_until(cx, "manual check result", |_, cx| {
         matches!(store.read(cx).manual(), Some(ManualCheck::Done(_)))
     });
-    if !cfg!(feature = "updater") {
-        assert_eq!(
-            cx.read(|cx| store.read(cx).manual().cloned()),
-            Some(ManualCheck::Done(UpdateCheck::Disabled))
-        );
-    }
+    assert_eq!(
+        cx.read(|cx| store.read(cx).manual().cloned()),
+        Some(ManualCheck::Done(UpdateCheck::Disabled))
+    );
     h.shutdown();
 }
 

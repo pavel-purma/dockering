@@ -1,7 +1,7 @@
 # Plan: Windows distribution — CI builds, releases, installer, signing, winget, auto-update, icon
 
 - **Slug:** `windows-distribution`
-- **Status:** approved
+- **Status:** in-progress
 - **Spec:** [docs/spec/features/distribution.md](../../spec/features/distribution.md) · [50-build-and-release.md](../../spec/50-build-and-release.md) · ADR [0006](../adr/0006-windows-installer-and-updates.md)
 - **Milestone:** M10 Distribution (post-v1)
 - **Requirement IDs:** REL-010…015, REL-020…027, REL-030…032, REL-040…042, REL-050…051, REL-060, UPD-001…012, SET-090, KBD-076 (new) · NFR-023, spec 50 *CI* / *Packaging* / *Updates* (changed)
@@ -283,8 +283,23 @@ A private-phase pre-release (`v0.1.0-alpha.1`, unsigned, updater compiled out) c
 | GitHub `releases/latest/download` redirect behaviour or rate limits | The anonymous asset CDN has no API rate limit. The client follows ≤ 5 redirects, to `github.com` and `*.githubusercontent.com` only. |
 | Private repo: release assets need auth | The updater is compiled out until `PUBLIC_RELEASES` (UPD-005); README download links work only for collaborators until then |
 
+### Spike S-9 results (2026-10-03)
+
+| Question | Result |
+|---|---|
+| Is Inno Setup on the GitHub runners? | Yes. `windows-2025` ships 6.7.1 ([inventory](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md)); `windows-11-arm` ships 6.6.1 ([inventory](https://github.com/actions/partner-runner-images/blob/main/images/arm-windows-11-image.md)). Both are ≥ 6.3 (arm64 support). The workflows fall back to `choco install innosetup --version 6.7.1` only if it's missing. |
+| Silent per-user install, reinstall, and uninstall | Pass, locally on Win 11 x64 with Inno 6.7.3 (`scripts/installer-smoke.ps1`). The uninstall removes the install dir, the HKCU uninstall key, and the Start Menu shortcut. |
+| `/UPDATE /RELAUNCH` with the app running | Pass. Steps: install 0.1.0 and start it; start the 0.2.0 setup with the updater's exact argv. `AppMutex` + `CloseApplications=force` closed the running app, the same *Installed apps* entry moved to 0.2.0, and Dockering relaunched (`runasoriginaluser`). |
+| `/ALLUSERS` | Not run locally (it needs a UAC click). CI's `installer-smoke` runs it on the elevated runner. |
+| UAC declined during an all-users update | Not handled. When elevation is declined, the setup exits before `[Run]`, so nothing relaunches the old version and the user has to start Dockering again. Follow-up: the UI could wait until the installer process is elevated before quitting. |
+| Exe resources | `embed-resource` 3.0.11 with icon ID 1 + `VERSIONINFO` doesn't clash with GPUI's manifest resource. Explorer shows the icon, and `VersionInfo` reports `Dockering 0.1.0`. |
+| AUMID | GPUI exposes `App::set_app_identity`, so no `unsafe` code is needed in the app crate. |
+
+| release-plz on this workspace | Dry run with release-plz 0.3.169 in a throwaway worktree. With a `version_group` over all crates, a `feat(update)` in `dk-update` plus a `fix(ui)` in `dockering` gives 0.1.0 → 0.2.0 for every crate and one `CHANGELOG.md` section with *Added* and *Fixed*. Without the group, the `feat` in a library crate was ignored (0.1.1). |
+
 ## 10. Revision log
 
+- 2026-10-03: implemented (tasks 1–15, 17–18; task 16 SignPath enrolment waits for the public launch). Spike S-9 recorded above. Deviations reconciled into the spec: release-plz `version_group`; Updates section placed before Diagnostics; macOS menu item *Check for Updates…*.
 - 2026-10-02: revised. The release flow uses **release-plz** (user decision): REL-010/011 rewritten, the xtask `release prepare` command dropped, task 7a added (App token, tag ruleset, PR-title check), §6.4 and §A1 updated.
 - 2026-10-02: created (research on Zed, Delta, Velopack, winget, and signing options. User decisions: opt-out updates with in-app install, Inno Setup, signing chosen from research, repo stays private for now).
 

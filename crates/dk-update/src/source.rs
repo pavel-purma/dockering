@@ -13,9 +13,33 @@ use crate::verify::write_stream_verified;
 /// Manifests and signatures are tiny; refuse anything larger.
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
-/// Hosts a release download may be served from (GitHub + its asset CDN).
+/// Hosts a release download may be served from: GitHub and its release-asset CDN (not
+/// `raw.githubusercontent.com`, which serves user content).
 fn allowed_host(host: &str) -> bool {
-    host == "github.com" || host.ends_with(".githubusercontent.com")
+    matches!(
+        host,
+        "github.com" | "objects.githubusercontent.com" | "release-assets.githubusercontent.com"
+    )
+}
+
+/// The repository whose releases the updater trusts (UPD-001).
+pub const REPO: &str = "pavel-purma/dockering";
+
+/// An asset URL must be one of *this* repo's release downloads for exactly `version`, with a
+/// plain file name: `https://github.com/<REPO>/releases/download/v<version>/<file>`. Returns the
+/// file name. A signed manifest can't redirect the updater to another repo's release.
+pub fn release_asset_name(url: &str, version: &str) -> Result<String, UpdateError> {
+    let prefix = format!("https://github.com/{REPO}/releases/download/v{version}/");
+    let name = url
+        .strip_prefix(&prefix)
+        .filter(|n| {
+            !n.is_empty()
+                && !n.starts_with('.')
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        })
+        .ok_or_else(|| UpdateError::Manifest(format!("unexpected asset URL {url}")))?;
+    Ok(name.to_owned())
 }
 
 /// Where update metadata and installers come from.
@@ -137,22 +161,6 @@ impl UpdateSource for GithubSource {
     }
 }
 
-/// The file name to save an asset under: the last URL segment, if it looks like a file name.
-pub fn asset_file_name(asset: &PlatformAsset) -> Result<String, UpdateError> {
-    let name = asset
-        .url
-        .rsplit('/')
-        .next()
-        .filter(|n| {
-            !n.is_empty()
-                && !n.starts_with('.')
-                && n.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        })
-        .ok_or_else(|| UpdateError::Manifest(format!("bad asset URL {}", asset.url)))?;
-    Ok(name.to_owned())
-}
-
 /// In-memory source for tests; counts requests so callers can assert "no network".
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing {
@@ -223,36 +231,33 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::AssetKind;
-
-    fn asset(url: &str) -> PlatformAsset {
-        PlatformAsset {
-            kind: AssetKind::Inno,
-            url: url.to_owned(),
-            sha256: String::new(),
-            size: 0,
-        }
-    }
 
     #[test]
     fn upd_010_only_github_hosts() {
         assert!(allowed_host("github.com"));
         assert!(allowed_host("objects.githubusercontent.com"));
         assert!(allowed_host("release-assets.githubusercontent.com"));
+        assert!(!allowed_host("raw.githubusercontent.com"));
         assert!(!allowed_host("evilgithub.com"));
         assert!(!allowed_host("github.com.evil.example"));
     }
 
     #[test]
-    fn upd_012_asset_file_name_is_safe() {
+    fn upd_001_asset_url_pinned_to_repo_and_version() {
+        let ok = "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-Setup-x64.exe";
         assert_eq!(
-            asset_file_name(&asset(
-                "https://github.com/o/r/releases/download/v1/Dockering-Setup-x64.exe"
-            )),
+            release_asset_name(ok, "0.2.0"),
             Ok("Dockering-Setup-x64.exe".to_owned())
         );
-        assert!(asset_file_name(&asset("https://github.com/o/r/..")).is_err());
-        assert!(asset_file_name(&asset("https://github.com/o/r/")).is_err());
-        assert!(asset_file_name(&asset("https://github.com/o/r/a%2F..")).is_err());
+        for bad in [
+            "https://github.com/attacker/x/releases/download/v0.2.0/Dockering-Setup-x64.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v0.1.0/Dockering-Setup-x64.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/../x.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/a/b.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/",
+            "http://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-Setup-x64.exe",
+        ] {
+            assert!(release_asset_name(bad, "0.2.0").is_err(), "{bad}");
+        }
     }
 }
