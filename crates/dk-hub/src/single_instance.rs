@@ -560,11 +560,23 @@ mod win {
             };
             assert_eq!(status, 0);
             let descriptor = OwnedLocal(descriptor.cast());
+            // `GA` on a pipe maps to FILE_ALL_ACCESS (`FA`); `P` = protected (no inheritance).
+            // The expected text goes through the same conversion because SDDL prints
+            // well-known SIDs as aliases (e.g. the built-in Administrator, as on CI, is `LA`).
+            let expected = SecurityDescriptor::from_sddl(&format!("D:P(A;;FA;;;{sid})")).unwrap();
+            assert_eq!(
+                dacl_sddl(descriptor.0.cast()),
+                dacl_sddl(expected.0.0.cast())
+            );
+        }
+
+        /// The DACL of `descriptor` as SDDL text.
+        fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> String {
             let mut text: *mut u16 = null_mut();
             // SAFETY: `descriptor` is a valid descriptor; `text` is a valid out pointer.
             let ok = unsafe {
                 ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                    descriptor.0.cast(),
+                    descriptor,
                     SDDL_REVISION_1,
                     DACL_SECURITY_INFORMATION,
                     &mut text,
@@ -573,9 +585,7 @@ mod win {
             };
             assert_ne!(ok, 0);
             // SAFETY: on success `text` is a LocalAlloc'ed NUL-terminated string we now own.
-            let sddl = unsafe { take_local_wide(text) };
-            // `GA` on a pipe maps to FILE_ALL_ACCESS (`FA`); `P` = protected (no inheritance).
-            assert_eq!(sddl, format!("D:P(A;;FA;;;{sid})"));
+            unsafe { take_local_wide(text) }
         }
 
         /// A running instance whose server process isn't the expected user isn't trusted:

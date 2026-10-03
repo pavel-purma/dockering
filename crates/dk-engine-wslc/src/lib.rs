@@ -25,6 +25,8 @@ mod com;
 #[cfg(any(test, feature = "test-support"))]
 #[allow(unsafe_code)]
 pub mod com;
+// Discovery/connect helpers are only reached from `#[cfg(windows)]` code and tests.
+#[cfg_attr(not(windows), allow(dead_code))]
 mod factory;
 pub mod version;
 
