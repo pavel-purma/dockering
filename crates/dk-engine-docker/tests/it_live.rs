@@ -138,7 +138,11 @@ async fn it_eng_108_connect_and_info() {
     assert!(!info.server_version.is_empty());
     assert!(info.api_version.is_some());
     assert!(!info.arch.is_empty());
-    assert_eq!(info.capabilities, Capabilities::DOCKER);
+    assert_eq!(info.capabilities, e.capabilities());
+    assert!(
+        info.capabilities
+            .contains(Capabilities::DOCKER - Capabilities::DISK_USAGE)
+    );
     assert!(info.daemon_id.is_some());
 }
 
@@ -367,7 +371,15 @@ async fn it_img_net_and_disk_usage() {
     assert!(nets.iter().any(|n| n.name == "bridge" && n.is_builtin()));
     let bridge = e.inspect_network("bridge").await.unwrap();
     assert_eq!(bridge.summary.name, "bridge");
-    let du = e.disk_usage().await.unwrap();
-    assert!(du.images_size > 0);
+    // DISK_USAGE needs API ≥ 1.52 (bollard 0.21 drops the older `/system/df` shape).
+    if e.capabilities().contains(Capabilities::DISK_USAGE) {
+        let du = e.disk_usage().await.unwrap();
+        assert!(du.images_size > 0);
+    } else {
+        assert!(matches!(
+            e.disk_usage().await,
+            Err(EngineError::Unsupported(Capabilities::DISK_USAGE))
+        ));
+    }
     assert!(e.remove_network("-bad").await.is_err());
 }

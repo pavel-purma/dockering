@@ -106,7 +106,7 @@ bitflags! { pub struct Capabilities: u32 {
 | STATS_STREAM | ✔ | ✔ | ✘ (polled `Stats()`) | ✘ (polled) |
 | TOP | ✔ | ✔ | ✘ | ✘ |
 | IMAGE_HISTORY | ✔ | ✔ | ✘ | ✘ |
-| DISK_USAGE | ✔ | ✔ | ✘ (derived) | ✘ (derived) |
+| DISK_USAGE | ✔ (API ≥ 1.52) | ✔ (API ≥ 1.52) | ✘ (derived) | ✘ (derived) |
 | PULL_PROGRESS | ✔ | ✔ | ✔ (`IProgressCallback`) | ✘ (text) |
 | NETWORK_MGMT | ✔ | ✔ | ✔ | ✔ |
 | LOGS_FOLLOW | ✔ | ✔ | ✔ | ✔ |
@@ -328,7 +328,7 @@ pub trait TerminalSession: Send + 'static {
 | Topic | Behaviour |
 |---|---|
 | API version | bollard 0.21's maximum is **1.53** (`CLIENT_MAX`, 20 §3), so newer daemons are driven at 1.53. |
-| `disk_usage` | At API ≥ 1.52, `/system/df` returns `ImageUsage` / `ContainerUsage` / `VolumeUsage` / `BuildCacheUsage`, each with `TotalSize`, `Reclaimable`, and `Items`. The older `LayersSize` / `Images` / `Volumes` arrays are gone. The mapper handles both shapes. |
+| `disk_usage` | At API ≥ 1.52, `/system/df` returns `ImageUsage` / `ContainerUsage` / `VolumeUsage` / `BuildCacheUsage`, each with `TotalSize`, `Reclaimable`, and `Items`. The older `LayersSize` / `Images` / `Volumes` arrays are gone. The mapper handles both shapes, but bollard 0.21's `SystemDataUsageResponse` only models the new one and silently drops the old fields. So `DISK_USAGE` is advertised only at negotiated API ≥ 1.52; below that, `disk_usage` returns `Unsupported(DISK_USAGE)` and the UI uses its no-`DISK_USAGE` fallbacks (VOL-002, IMG-003). |
 | `pull_image` reference | Adds `tag=latest` when the reference has neither a tag nor a digest. |
 | `pull_image(ref, None)` | The engine resolves credentials itself from the Docker config (IMG-007). |
 | Registry auth errors | Not always 401: ghcr returns 500 `denied`, and Docker Hub returns `pull access denied`. All of these map to the IMG-007 "Authentication required" message. |

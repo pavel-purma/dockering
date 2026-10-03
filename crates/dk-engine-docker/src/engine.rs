@@ -122,6 +122,11 @@ impl DockerEngine {
             }
     }
 
+    /// The capability set for this daemon's negotiated API version.
+    pub(crate) fn caps(&self) -> Capabilities {
+        caps_for_api(&self.api)
+    }
+
     /// Bollard model → JSON (for the shared `docker_json` mappers).
     pub(crate) fn to_value<T: serde::Serialize>(v: &T) -> EngineResult<Value> {
         serde_json::to_value(v).map_err(EngineError::from)
@@ -152,6 +157,23 @@ fn u32_field(v: &Value, key: &str) -> Option<u32> {
         .and_then(|n| u32::try_from(n).ok())
 }
 
+/// First API version whose `/system/df` shape bollard 0.21 can decode. Its
+/// `SystemDataUsageResponse` only has the ≥ 1.52 `*Usage` objects; older daemons send
+/// `LayersSize`/`Images`/… which it silently drops (spec 21 §6).
+const DISK_USAGE_MIN_API: ClientVersion = ClientVersion {
+    major_version: 1,
+    minor_version: 52,
+};
+
+/// `Capabilities::DOCKER`, minus `DISK_USAGE` below API 1.52.
+pub(crate) fn caps_for_api(api: &ClientVersion) -> Capabilities {
+    if *api < DISK_USAGE_MIN_API {
+        Capabilities::DOCKER - Capabilities::DISK_USAGE
+    } else {
+        Capabilities::DOCKER
+    }
+}
+
 /// `/info` JSON → `EngineInfo` (pure; tested on fixtures).
 pub(crate) fn engine_info_from_json(
     info: &Value,
@@ -159,6 +181,7 @@ pub(crate) fn engine_info_from_json(
     transport: &str,
     api_version: &str,
     server_version: Option<&str>,
+    capabilities: Capabilities,
 ) -> EngineInfo {
     let name = str_field(info, "Name")
         .or_else(|| str_field(info, "OperatingSystem"))
@@ -194,7 +217,7 @@ pub(crate) fn engine_info_from_json(
         } else {
             LIST_STATS_LIMIT
         },
-        capabilities: Capabilities::DOCKER,
+        capabilities,
     }
 }
 
@@ -209,7 +232,7 @@ impl Engine for DockerEngine {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities::DOCKER
+        self.caps()
     }
 
     async fn ping(&self) -> EngineResult<()> {
@@ -229,6 +252,7 @@ impl Engine for DockerEngine {
             &self.transport,
             &connect::version_string(&self.api),
             self.server_version.as_deref(),
+            self.caps(),
         ))
     }
 
@@ -332,6 +356,9 @@ impl Engine for DockerEngine {
     }
 
     async fn disk_usage(&self) -> EngineResult<DiskUsage> {
+        if !self.caps().contains(Capabilities::DISK_USAGE) {
+            return Err(EngineError::Unsupported(Capabilities::DISK_USAGE));
+        }
         self.disk_usage_impl().await
     }
 
@@ -367,7 +394,14 @@ mod tests {
             "ContainersPaused": 0, "ContainersStopped": 1, "Images": 8, "Driver": "overlayfs",
             "DockerRootDir": "/var/lib/docker", "ServerVersion": "29.8.1"
         });
-        let i = engine_info_from_json(&v, EngineKind::Docker, "npipe", "1.53", None);
+        let i = engine_info_from_json(
+            &v,
+            EngineKind::Docker,
+            "npipe",
+            "1.53",
+            None,
+            Capabilities::DOCKER,
+        );
         assert_eq!(i.name, "docker-desktop");
         assert_eq!(i.arch, "amd64");
         assert_eq!(i.cpus, Some(16));
@@ -383,6 +417,7 @@ mod tests {
             "bridge",
             "1.47",
             Some("27.5.1"),
+            Capabilities::DOCKER - Capabilities::DISK_USAGE,
         );
         assert_eq!(w.name, "Ubuntu 24.04");
         assert_eq!(w.arch, "arm64");
@@ -390,5 +425,23 @@ mod tests {
         assert_eq!(w.kind, EngineKind::WslDistro);
         assert_eq!(w.list_stats_limit, 8);
         assert_eq!(w.cpus, None);
+        assert!(!w.capabilities.contains(Capabilities::DISK_USAGE));
+    }
+
+    #[test]
+    fn eng_030_disk_usage_needs_api_1_52() {
+        let v = |minor_version| ClientVersion {
+            major_version: 1,
+            minor_version,
+        };
+        for minor in [41, 48, 51] {
+            assert_eq!(
+                caps_for_api(&v(minor)),
+                Capabilities::DOCKER - Capabilities::DISK_USAGE,
+                "1.{minor}"
+            );
+        }
+        assert_eq!(caps_for_api(&v(52)), Capabilities::DOCKER);
+        assert_eq!(caps_for_api(&v(53)), Capabilities::DOCKER);
     }
 }
