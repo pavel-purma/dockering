@@ -983,3 +983,54 @@ pub const CMD_LOGS_SAVE: &str = "Logs: save to file…";
 pub const CMD_LOGS_COPY: &str = "Logs: copy all";
 pub const CMD_TERM_NEW: &str = "New terminal session";
 pub const CMD_TERM_CLOSE: &str = "Close terminal session";
+
+// Updates (UPD-008, UPD-009, SET-090, KBD-076)
+pub const CMD_CHECK_FOR_UPDATES: &str = "Check for updates";
+pub const CMD_CHECK_FOR_UPDATES_MENU: &str = "Check for Updates…";
+pub const CMD_RESTART_TO_UPDATE: &str = "Restart to update";
+pub const CMD_VIEW_RELEASE_NOTES: &str = "View release notes";
+pub const SET_DESC_UPDATES: &str =
+    "Dockering checks GitHub Releases once a day. The request is anonymous and carries no ids.";
+pub const UPD_GROUP: &str = "Updates";
+pub const UPD_AUTO_CHECK: &str = "Check for updates automatically";
+pub const UPD_AUTO_CHECK_DESC: &str =
+    "Downloads new versions in the background. Nothing is installed until you restart to update.";
+pub const UPD_LAST_CHECKED: &str = "Last checked";
+pub const UPD_NEVER_CHECKED: &str = "Never";
+pub const UPD_CHECK_NOW: &str = "Check now";
+pub const UPD_CHECK_NOW_DESC: &str = "Check GitHub Releases for a newer version.";
+pub const UPD_UP_TO_DATE: &str = "You're up to date.";
+pub const UPD_CHECK_FAILED: &str = "Update check failed:";
+pub const UPD_CHECKING: &str = "Checking for updates…";
+pub const UPD_POLICY: &str = "Updates are turned off by your administrator.";
+pub const UPD_UNAVAILABLE: &str = "Updates aren't available in this build.";
+pub const UPD_NOTHING_READY: &str = "No update is ready to install.";
+pub const UPD_APPLY_FAILED: &str = "Couldn't start the update";
+pub const UPD_WHATS_NEW: &str = "What's new";
+pub const UPD_RESTART_NOW: &str = "Restart now";
+pub const RELEASES_URL: &str = "https://github.com/pavel-purma/dockering/releases";
+pub fn upd_available(version: &str) -> String {
+    format!("Dockering {version} is available.")
+}
+pub fn upd_available_short(version: &str) -> String {
+    format!("Dockering {version} available")
+}
+pub fn upd_downloading(percent: u64) -> String {
+    format!("Downloading update… {percent}%")
+}
+pub fn upd_restart(version: &str, needs_elevation: bool) -> String {
+    if needs_elevation {
+        format!("Restart to update ({version}, admin)")
+    } else {
+        format!("Restart to update ({version})")
+    }
+}
+pub fn upd_ready(version: &str) -> String {
+    format!("Dockering {version} is ready to install.")
+}
+pub fn upd_updated(version: &str) -> String {
+    format!("Updated to Dockering {version}.")
+}
+pub fn release_notes_url(version: &str) -> String {
+    format!("{RELEASES_URL}/tag/v{version}")
+}

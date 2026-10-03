@@ -17,6 +17,7 @@ pub mod controls;
 pub mod diagnostics;
 pub mod engines;
 pub mod mapping;
+pub mod updates;
 
 use std::collections::HashMap;
 
@@ -413,6 +414,7 @@ impl SettingsPage {
                     SettingsSection::Logs => IconName::FileText,
                     SettingsSection::Terminal => IconName::SquareTerminal,
                     SettingsSection::Stats => IconName::ChartPie,
+                    SettingsSection::Updates => IconName::Redo,
                     SettingsSection::Diagnostics => IconName::Info,
                     SettingsSection::Keyboard => IconName::ALargeSmall,
                 };
@@ -656,6 +658,7 @@ impl SettingsPage {
                     ),
                 ],
             )],
+            S::Updates => updates::blocks(self, window, cx),
             S::Diagnostics => diagnostics::blocks(self, window, cx),
             S::Engines => engines::blocks(self, window, cx),
             S::Keyboard => vec![
@@ -681,6 +684,7 @@ impl SettingsPage {
             S::Logs => s::SET_DESC_LOGS,
             S::Terminal => s::SET_DESC_TERMINAL,
             S::Stats => s::SET_DESC_STATS,
+            S::Updates => s::SET_DESC_UPDATES,
             S::Diagnostics => s::SET_DESC_DIAGNOSTICS,
             S::Keyboard => s::SET_DESC_KEYBOARD,
         }

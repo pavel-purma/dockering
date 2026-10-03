@@ -162,6 +162,27 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     c!(s::CMD_ABOUT, About, General, Always),
     c!(s::CMD_OPEN_LOGS_FOLDER, OpenLogsFolder, General, Always),
+    c!(
+        s::CMD_CHECK_FOR_UPDATES,
+        CheckForUpdates,
+        General,
+        Always,
+        &["update", "upgrade", "version"]
+    ),
+    c!(
+        s::CMD_RESTART_TO_UPDATE,
+        RestartToUpdate,
+        General,
+        Always,
+        &["update", "install"]
+    ),
+    c!(
+        s::CMD_VIEW_RELEASE_NOTES,
+        ViewReleaseNotes,
+        General,
+        Always,
+        &["changelog", "what's new"]
+    ),
     c!(s::CMD_QUIT, Quit, General, Always, &["exit"]),
     c!(
         s::CMD_TOGGLE_THEME,

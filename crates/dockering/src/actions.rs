@@ -49,6 +49,12 @@ gpui_kit::actions!(
         StartEngine,
         /// Lone `Alt` on Windows/Linux: focus the title-bar overflow menu (SHL-021).
         FocusMenuBar,
+        /// KBD-076 / UPD-004: manual update check (palette, Settings › Updates, macOS menu).
+        CheckForUpdates,
+        /// KBD-076 / UPD-007: start the downloaded installer and quit.
+        RestartToUpdate,
+        /// KBD-076: release notes of the offered (or current) version.
+        ViewReleaseNotes,
     ]
 );
 

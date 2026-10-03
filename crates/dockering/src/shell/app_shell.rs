@@ -6,11 +6,13 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dk_core::{EngineId, EngineState};
-use dk_hub::ThemeMode;
+use dk_hub::{ThemeMode, UpdateStatus};
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::sidebar::Sidebar;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
@@ -37,6 +39,7 @@ use crate::pages;
 use crate::pages::containers::ContainersPage;
 use crate::state::{
     AppState, Collection, EngineListEvent, EngineListStore, EngineStore, EngineStoreEvent,
+    ManualCheck, UpdateStore,
 };
 use crate::strings as s;
 use crate::theme;
@@ -219,12 +222,171 @@ impl AppShell {
             store_subs: Vec::new(),
             _subs: subs,
         };
+        if let Some(updates) = UpdateStore::global(cx) {
+            this._subs
+                .push(cx.observe_in(&updates, window, Self::on_update_status));
+        }
+        // UPD-008: first launch after an update.
+        if let Some(_previous) = AppState::hub(cx).take_previous_version() {
+            let version = env!("CARGO_PKG_VERSION");
+            let url = s::release_notes_url(version);
+            let note = Notification::info(s::upd_updated(version)).action(move |_, _, _| {
+                let url = url.clone();
+                Button::new("upd-whats-new")
+                    .small()
+                    .ghost()
+                    .label(s::UPD_WHATS_NEW)
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+            });
+            window.push_notification(note, cx);
+        }
         let active = this.engines.read(cx).active_id().cloned();
         this.set_engine(active, window, cx);
         this
     }
 
+    // ── updates (UPD-007, UPD-008, KBD-076) ────────────────────────────────────────────
+
+    /// Status changed: re-render the status bar; once per version, announce a ready update.
+    fn on_update_status(
+        &mut self,
+        updates: Entity<UpdateStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ready = updates.read(cx).ready_version().map(str::to_owned);
+        if let Some(version) = ready
+            && AppState::hub(cx).mark_update_notified(&version)
+        {
+            let note = Notification::info(s::upd_ready(&version)).action(|_, _, _| {
+                Button::new("upd-restart-now")
+                    .small()
+                    .primary()
+                    .label(s::UPD_RESTART_NOW)
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx))
+            });
+            window.push_notification(note, cx);
+        }
+        cx.notify();
+    }
+
+    fn on_check_for_updates(
+        &mut self,
+        _: &CheckForUpdates,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(updates) = UpdateStore::global(cx) {
+            updates.update(cx, |u, cx| u.check_now(cx));
+        }
+    }
+
+    fn on_restart_to_update(
+        &mut self,
+        _: &RestartToUpdate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ready =
+            UpdateStore::global(cx).and_then(|u| u.read(cx).ready_version().map(str::to_owned));
+        if ready.is_none() {
+            notify::info(window, cx, s::UPD_NOTHING_READY);
+            return;
+        }
+        let call = AppState::hub(cx).apply_update();
+        self.action_task = Some(cx.spawn_in(window, async move |_, cx| {
+            let result = call.await;
+            cx.update(|window, cx| match result {
+                // The installer waits for us to exit (AppMutex), then relaunches Dockering.
+                Ok(()) => {
+                    crate::app::save_window_bounds(window, cx);
+                    cx.quit();
+                }
+                Err(e) => notify::engine_error(window, cx, s::UPD_APPLY_FAILED, &e),
+            })
+            .ok();
+        }));
+    }
+
+    fn on_view_release_notes(
+        &mut self,
+        _: &ViewReleaseNotes,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let url = UpdateStore::global(cx)
+            .and_then(|u| u.read(cx).notes_url().map(str::to_owned))
+            .unwrap_or_else(|| s::release_notes_url(env!("CARGO_PKG_VERSION")));
+        cx.open_url(&url);
+    }
+
+    /// Right-hand status-bar item (UPD-008). No focus ring (user preference).
+    fn render_update_item(&self, cx: &App) -> Option<gpui_kit::AnyElement> {
+        let store = UpdateStore::global(cx)?;
+        let store = store.read(cx);
+        let manual_running = matches!(store.manual(), Some(ManualCheck::Running));
+        Some(match store.status() {
+            UpdateStatus::Downloading { done, total, .. } => {
+                let percent = if *total == 0 { 0 } else { done * 100 / total };
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(Spinner::new().xsmall())
+                    .child(div().text_xs().child(s::upd_downloading(percent)))
+                    .into_any_element()
+            }
+            UpdateStatus::Ready {
+                version,
+                needs_elevation,
+                ..
+            } => Button::new("status-restart-to-update")
+                .xsmall()
+                .primary()
+                .icon(IconName::Redo)
+                .label(s::upd_restart(version, *needs_elevation))
+                .tooltip_with_action(s::CMD_RESTART_TO_UPDATE, &RestartToUpdate, None)
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx))
+                .into_any_element(),
+            UpdateStatus::Available {
+                version,
+                notes_url,
+                notify_only: true,
+            } => {
+                let url = notes_url.clone();
+                Button::new("status-update-available")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::ExternalLink)
+                    .label(s::upd_available_short(version))
+                    .tooltip_with_action(s::CMD_VIEW_RELEASE_NOTES, &ViewReleaseNotes, None)
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .into_any_element()
+            }
+            UpdateStatus::Checking if manual_running => div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(s::UPD_CHECKING)
+                .into_any_element(),
+            UpdateStatus::Error { message } if store.manual().is_some() => {
+                Button::new("status-update-error")
+                    .xsmall()
+                    .ghost()
+                    .icon(IconName::TriangleAlert)
+                    .label(s::UPD_CHECK_FAILED.trim_end_matches(':').to_owned())
+                    .tooltip(message.clone())
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(CheckForUpdates), cx))
+                    .into_any_element()
+            }
+            _ => return None,
+        })
+    }
+
     // ── accessors (tests) ──────────────────────────────────────────────────────────────
+
+    /// Whether the status bar currently shows an update item (UPD-008).
+    pub fn has_update_item(&self, cx: &App) -> bool {
+        self.render_update_item(cx).is_some()
+    }
 
     pub fn route(&self) -> &Route {
         self.history.current()
@@ -1339,8 +1501,16 @@ impl AppShell {
                     this.child(Tag::info().small().child(n.clone()))
                 })
             });
-        let right = info.as_ref().map(|i| {
+        let resources = info.as_ref().map(|i| {
             s::status_bar_resources(i.cpus, i.mem_total.map(dk_core::format::format_size))
+        });
+        let update = self.render_update_item(cx);
+        let right = (resources.is_some() || update.is_some()).then(|| {
+            h_flex()
+                .gap_3()
+                .items_center()
+                .when_some(resources, |this, r| this.child(r))
+                .when_some(update, |this, u| this.child(u))
         });
         div()
             .id("status-region")
@@ -1351,7 +1521,7 @@ impl AppShell {
             .child(
                 StatusBar::new()
                     .left(left)
-                    .when_some(right, |this, r| this.right(div().child(r))),
+                    .when_some(right, |this, r| this.right(r)),
             )
             .into_any_element()
     }
@@ -1571,6 +1741,9 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_hide_others))
             .on_action(cx.listener(Self::on_about))
             .on_action(cx.listener(Self::on_open_logs))
+            .on_action(cx.listener(Self::on_check_for_updates))
+            .on_action(cx.listener(Self::on_restart_to_update))
+            .on_action(cx.listener(Self::on_view_release_notes))
             .on_action(cx.listener(Self::on_manage_engines))
             .on_action(cx.listener(Self::on_add_engine))
             .on_action(cx.listener(Self::on_copy_diagnostics))

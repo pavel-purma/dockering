@@ -19,6 +19,9 @@ path = "src/main.rs"
 default = ["demo"]
 # `--demo`: run the full UI against an in-memory FakeEngine (no Docker needed).
 demo = ["dk-core/test-support"]
+# In-app updates (UPD-001…012). Off by default; release.yml enables it for public releases
+# (UPD-005). The UI is the same either way: without it the hub reports updates as disabled.
+updater = ["dk-hub/updater"]
 
 [dependencies]
 dk-core.workspace = true
