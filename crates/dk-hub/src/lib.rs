@@ -26,7 +26,7 @@ pub use handle::{ConfigHandle, HubHandle, HubOptions};
 pub use hub::EngineHub;
 pub use paths::Paths;
 pub use supervisor::backoff_delay;
-pub use updates::{UpdateCheck, UpdateState, UpdateStatus};
+pub use updates::{DisabledReason, UpdateCheck, UpdateState, UpdateStatus};
 
 /// The backend factories for this OS (spec 21 §8): Docker everywhere; WSL distro + WSLC on
 /// Windows (their crates compile everywhere and discover nothing elsewhere).

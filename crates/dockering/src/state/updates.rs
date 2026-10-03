@@ -103,7 +103,8 @@ impl UpdateStore {
                 }
                 s.manual = match result {
                     Ok(check) => Some(ManualCheck::Done(check)),
-                    Err(EngineError::Cancelled) => return,
+                    // Superseded (a newer check owns `manual`) or hub shutdown.
+                    Err(EngineError::Cancelled) => None,
                     Err(e) => Some(ManualCheck::Failed(e.to_string())),
                 };
                 cx.notify();

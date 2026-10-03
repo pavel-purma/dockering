@@ -1079,7 +1079,9 @@ pub(crate) fn update_status(h: &HubHandle) -> HubStream<crate::updates::UpdateSt
     }
     let _ = h;
     let (mut tx, _token, stream) = HubStream::channel(1);
-    let _ = tx.try_send(Ok(UpdateStatus::Disabled { by_policy: false }));
+    let _ = tx.try_send(Ok(UpdateStatus::Disabled {
+        reason: crate::updates::DisabledReason::Unavailable,
+    }));
     stream
 }
 

@@ -12,6 +12,8 @@
 #ifndef AppVersion
   #error AppVersion is not defined (run through cargo xtask package)
 #endif
+; VersionInfoVersion only takes numbers (a.b.c[.d]): `0.2.0-rc.1` → `0.2.0`.
+#define AppVersionNumeric Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1)
 #ifndef Arch
   #define Arch "x64"
 #endif
@@ -42,7 +44,7 @@ AppPublisherURL={#RepoUrl}
 AppSupportURL={#RepoUrl}/issues
 AppUpdatesURL={#RepoUrl}/releases
 AppCopyright=Copyright (c) 2026 Dockering contributors
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#AppVersionNumeric}
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} Setup
 ; REL-021: per user by default, all users via the scope dialog or /ALLUSERS.
@@ -107,7 +109,11 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "
 ; Interactive installs: "Launch Dockering" checkbox on the finish page.
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: not IsRelaunch
 ; /RELAUNCH (in-app update): always start the app again, even silently. Never elevated.
-Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: IsRelaunch
+; Per-user setups aren't elevated, so this starts Dockering as the user.
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: IsRelaunch and not IsAdminInstallMode
+; All-users updates run elevated through `runas`, where `runasoriginaluser` has no original
+; user to fall back to. Explorer starts the app with the shell's (unelevated) token instead.
+Filename: "{win}\explorer.exe"; Parameters: """{app}\{#AppExe}"""; Flags: nowait; Check: IsRelaunch and IsAdminInstallMode
 
 [Code]
 var

@@ -78,10 +78,10 @@ App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 1
 
 ## Updates
 
-v1: no auto-update and no update check (NFR-023). Releases go out through GitHub Releases and OS package managers (winget, Homebrew cask, and Flathub post-v1).
+Releases go out through GitHub Releases and OS package managers (winget; Homebrew cask and Flathub post-v1).
 
-*Planned* ([distribution.md](features/distribution.md) UPD-001…012, ADR-0006): an opt-out updater compiled into public release builds only. It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
+[distribution.md](features/distribution.md) UPD-001…012, ADR-0006: an opt-out updater, compiled into public release builds only (`--features updater` when `PUBLIC_RELEASES=true`). It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
 
 ## Versioning
 
-SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`. *Planned:* release-plz computes the next version from conventional commits and writes the changelog in a release PR (REL-010/011).
+SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`. release-plz computes the next version from conventional commits and writes the changelog in a release PR (REL-010/011).

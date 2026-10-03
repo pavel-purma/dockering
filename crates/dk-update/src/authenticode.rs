@@ -1,5 +1,7 @@
 //! Authenticode check of a downloaded installer (UPD-003): when the running `dockering.exe` is
-//! signed, the installer must carry a valid signature from the same subject.
+//! signed, the installer must carry a valid signature from the same signer. "Same" means the
+//! full subject DN *and* the issuer DN of the signing certificate, not just the display name
+//! (e.g. every SignPath Foundation project shares the CN "SignPath Foundation").
 
 use std::path::Path;
 
@@ -28,24 +30,48 @@ pub fn decide(
 }
 
 /// Checks `installer` against the running executable `running_exe`.
+///
+/// The pin is skipped only when the running exe has **no** embedded signature (dev and
+/// private-phase builds). If it has one that doesn't verify, the check fails closed.
 pub fn check_installer(installer: &Path, running_exe: &Path) -> Result<TrustCheck, UpdateError> {
-    let running = signer_subject(running_exe)?;
-    let installer = signer_subject(installer)?;
+    let running = match imp::signature(running_exe) {
+        Signature::None => None,
+        Signature::Invalid => return Err(UpdateError::UntrustedInstaller),
+        Signature::Valid(id) => Some(id),
+    };
+    let installer = match imp::signature(installer) {
+        Signature::Valid(id) => Some(id),
+        Signature::None | Signature::Invalid => None,
+    };
     decide(running.as_deref(), installer.as_deref())
 }
 
-/// The simple display name of the signer when `path` has a valid, trusted embedded Authenticode
-/// signature; `None` when it is unsigned or the signature doesn't verify.
+/// The signer identity (`subject DN` + `issuer DN`) when `path` has a valid, trusted embedded
+/// Authenticode signature; `None` when it is unsigned or the signature doesn't verify.
 pub fn signer_subject(path: &Path) -> Result<Option<String>, UpdateError> {
-    imp::signer_subject(path)
+    Ok(match imp::signature(path) {
+        Signature::Valid(id) => Some(id),
+        Signature::None | Signature::Invalid => None,
+    })
+}
+
+/// Embedded Authenticode signature state of a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Signature {
+    /// No embedded signature at all.
+    None,
+    /// Has one, but WinVerifyTrust rejects it (tampered, untrusted chain, …).
+    Invalid,
+    /// Trusted; the signer identity.
+    Valid(String),
 }
 
 #[cfg(not(windows))]
 mod imp {
     use super::*;
 
-    pub(super) fn signer_subject(_path: &Path) -> Result<Option<String>, UpdateError> {
-        Ok(None)
+    pub(super) fn signature(_path: &Path) -> Signature {
+        Signature::None
     }
 }
 
@@ -56,11 +82,12 @@ mod imp {
     use std::ptr::{null, null_mut};
 
     use windows_sys::Win32::Security::Cryptography::{
-        CERT_CONTEXT, CERT_FIND_SUBJECT_CERT, CERT_INFO, CERT_NAME_SIMPLE_DISPLAY_TYPE,
+        CERT_CONTEXT, CERT_FIND_SUBJECT_CERT, CERT_INFO, CERT_NAME_ISSUER_FLAG, CERT_NAME_RDN_TYPE,
         CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, CERT_QUERY_FORMAT_FLAG_BINARY,
-        CERT_QUERY_OBJECT_FILE, CMSG_SIGNER_INFO, CMSG_SIGNER_INFO_PARAM, CertCloseStore,
-        CertFindCertificateInStore, CertFreeCertificateContext, CertGetNameStringW, CryptMsgClose,
-        CryptMsgGetParam, CryptQueryObject, HCERTSTORE, PKCS_7_ASN_ENCODING, X509_ASN_ENCODING,
+        CERT_QUERY_OBJECT_FILE, CERT_X500_NAME_STR, CMSG_SIGNER_INFO, CMSG_SIGNER_INFO_PARAM,
+        CertCloseStore, CertFindCertificateInStore, CertFreeCertificateContext, CertGetNameStringW,
+        CryptMsgClose, CryptMsgGetParam, CryptQueryObject, HCERTSTORE, PKCS_7_ASN_ENCODING,
+        X509_ASN_ENCODING,
     };
     use windows_sys::Win32::Security::WinTrust::{
         WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
@@ -70,12 +97,17 @@ mod imp {
 
     use super::*;
 
-    pub(super) fn signer_subject(path: &Path) -> Result<Option<String>, UpdateError> {
+    pub(super) fn signature(path: &Path) -> Signature {
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        if !verify_trust(&wide) {
-            return Ok(None);
+        // `identity` reads the embedded PKCS#7 without judging it: absent → unsigned.
+        let Some(id) = identity(&wide) else {
+            return Signature::None;
+        };
+        if verify_trust(&wide) {
+            Signature::Valid(id)
+        } else {
+            Signature::Invalid
         }
-        Ok(subject(&wide))
     }
 
     /// WinVerifyTrust with the generic Authenticode policy, no UI, no revocation round-trips.
@@ -142,8 +174,8 @@ mod imp {
         }
     }
 
-    /// Subject display name of the embedded signature's signer certificate.
-    fn subject(wide_path: &[u16]) -> Option<String> {
+    /// `subject DN | issuer DN` of the embedded signature's signer certificate.
+    fn identity(wide_path: &[u16]) -> Option<String> {
         let encoding = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
         let mut store: HCERTSTORE = null_mut();
         let mut msg: *mut core::ffi::c_void = null_mut();
@@ -212,17 +244,19 @@ mod imp {
         }
         let cert = Cert(cert);
 
-        // SAFETY: size query, then a buffer of exactly that many UTF-16 units.
-        let n = unsafe {
-            CertGetNameStringW(
-                cert.0,
-                CERT_NAME_SIMPLE_DISPLAY_TYPE,
-                0,
-                null(),
-                null_mut(),
-                0,
-            )
-        };
+        let subject = name_string(&cert, 0)?;
+        let issuer = name_string(&cert, CERT_NAME_ISSUER_FLAG)?;
+        Some(format!("{subject} | {issuer}"))
+    }
+
+    /// The full X.500 name (`CN=…, O=…, C=…`) of the subject, or the issuer with
+    /// `CERT_NAME_ISSUER_FLAG`.
+    fn name_string(cert: &Cert, flags: u32) -> Option<String> {
+        let ty = CERT_X500_NAME_STR;
+        let para = (&ty as *const u32).cast();
+        // SAFETY: size query; `para` points at the string type for CERT_NAME_RDN_TYPE.
+        let n =
+            unsafe { CertGetNameStringW(cert.0, CERT_NAME_RDN_TYPE, flags, para, null_mut(), 0) };
         if n <= 1 {
             return None;
         }
@@ -231,9 +265,9 @@ mod imp {
         unsafe {
             CertGetNameStringW(
                 cert.0,
-                CERT_NAME_SIMPLE_DISPLAY_TYPE,
-                0,
-                null(),
+                CERT_NAME_RDN_TYPE,
+                flags,
+                para,
                 name.as_mut_ptr(),
                 n,
             )

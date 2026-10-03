@@ -16,9 +16,9 @@ on:
   push:
     branches: [main, "release/*"]
 
+# The release-bot App token does the writing; GITHUB_TOKEN needs nothing beyond read.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
   RUST_TOOLCHAIN: "1.98"
@@ -52,7 +52,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app.outputs.token }}
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
         if: env.RELEASE_BOT_APP_ID != ''
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -87,7 +87,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app.outputs.token }}
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
         if: env.RELEASE_BOT_APP_ID != ''
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}

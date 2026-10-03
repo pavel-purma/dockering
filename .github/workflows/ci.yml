@@ -50,6 +50,8 @@ jobs:
         run: cargo xtask icons --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo clippy (updater feature, UPD-005)
+        run: cargo clippy --workspace --all-targets --locked --features dockering/updater -- -D warnings
       - name: cargo deny (licences, bans, sources, advisories)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
@@ -93,6 +95,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo nextest
         run: cargo nextest run --workspace --locked
+      - name: cargo nextest (updater feature)
+        run: cargo nextest run -p dk-update -p dk-hub --features dk-hub/updater --locked
       - name: doc tests
         if: runner.os == 'Linux'
         run: cargo test --workspace --doc --locked
@@ -167,8 +171,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # REL-014: the Windows installer is built and smoke-tested on every push to main (and on PRs
-  # that touch packaging). Unsigned; signing happens only in release.yml.
+  # REL-014: the Windows installer is built and smoke-tested on every push and PR. Unsigned;
+  # signing happens only in release.yml.
   installer:
     name: installer (${{ matrix.target }})
     runs-on: ${{ matrix.os }}

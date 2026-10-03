@@ -2,7 +2,7 @@
 //! check, *Check now* with an inline result, and release notes. When an administrator policy
 //! turns updates off the section says so and its controls are disabled.
 
-use dk_hub::{UpdateCheck, UpdateStatus};
+use dk_hub::{DisabledReason, UpdateCheck, UpdateStatus};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::spinner::Spinner;
@@ -17,13 +17,14 @@ use crate::actions::{CheckForUpdates, ViewReleaseNotes};
 use crate::state::{AppState, ManualCheck, UpdateStore};
 use crate::strings as s;
 
-/// What the section can do, from the hub status and the setting.
+/// What the section can do, from the hub status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
-    /// Policy: everything disabled, with a note.
+    /// Policy: everything disabled, with a note; *Check now* hidden.
     Policy,
-    /// Not compiled in, `DOCKERING_DISABLE_UPDATES`, or demo, while the switch is on.
+    /// Not compiled in, `DOCKERING_DISABLE_UPDATES`, or demo: a note; *Check now* disabled.
     Unavailable,
+    /// Normal, including "automatic checks off" (*Check now* still works).
     Normal,
 }
 
@@ -36,12 +37,18 @@ pub(super) fn blocks(
     let status = store
         .as_ref()
         .map(|s| s.read(cx).status().clone())
-        .unwrap_or(UpdateStatus::Disabled { by_policy: false });
+        .unwrap_or(UpdateStatus::Disabled {
+            reason: DisabledReason::Unavailable,
+        });
     let manual = store.as_ref().and_then(|s| s.read(cx).manual().cloned());
     let check_on = BoolKey::CheckUpdates.get(AppState::config(cx));
     let mode = match status {
-        UpdateStatus::Disabled { by_policy: true } => Mode::Policy,
-        UpdateStatus::Disabled { by_policy: false } if check_on => Mode::Unavailable,
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Policy,
+        } => Mode::Policy,
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Unavailable,
+        } => Mode::Unavailable,
         _ => Mode::Normal,
     };
     let state = AppState::ui_state(cx).updates;

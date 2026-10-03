@@ -120,6 +120,8 @@ pub struct AppShell {
     /// Focus at the previous render (see `ensure_focus_rendered`).
     last_focus: Option<FocusHandle>,
     action_task: Option<Task<()>>,
+    /// *Restart to update* (UPD-007); separate so a container action can't cancel the quit.
+    update_task: Option<Task<()>>,
     store_subs: Vec<Subscription>,
     _subs: Vec<Subscription>,
 }
@@ -219,6 +221,7 @@ impl AppShell {
             focus_page_pending: Rc::new(Cell::new(true)),
             last_focus: None,
             action_task: None,
+            update_task: None,
             store_subs: Vec::new(),
             _subs: subs,
         };
@@ -258,13 +261,18 @@ impl AppShell {
         if let Some(version) = ready
             && AppState::hub(cx).mark_update_notified(&version)
         {
-            let note = Notification::info(s::upd_ready(&version)).action(|_, _, _| {
-                Button::new("upd-restart-now")
-                    .small()
-                    .primary()
-                    .label(s::UPD_RESTART_NOW)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(RestartToUpdate), cx))
-            });
+            // One action button (GPUI Kit); clicking the toast body opens the release notes.
+            let note = Notification::info(s::upd_ready(&version))
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(ViewReleaseNotes), cx))
+                .action(|_, _, _| {
+                    Button::new("upd-restart-now")
+                        .small()
+                        .primary()
+                        .label(s::UPD_RESTART_NOW)
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(RestartToUpdate), cx)
+                        })
+                });
             window.push_notification(note, cx);
         }
         cx.notify();
@@ -294,7 +302,7 @@ impl AppShell {
             return;
         }
         let call = AppState::hub(cx).apply_update();
-        self.action_task = Some(cx.spawn_in(window, async move |_, cx| {
+        self.update_task = Some(cx.spawn_in(window, async move |_, cx| {
             let result = call.await;
             cx.update(|window, cx| match result {
                 // The installer waits for us to exit (AppMutex), then relaunches Dockering.
@@ -1612,6 +1620,8 @@ impl AppShell {
                 on_containers: matches!(self.page, ShellPage::Containers(_)),
                 page: self.history.current().page(),
                 on_detail: self.history.current().is_detail(),
+                update_ready: UpdateStore::global(cx)
+                    .is_some_and(|u| u.read(cx).ready_version().is_some()),
             };
             let shell = cx.entity().downgrade();
             let el = palette::element(state, ctx, self.store.as_ref(), window, cx)

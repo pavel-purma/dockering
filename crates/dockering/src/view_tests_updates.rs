@@ -1,7 +1,7 @@
 //! Updater UI view tests (UPD-008, UPD-009, SET-090, KBD-076). Statuses are injected into the
 //! `UpdateStore`; the hub side is covered by `dk-hub`'s `updates_tests`.
 
-use dk_hub::UpdateStatus;
+use dk_hub::{DisabledReason, UpdateStatus};
 use gpui_kit::component::WindowExt;
 use gpui_kit::{Entity, TestAppContext};
 
@@ -43,8 +43,12 @@ fn upd_008_status_bar_renders_each_state(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     for status in [
-        UpdateStatus::Disabled { by_policy: false },
-        UpdateStatus::Disabled { by_policy: true },
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Unavailable,
+        },
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Policy,
+        },
         UpdateStatus::Idle { last_check: None },
         UpdateStatus::Checking,
         UpdateStatus::Available {
@@ -110,12 +114,23 @@ fn set_090_updates_section_states(cx: &mut TestAppContext) {
     open_updates(&h, cx);
     for status in [
         UpdateStatus::Idle { last_check: None },
-        UpdateStatus::Disabled { by_policy: false },
-        UpdateStatus::Disabled { by_policy: true },
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Unavailable,
+        },
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Policy,
+        },
         UpdateStatus::Checking,
     ] {
         set(&h, cx, status);
     }
+    set(
+        &h,
+        cx,
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Setting,
+        },
+    );
     // The switch writes `[updates] check`.
     let page = h
         .read(cx, |s, _, _| match s.page() {
@@ -164,7 +179,13 @@ fn set_090_policy_disables_controls(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     open_updates(&h, cx);
-    set(&h, cx, UpdateStatus::Disabled { by_policy: true });
+    set(
+        &h,
+        cx,
+        UpdateStatus::Disabled {
+            reason: DisabledReason::Policy,
+        },
+    );
     // *Check now* is not rendered under a policy; it is once the policy is gone.
     let visible = |h: &Harness, cx: &mut TestAppContext| {
         h.draw(cx);

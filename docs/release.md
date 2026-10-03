@@ -183,6 +183,7 @@ them (no `updater` feature). Checklist:
 | `APPLE_*` (6) | secret | env `release` | release.yml (macOS) |
 | `WINGET_TOKEN` | secret | repo | winget.yml |
 | `WINDOWS_SIGNING` | variable | repo | release.yml |
+| `WINDOWS_SIGNER_SUBJECT` | variable | repo | release.yml (REL-032 expected signer, e.g. `CN=SignPath Foundation, …`) |
 | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | variable | repo | release.yml |
 | `PUBLIC_RELEASES` | variable | repo | release.yml (`--features updater`) |
 | `WINGET_ENABLED` | variable | repo | winget.yml |

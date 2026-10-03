@@ -4,19 +4,17 @@
 //!
 //! The DTOs below are always compiled, so the UI builds the same either way. The network side
 //! (`dk-update`) only exists with the `updater` feature; without it the status is
-//! `Disabled { by_policy: false }` and nothing touches the network (UPD-005).
+//! `Disabled { reason: Unavailable }` and nothing touches the network (UPD-005).
 
 use serde::{Deserialize, Serialize};
 
 /// What the UI shows (UPD-008). `update_status()` replays the current value first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
-    /// Updates are off: not compiled in, turned off in Settings, `DOCKERING_DISABLE_UPDATES`,
-    /// demo mode, or (`by_policy`) an administrator policy, which also hides *Check now*.
+    /// Updates are off; `reason` says why (UPD-005, UPD-009).
     Disabled {
-        by_policy: bool,
+        reason: DisabledReason,
     },
-    /// Nothing to do. `last_check` is an RFC 3339 time, `None` if never checked.
     Idle {
         last_check: Option<String>,
     },
@@ -46,6 +44,17 @@ pub enum UpdateStatus {
     },
 }
 
+/// Why updates are off (UPD-005). Settings shows a different note for each (UPD-009).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisabledReason {
+    /// An administrator policy (`DisableUpdates`): everything off, *Check now* hidden.
+    Policy,
+    /// The user turned automatic checks off; *Check now* still works.
+    Setting,
+    /// Not in this build (no `updater` feature), `DOCKERING_DISABLE_UPDATES`, or demo mode.
+    Unavailable,
+}
+
 /// Result of a manual `check_for_updates()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateCheck {
@@ -66,6 +75,8 @@ pub struct UpdateState {
     pub last_run_version: Option<String>,
     /// Version whose "ready to install" notification was already shown (once per version).
     pub notified_version: Option<String>,
+    /// Version whose installer is downloaded and verified, kept across restarts (UPD-007).
+    pub pending_version: Option<String>,
 }
 
 /// Environment switch that turns updates off (UPD-005).
@@ -73,21 +84,21 @@ pub const DISABLE_ENV: &str = "DOCKERING_DISABLE_UPDATES";
 
 #[cfg_attr(not(feature = "updater"), allow(dead_code))]
 /// Why updates are off, if they are. `setting` is `[updates] check` in `config.toml`.
-pub(crate) fn disabled_reason(compiled: bool, demo: bool, setting: bool) -> Option<bool> {
+pub(crate) fn disabled_reason(compiled: bool, demo: bool, setting: bool) -> Option<DisabledReason> {
     if !compiled || demo {
-        return Some(false);
+        return Some(DisabledReason::Unavailable);
     }
     if policy_disabled() {
-        return Some(true);
+        return Some(DisabledReason::Policy);
     }
     let env_off = std::env::var(DISABLE_ENV).is_ok_and(|v| {
         let v = v.trim();
         !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
     });
-    if env_off || !setting {
-        return Some(false);
+    if env_off {
+        return Some(DisabledReason::Unavailable);
     }
-    None
+    (!setting).then_some(DisabledReason::Setting)
 }
 
 #[cfg(feature = "updater")]
@@ -103,6 +114,17 @@ fn policy_disabled() -> bool {
 }
 
 /// `true` when `a` is an older SemVer than `b` (unparsable → `false`).
+#[cfg(feature = "updater")]
+pub(crate) fn older(a: &str, b: &str) -> bool {
+    matches!(
+        (semver::Version::parse(a), semver::Version::parse(b)),
+        (Ok(a), Ok(b)) if a < b
+    )
+}
+
+/// `true` when `a` is an older SemVer than `b` (unparsable → `false`). Without the `semver`
+/// dependency: numeric core, a pre-release is older than its release.
+#[cfg(not(feature = "updater"))]
 pub(crate) fn older(a: &str, b: &str) -> bool {
     fn parse(v: &str) -> Option<(Vec<u64>, String)> {
         let (core, pre) = v.split_once('-').unwrap_or((v, ""));
@@ -152,6 +174,16 @@ mod service {
     pub(crate) const INTERVAL: Duration = Duration::from_secs(24 * 3600);
     pub(crate) const JITTER_SECS: u64 = 3600;
 
+    /// A downloaded, verified installer (UPD-007). Kept with its manifest entry so `apply` can
+    /// verify the file again right before running it (the updates dir is user-writable).
+    #[derive(Clone)]
+    pub(crate) struct Pending {
+        pub(crate) path: PathBuf,
+        pub(crate) version: String,
+        pub(crate) notes_url: String,
+        pub(crate) asset: PlatformAsset,
+    }
+
     /// Hub-owned updater state.
     pub(crate) struct State {
         pub(crate) status: watch::Sender<UpdateStatus>,
@@ -160,8 +192,8 @@ mod service {
         pub(crate) current: semver::Version,
         pub(crate) keys: Vec<String>,
         pub(crate) running_exe: Option<PathBuf>,
-        /// Verified installer ready to run: (path, version).
-        pub(crate) ready: Mutex<Option<(PathBuf, String)>>,
+        /// Verified installer waiting for *Restart to update*.
+        pub(crate) ready: Mutex<Option<Pending>>,
         /// Id of the latest *manual* check; a manual check superseded by a newer one returns
         /// `Cancelled` (UPD-011). Automatic checks don't touch it.
         pub(crate) request: std::sync::atomic::AtomicU64,
@@ -224,8 +256,20 @@ mod service {
         EngineError::protocol(e.to_string())
     }
 
+    /// `<data-local>/updates` (UPD-012): next to the logs, never in the roaming profile.
     fn updates_dir(inner: &HubInner) -> PathBuf {
-        inner.paths.data_dir.join("updates")
+        inner.paths.log_dir.parent().map_or_else(
+            || inner.paths.data_dir.join("updates"),
+            |p| p.join("updates"),
+        )
+    }
+
+    fn ready_status(u: &State, p: &Pending) -> UpdateStatus {
+        UpdateStatus::Ready {
+            version: p.version.clone(),
+            notes_url: p.notes_url.clone(),
+            needs_elevation: u.kind == InstallKind::InnoMachine,
+        }
     }
 
     fn now_rfc3339() -> Option<String> {
@@ -246,14 +290,32 @@ mod service {
             return;
         };
         let setting = lock(&inner.config).updates.check;
-        if let Some(by_policy) = disabled_reason(true, inner.demo, setting) {
-            u.set(UpdateStatus::Disabled { by_policy });
+        if let Some(reason) = disabled_reason(true, inner.demo, setting) {
+            if reason != DisabledReason::Setting || lock(&u.ready).is_none() {
+                u.set(UpdateStatus::Disabled { reason });
+            }
+            // Policy, env, or demo: no network, and nothing pending is kept.
+            if reason != DisabledReason::Setting {
+                return;
+            }
+            // Only the setting is off: no schedule, but restore a pending update.
+            inner.handle.spawn(restore_pending(inner.clone()));
             return;
         }
-        u.set(idle_status(inner));
+        if lock(&u.ready).is_none() {
+            u.set(idle_status(inner));
+        }
         let token = inner.shutdown.child_token();
         *lock(&u.schedule) = Some(token.clone());
         inner.handle.spawn(schedule(inner.clone(), token));
+    }
+
+    /// UPD-007: a downloaded update stays offered across restarts. The pending version is in
+    /// `state.json`; its file is only trusted again after a fresh signed-manifest check, so here
+    /// we only keep the file (cleanup) and let the next check pick it up without downloading.
+    async fn restore_pending(inner: Arc<HubInner>) {
+        let pending = inner.ui_state().updates.pending_version;
+        dk_update::cleanup::cleanup(&updates_dir(&inner), pending.as_deref()).await;
     }
 
     /// Re-evaluates the gates after a Settings change (`[updates] check`).
@@ -264,11 +326,14 @@ mod service {
         let setting = lock(&inner.config).updates.check;
         let running = lock(&u.schedule).is_some();
         match disabled_reason(true, inner.demo, setting) {
-            Some(by_policy) => {
+            Some(reason) => {
                 if let Some(t) = lock(&u.schedule).take() {
                     t.cancel();
                 }
-                u.set(UpdateStatus::Disabled { by_policy });
+                // An already verified update stays installable (it was the user's choice).
+                if reason != DisabledReason::Setting || lock(&u.ready).is_none() {
+                    u.set(UpdateStatus::Disabled { reason });
+                }
             }
             None if !running => start(inner),
             None => {}
@@ -276,8 +341,7 @@ mod service {
     }
 
     async fn schedule(inner: Arc<HubInner>, token: CancellationToken) {
-        let cleanup_dir = updates_dir(&inner);
-        dk_update::cleanup::cleanup(&cleanup_dir, None).await;
+        restore_pending(inner.clone()).await;
         let mut delay = FIRST_CHECK;
         loop {
             tokio::select! {
@@ -298,10 +362,10 @@ mod service {
             return Ok(UpdateCheck::Disabled);
         };
         let setting = lock(&inner.config).updates.check;
-        if let Some(by_policy) = disabled_reason(true, inner.demo, setting) {
-            // A manual check while the setting is off still runs (Settings → *Check now*), but
-            // never against policy, env, or demo.
-            if by_policy || !manual || disabled_reason(true, inner.demo, true).is_some() {
+        if let Some(reason) = disabled_reason(true, inner.demo, setting) {
+            // A manual check while only the setting is off still runs (Settings → *Check
+            // now*), but never against policy, env, or demo.
+            if reason != DisabledReason::Setting || !manual {
                 return Ok(UpdateCheck::Disabled);
             }
         }
@@ -317,11 +381,10 @@ mod service {
             // Turned off while this automatic check waited.
             return Ok(UpdateCheck::Disabled);
         }
-        // A verified installer is already waiting: nothing to fetch.
-        if let Some((_, version)) = lock(&u.ready).clone() {
-            return Ok(UpdateCheck::Available { version });
+        let had_ready = lock(&u.ready).clone();
+        if had_ready.is_none() {
+            u.set(UpdateStatus::Checking);
         }
-        u.set(UpdateStatus::Checking);
         let result = check_inner(inner, u).await;
         let stale = superseded();
         let summary = match &result {
@@ -341,15 +404,19 @@ mod service {
             *u.status.borrow(),
             UpdateStatus::Checking | UpdateStatus::Downloading { .. }
         );
-        match &result {
-            Err(e) if manual && !stale && in_flight => u.set(UpdateStatus::Error {
+        let ready_now = lock(&u.ready).clone();
+        match (&result, ready_now) {
+            // A failed re-check never hides an update that is already verified on disk.
+            (Err(_), Some(p)) => u.set(ready_status(u, &p)),
+            (Err(e), None) if manual && !stale && in_flight => u.set(UpdateStatus::Error {
                 message: e.to_string(),
             }),
-            _ if in_flight => u.set(UpdateStatus::Idle {
+            (_, None) if in_flight => u.set(UpdateStatus::Idle {
                 last_check: checked_at,
             }),
             _ => {}
         }
+        let _ = had_ready;
         if stale {
             return Err(EngineError::Cancelled);
         }
@@ -363,9 +430,19 @@ mod service {
         let Some((manifest, asset)) =
             dk_update::manifest::evaluate(&json, &u.current, &dk_update::manifest::platform_key())?
         else {
+            // E.g. the pending release was pulled: forget it.
+            *lock(&u.ready) = None;
+            inner.update_ui_state(|s| s.updates.pending_version = None);
             return Ok(UpdateCheck::UpToDate);
         };
         let version = manifest.version.to_string();
+        if let Some(p) = lock(&u.ready).clone()
+            && p.version == version
+            && p.asset == asset
+        {
+            u.set(ready_status(u, &p));
+            return Ok(UpdateCheck::Available { version });
+        }
         if !u.kind.can_install() {
             u.set(UpdateStatus::Available {
                 version: version.clone(),
@@ -389,12 +466,15 @@ mod service {
                 return Err(e);
             }
         }
-        *lock(&u.ready) = Some((path, version.clone()));
-        u.set(UpdateStatus::Ready {
+        let pending = Pending {
+            path,
             version: version.clone(),
             notes_url: manifest.notes_url,
-            needs_elevation: u.kind == InstallKind::InnoMachine,
-        });
+            asset,
+        };
+        u.set(ready_status(u, &pending));
+        *lock(&u.ready) = Some(pending);
+        inner.update_ui_state(|s| s.updates.pending_version = Some(version.clone()));
         Ok(UpdateCheck::Available { version })
     }
 
@@ -443,10 +523,26 @@ mod service {
         let Some(u) = inner.updates.as_ref() else {
             return Err(EngineError::protocol("updates are disabled"));
         };
-        let Some((path, _)) = lock(&u.ready).clone() else {
+        let Some(p) = lock(&u.ready).clone() else {
             return Err(EngineError::protocol("no update is ready to install"));
         };
-        dk_update::apply::spawn_installer(&path, u.kind).map_err(engine_err)
+        // UPD-003: the file sits in a user-writable dir and may have been verified days ago.
+        // Check it again right before running it (this runs on a blocking thread).
+        let verified = futures::executor::block_on(dk_update::verify::verify_file(
+            &p.path,
+            &p.asset.sha256,
+            p.asset.size,
+        ));
+        let trusted = verified.and_then(|()| match &u.running_exe {
+            Some(exe) => dk_update::authenticode::check_installer(&p.path, exe).map(drop),
+            None => Ok(()),
+        });
+        if let Err(e) = trusted {
+            *lock(&u.ready) = None;
+            u.set(idle_status(inner));
+            return Err(engine_err(e));
+        }
+        dk_update::apply::spawn_installer(&p.path, u.kind).map_err(engine_err)
     }
 }
 
@@ -465,8 +561,20 @@ mod tests {
 
     #[test]
     fn upd_005_not_compiled_or_demo_is_disabled() {
-        assert_eq!(disabled_reason(false, false, true), Some(false));
-        assert_eq!(disabled_reason(true, true, true), Some(false));
-        assert_eq!(disabled_reason(true, false, false), Some(false));
+        assert_eq!(
+            disabled_reason(false, false, true),
+            Some(DisabledReason::Unavailable)
+        );
+        assert_eq!(
+            disabled_reason(true, true, true),
+            Some(DisabledReason::Unavailable)
+        );
+        if std::env::var_os(DISABLE_ENV).is_none() && !policy_disabled() {
+            assert_eq!(
+                disabled_reason(true, false, false),
+                Some(DisabledReason::Setting)
+            );
+            assert_eq!(disabled_reason(true, false, true), None);
+        }
     }
 }

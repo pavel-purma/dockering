@@ -51,4 +51,5 @@ jobs:
             release
             update
             installer
+            deps
           requireScope: false

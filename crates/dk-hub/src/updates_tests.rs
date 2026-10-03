@@ -151,7 +151,20 @@ async fn upd_007_manual_check_downloads_and_is_ready() {
             version: "0.2.0".into()
         })
     );
-    assert_eq!(f.source.requests(), 2, "manifest + one download");
+    // The manifest is fetched again (a newer release could replace the pending one), but the
+    // verified download is reused.
+    assert_eq!(f.source.requests(), 3, "2 manifests + one download");
+
+    // Turning automatic checks off doesn't hide an update that's ready (UPD-007).
+    f.hub.config().update(|c| c.updates.check = false);
+    status_until(&f.hub, Duration::from_secs(1), |s| {
+        matches!(s, UpdateStatus::Ready { .. })
+    })
+    .await;
+    assert_eq!(
+        f.hub.config().ui_state().updates.pending_version.as_deref(),
+        Some("0.2.0")
+    );
 }
 
 #[tokio::test(start_paused = true)]
