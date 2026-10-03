@@ -1,14 +1,26 @@
-# Release on tag v* (spec 50 "CI" + "Packaging"; REL-002).
-# Signing secrets live only in the GitHub environment `release`. Every signing step is skipped
-# when its secrets are absent, which produces an unsigned build (fine for nightly/dev, not for
-# public releases).
+# Release on tag v* (REL-010…013, REL-030…032, UPD-002/003; docs/spec/features/distribution.md).
 #
-# Windows (Azure Trusted Signing, via Azure/artifact-signing-action):
+# The tag is normally created by release-plz (release-plz.yml) when a release PR merges; a
+# maintainer can also push it by hand. This workflow builds, signs, attests, and uploads every
+# asset to a DRAFT GitHub Release. Publishing the draft (by hand, after a smoke test) is what
+# makes a version visible to users, the in-app updater, and winget.
+#
+# Signing secrets live only in the GitHub environment `release` (required reviewers). Every step
+# is skipped when its secrets are absent, which gives an unsigned build. An unsigned STABLE tag
+# fails the publish job (REL-031); pre-releases (`-alpha.N`, `-rc.N`, …) may be unsigned.
+#
+# Repository variables:
+#   WINDOWS_SIGNING   signpath | azure | none (default none)          REL-031
+#   PUBLIC_RELEASES   'true' → build with the in-app updater          UPD-005
+#   SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG                    (signpath)
+#   WINDOWS_SIGNER_SUBJECT  expected Authenticode subject DN           REL-032
+# Secrets (environment `release`):
+#   SIGNPATH_API_TOKEN                                                 (signpath)
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-#   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE
-# macOS (Developer ID codesign by cargo-packager + notarytool):
-#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
-#   APPLE_API_KEY (key id), APPLE_API_ISSUER, APPLE_API_KEY_P8 (contents of AuthKey_<id>.p8)
+#   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE  (azure)
+#   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)        UPD-003 manifest signature
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8                  (macOS)
 name: Release
 
 on:
@@ -30,8 +42,36 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  verify:
+    name: verify tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: v
+        name: Tag matches the workspace version and CHANGELOG.md (REL-011)
+        shell: bash
+        run: |
+          version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::notice::not a tag build (workflow_dispatch); version $version"
+            exit 0
+          fi
+          [[ "${GITHUB_REF_NAME#v}" == "$version" ]] || { echo "::error::tag $GITHUB_REF_NAME != workspace version $version"; exit 1; }
+          grep -qE "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$version]' section"; exit 1; }
+          # The tag must be on main or a release/* branch (REL-010).
+          git branch -r --contains "$GITHUB_SHA" | grep -qE 'origin/(main|release/)' \
+            || { echo "::error::$GITHUB_REF_NAME is not on main or release/*"; exit 1; }
+
   package:
     name: package (${{ matrix.target }})
+    needs: verify
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:
@@ -46,36 +86,47 @@ jobs:
           - { target: x86_64-apple-darwin, os: macos-15-intel }
     env:
       TARGET: ${{ matrix.target }}
-      # Mapped here so `if: env.X != ''` can gate steps. Values stay masked in logs.
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
+      # Only "is it configured" booleans at job level: secret values never reach build steps
+      # (cargo build scripts, cargo install, …), only the steps that use them (NFR-020, REL-013).
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_APPLE_API: ${{ secrets.APPLE_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
-      - name: Tag matches workspace version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          version=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
-          [[ "${GITHUB_REF_NAME#v}" == "$version" ]] || { echo "::error::tag $GITHUB_REF_NAME != workspace version $version"; exit 1; }
       - name: Linux prerequisites (GPUI Kit)
         if: runner.os == 'Linux'
         run: bash scripts/bootstrap.sh
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - name: Install cargo-packager
+        if: runner.os != 'Windows'
         shell: bash
         run: cargo install cargo-packager --locked --version "$PACKAGER_VERSION"
+      - name: Inno Setup (REL-020)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version 6.7.1 -y --no-progress
+          }
 
       - name: cargo build --release
-        run: cargo build --release --locked -p dockering --target ${{ matrix.target }}
+        shell: bash
+        run: |
+          features=()
+          # UPD-005: only public releases contain the updater.
+          if [[ "${{ vars.PUBLIC_RELEASES }}" == "true" ]]; then features=(--features updater); fi
+          cargo build --release --locked -p dockering --target "$TARGET" "${features[@]}"
 
-      # --- Windows: sign the exe before it goes into the installer and zip ---
-      - name: Sign dockering.exe (Azure Trusted Signing)
-        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
-        uses: Azure/artifact-signing-action@v2
+      # --- Windows, stage 1: sign dockering.exe before it goes into the installer and zip ---
+      - name: Sign dockering.exe (Azure Artifact Signing)
+        if: runner.os == 'Windows' && env.SIGNING == 'azure' && env.HAS_AZURE == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -87,13 +138,34 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+      - name: Upload unsigned dockering.exe for SignPath
+        id: unsigned-exe
+        if: runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-exe-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/dockering.exe
+          if-no-files-found: error
+      - name: Sign dockering.exe (SignPath)
+        if: runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: target/${{ matrix.target }}/release
 
       # --- macOS: cargo-packager signs and notarises the .app when the identity is set ---
       - name: Prepare macOS signing
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
           echo "DOCKERING_MACOS_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
@@ -106,13 +178,17 @@ jobs:
 
       - name: cargo xtask package
         env:
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # cargo-packager reads these for codesign + notarytool (macOS only).
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
         run: cargo xtask package --target ${{ matrix.target }}
 
-      - name: Sign Windows installers (Azure Trusted Signing)
-        if: runner.os == 'Windows' && env.AZURE_CLIENT_ID != ''
-        uses: Azure/artifact-signing-action@v2
+      # --- Windows, stage 2: sign the installer ---
+      - name: Sign the installer (Azure Artifact Signing)
+        if: runner.os == 'Windows' && env.SIGNING == 'azure' && env.HAS_AZURE == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -121,15 +197,58 @@ jobs:
           signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
           files-folder: ${{ github.workspace }}\target\dist\${{ matrix.target }}
-          files-folder-filter: msi,exe
+          files-folder-filter: exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
+      - name: Upload unsigned installer for SignPath
+        id: unsigned-setup
+        if: runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-setup-${{ matrix.target }}
+          path: target/dist/${{ matrix.target }}/Dockering-Setup-*.exe
+          if-no-files-found: error
+      - name: Sign the installer (SignPath)
+        if: runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: target/dist/${{ matrix.target }}
+
+      - name: Verify Windows signatures (REL-032)
+        id: verify-signatures
+        if: runner.os == 'Windows' && env.SIGNING != 'none'
+        shell: pwsh
+        run: |
+          $files = @("target\${{ matrix.target }}\release\dockering.exe") + (Get-ChildItem "target\dist\${{ matrix.target }}\Dockering-Setup-*.exe").FullName
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f
+            if ($sig.Status -ne 'Valid') { Write-Host "::error::$f signature: $($sig.Status)"; exit 1 }
+            Write-Host "$f signed by $($sig.SignerCertificate.Subject)"
+          }
+          $subjects = @($files | ForEach-Object { (Get-AuthenticodeSignature $_).SignerCertificate.Subject } | Sort-Object -Unique)
+          if ($subjects.Count -ne 1) { Write-Host "::error::signers differ: $subjects"; exit 1 }
+          # REL-032: the signer must be the expected publisher (repo variable WINDOWS_SIGNER_SUBJECT).
+          $expected = "${{ vars.WINDOWS_SIGNER_SUBJECT }}"
+          if ($expected -and $subjects[0] -ne $expected) { Write-Host "::error::signer '$($subjects[0])' is not '$expected'"; exit 1 }
+
+      - name: Installer smoke test (REL-014)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup target\dist\${{ matrix.target }}\Dockering-Setup-x64.exe -Version "${{ needs.verify.outputs.version }}"
 
       - name: Sign, notarise and staple the DMG
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != '' && env.APPLE_API_KEY != ''
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true' && env.HAS_APPLE_API == 'true'
         shell: bash
         env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           for dmg in target/dist/"$TARGET"/*.dmg; do
@@ -144,49 +263,112 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
 
-      - name: Checksums
+      # Only a successful signature check counts (REL-031): a skipped signing step leaves "false".
+      - name: Record whether Windows binaries are signed
+        if: runner.os == 'Windows'
         shell: bash
+        env:
+          VERIFIED: ${{ steps.verify-signatures.outcome }}
         run: |
-          cd "target/dist/$TARGET"
-          for f in *; do
-            [[ -f "$f" && "$f" != *.sha256 ]] || continue
-            if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi > "$f.sha256"
-          done
+          signed=false
+          if [[ "$VERIFIED" == success ]]; then signed=true; fi
+          echo "$signed" > "target/dist/$TARGET/.signed"
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: |
-            target/dist/${{ matrix.target }}/*.*
-            !target/dist/${{ matrix.target }}/.cargo-packager/**
+            target/dist/${{ matrix.target }}/Dockering-*
+            target/dist/${{ matrix.target }}/.signed
+          include-hidden-files: true
           if-no-files-found: error
 
   publish:
-    name: publish GitHub Release
-    needs: package
+    name: publish draft GitHub Release
+    needs: [verify, package]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    environment: release
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
-          path: dist
-          merge-multiple: true
-      - name: Release notes from CHANGELOG.md
+          path: artifacts
+      - name: Collect assets
+        shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          find artifacts -type f -name 'Dockering-*' -exec cp {} dist/ \;
+          ls -la dist
+      # Only once the repo is public: while private, every release is an unsigned internal
+      # build (REL-060). The guard then blocks unsigned stable tags.
+      - name: Stable public releases must be signed (REL-031)
+        if: needs.verify.outputs.prerelease != 'true' && vars.PUBLIC_RELEASES == 'true'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          markers=(artifacts/release-*windows*/.signed)
+          [[ ${#markers[@]} -eq 2 ]] || { echo "::error::expected 2 Windows signing markers, found ${#markers[@]}"; exit 1; }
+          for f in "${markers[@]}"; do
+            [[ "$(cat "$f")" == true ]] || { echo "::error::unsigned Windows build ($f) on a stable tag; set WINDOWS_SIGNING and its secrets, or tag a pre-release"; exit 1; }
+          done
+      - name: Build xtask (no secrets in this step)
+        run: cargo build --locked -p xtask
+      - name: Update manifest (UPD-002)
+        run: target/debug/xtask update-manifest --assets dist --version "${{ needs.verify.outputs.version }}" --repo "$GITHUB_REPOSITORY"
+      - name: Sign the update manifest (UPD-003)
+        shell: bash
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          UPDATE_SIGNING_KEY_PASSWORD: ${{ secrets.UPDATE_SIGNING_KEY_PASSWORD }}
+          STRICT: ${{ needs.verify.outputs.prerelease != 'true' && vars.PUBLIC_RELEASES == 'true' }}
+        run: |
+          if [[ -n "$UPDATE_SIGNING_KEY" ]]; then
+            target/debug/xtask sign-manifest dist/dockering-update.json
+          elif [[ "$STRICT" == true ]]; then
+            echo "::error::UPDATE_SIGNING_KEY is not set: installed apps would reject this release's update manifest"
+            exit 1
+          else
+            echo "::warning::UPDATE_SIGNING_KEY is not set; the update manifest is unsigned and installed apps will ignore it"
+          fi
+      - name: Checksums
+        run: target/debug/xtask checksums dist
+      # Attestations in private repos need GitHub Enterprise Cloud; skipped until the public launch.
+      - name: Build provenance (REL-013)
+        if: vars.PUBLIC_RELEASES == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          version="${{ needs.verify.outputs.version }}"
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           [[ -s "$RUNNER_TEMP/notes.md" ]] || echo "See CHANGELOG.md." > "$RUNNER_TEMP/notes.md"
-      - uses: softprops/action-gh-release@v3
+          {
+            echo
+            echo "---"
+            if [[ "${{ vars.PUBLIC_RELEASES }}" == true ]]; then
+              echo "**Verify a download:** \`gh attestation verify <file> -R $GITHUB_REPOSITORY\` · checksums in \`SHA256SUMS\`."
+            else
+              echo "**Internal build:** unsigned, not for distribution. Windows shows a SmartScreen warning (*More info → Run anyway*). Checksums in \`SHA256SUMS\`."
+            fi
+          } >> "$RUNNER_TEMP/notes.md"
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*
           body_path: ${{ runner.temp }}/notes.md
           draft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true

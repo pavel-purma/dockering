@@ -38,6 +38,8 @@ pub enum BoolKey {
     AllCores,
     ShowAllDistros,
     ShowAllSessions,
+    /// SET-090 / UPD-005
+    CheckUpdates,
 }
 
 impl BoolKey {
@@ -51,6 +53,7 @@ impl BoolKey {
             BoolKey::AllCores => c.stats.cpu_relative_to_all_cores,
             BoolKey::ShowAllDistros => c.engines.show_all_wsl_distros,
             BoolKey::ShowAllSessions => c.engines.show_all_wslc_sessions,
+            BoolKey::CheckUpdates => c.updates.check,
         }
     }
 
@@ -64,6 +67,7 @@ impl BoolKey {
             BoolKey::AllCores => c.stats.cpu_relative_to_all_cores = v,
             BoolKey::ShowAllDistros => c.engines.show_all_wsl_distros = v,
             BoolKey::ShowAllSessions => c.engines.show_all_wslc_sessions = v,
+            BoolKey::CheckUpdates => c.updates.check = v,
         }
     }
 
@@ -78,6 +82,7 @@ impl BoolKey {
             BoolKey::AllCores => "set-all-cores",
             BoolKey::ShowAllDistros => "set-all-distros",
             BoolKey::ShowAllSessions => "set-all-sessions",
+            BoolKey::CheckUpdates => "set-check-updates",
         }
     }
 }
@@ -314,7 +319,7 @@ pub fn keys_for(section: crate::nav::SettingsSection) -> &'static [Key] {
         ],
         S::Stats => &[Key::StatsHistory],
         S::Diagnostics => &[Key::LogLevel],
-        S::Engines | S::Keyboard => &[],
+        S::Engines | S::Keyboard | S::Updates => &[],
     }
 }
 

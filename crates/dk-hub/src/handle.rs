@@ -15,6 +15,7 @@ use futures::Stream;
 use crate::bridge::{Feed, HubCall, HubEvent, HubStream, TerminalHandle};
 use crate::config::{Config, UiState};
 use crate::paths::Paths;
+use crate::updates::{UpdateCheck, UpdateStatus};
 
 /// Options for `EngineHub::start`.
 pub struct HubOptions {
@@ -28,6 +29,8 @@ pub struct HubOptions {
     pub discover_on_start: bool,
     /// Worker threads (2–4).
     pub worker_threads: usize,
+    /// `--demo`: the updater stays off (UPD-005).
+    pub demo: bool,
 }
 
 /// Cheap to clone (`Arc` inside); stored as a GPUI `Global` by the app.
@@ -135,6 +138,30 @@ impl HubHandle {
     }
     pub fn config(&self) -> ConfigHandle {
         crate::hub::config_handle(self)
+    }
+
+    // ── updates (UPD-*) ───────────────────────────────────────────────────────────────────
+
+    /// Current updater status first, then every change (UPD-008).
+    pub fn update_status(&self) -> HubStream<UpdateStatus> {
+        crate::hub::update_status(self)
+    }
+    /// Manual check (+ download when the install supports it). Errors surface (UPD-004).
+    pub fn check_for_updates(&self) -> HubCall<UpdateCheck> {
+        crate::hub::check_for_updates(self)
+    }
+    /// Starts the verified installer; the UI quits right after (UPD-007).
+    pub fn apply_update(&self) -> HubCall<()> {
+        crate::hub::apply_update(self)
+    }
+    /// The version that ran before this one, if older (once per upgrade; "Updated to X.Y.Z").
+    /// Records the current version as the last run.
+    pub fn take_previous_version(&self) -> Option<String> {
+        crate::hub::take_previous_version(self)
+    }
+    /// Marks the "ready to install" notification for `version` as shown; `true` the first time.
+    pub fn mark_update_notified(&self, version: &str) -> bool {
+        crate::hub::mark_update_notified(self, version)
     }
     pub fn paths(&self) -> &Paths {
         &self.inner.paths

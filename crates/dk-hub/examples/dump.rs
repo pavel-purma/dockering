@@ -17,6 +17,7 @@ fn main() {
         factories: None,
         discover_on_start: true,
         worker_threads: 2,
+        demo: false,
     })
     .expect("hub start");
 

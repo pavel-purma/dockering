@@ -34,6 +34,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Networks | [features/networks.md](features/networks.md) | implemented |
 | Settings | [features/settings.md](features/settings.md) | implemented |
 | Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open) |
+| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (public-launch steps open) |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 
 Each implemented spec has a *Verification* table (requirement → tests) and a *Known gaps (v1)*
@@ -77,6 +78,8 @@ Requirements are numbered so plans, code comments and tests can reference them:
 | `SHL` | UI shell (global) |
 | `KBD` | Keyboard navigation & shortcuts |
 | `NFR` | Non-functional |
+| `REL` | Release, packaging, signing, distribution |
+| `UPD` | In-app updates |
 
 IDs are never reused. A removed requirement is struck through and marked `(removed in <date>)`.
 

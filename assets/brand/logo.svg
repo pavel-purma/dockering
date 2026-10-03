@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#8E7AEB"/><stop offset="1" stop-color="#5840B5"/></linearGradient>
+<linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="d"><path fill-rule="evenodd" d="M274.55999999999995 238.71999999999997H520.96A273.28000000000003 273.28000000000003 0 0 1 520.96 785.28H274.55999999999995Z M391.03999999999996 355.2H512A156.8 156.8 0 0 1 512 668.8H391.03999999999996Z"/></clipPath></defs>
+<rect x="40" y="40" width="944" height="944" rx="200" fill="url(#bg)"/>
+<rect x="40" y="40" width="944" height="944" rx="200" fill="url(#hl)"/>
+<g clip-path="url(#d)"><rect x="252.15999999999997" y="238.71999999999997" width="627.2" height="162.18666666666664" fill="#fff" fill-opacity="1"/><rect x="252.15999999999997" y="430.90666666666664" width="627.2" height="162.18666666666664" fill="#fff" fill-opacity="0.84"/><rect x="252.15999999999997" y="623.0933333333332" width="627.2" height="162.18666666666664" fill="#fff" fill-opacity="0.68"/></g></svg>

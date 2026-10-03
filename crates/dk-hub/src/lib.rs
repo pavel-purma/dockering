@@ -13,16 +13,20 @@ pub mod single_instance;
 mod stats_service;
 mod supervisor;
 mod terminal;
+pub mod updates;
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "updater"))]
+mod updates_tests;
 
 pub use bridge::{Feed, HubCall, HubEvent, HubStream, STREAM_CAPACITY, TermCmd, TerminalHandle};
-pub use config::{Config, ThemeMode, UiState};
+pub use config::{Config, ThemeMode, UiState, UpdateSettings};
 pub use handle::{ConfigHandle, HubHandle, HubOptions};
 pub use hub::EngineHub;
 pub use paths::Paths;
 pub use supervisor::backoff_delay;
+pub use updates::{DisabledReason, UpdateCheck, UpdateState, UpdateStatus};
 
 /// The backend factories for this OS (spec 21 §8): Docker everywhere; WSL distro + WSLC on
 /// Windows (their crates compile everywhere and discover nothing elsewhere).

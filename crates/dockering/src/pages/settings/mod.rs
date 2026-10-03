@@ -17,6 +17,7 @@ pub mod controls;
 pub mod diagnostics;
 pub mod engines;
 pub mod mapping;
+pub mod updates;
 
 use std::collections::HashMap;
 
@@ -560,6 +561,7 @@ impl SettingsPage {
                 ],
                 cx,
             )],
+            S::Updates => updates::blocks(self, cx),
             S::Diagnostics => diagnostics::blocks(self, cx),
             S::Engines => engines::blocks(self, cx),
             S::Keyboard => vec![
@@ -585,6 +587,7 @@ impl SettingsPage {
             S::Logs => s::SET_DESC_LOGS,
             S::Terminal => s::SET_DESC_TERMINAL,
             S::Stats => s::SET_DESC_STATS,
+            S::Updates => s::SET_DESC_UPDATES,
             S::Diagnostics => s::SET_DESC_DIAGNOSTICS,
             S::Keyboard => s::SET_DESC_KEYBOARD,
         }

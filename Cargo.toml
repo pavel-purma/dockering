@@ -12,7 +12,7 @@ gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 repository = "https://github.com/pavel-purma/dockering"
 publish = false
 
@@ -24,6 +24,16 @@ dk-engine-docker = { path = "crates/dk-engine-docker" }
 dk-engine-wslc = { path = "crates/dk-engine-wslc" }
 dk-wsl = { path = "crates/dk-wsl" }
 dk-terminal = { path = "crates/dk-terminal" }
+dk-update = { path = "crates/dk-update" }
+
+# updater
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream", "http2", "system-proxy"] }
+minisign-verify = "0.3.0"
+minisign = "0.10.0"
+semver = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3"
 
 # UI (only dockering + dk-terminal, ADR-0001)
 gpui-kit = { version = "=0.7.0" }

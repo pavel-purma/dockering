@@ -2,6 +2,9 @@
 //! window and exits. Windows: named pipe `\\.\pipe\dockering-instance-<user SID>`, created with
 //! a current-user-only DACL; a secondary exits only after verifying that the pipe's server
 //! process runs as the same user. Unix: socket `<data_dir>/instance.sock`.
+//!
+//! Windows also holds the named mutex `dev.dockering.Dockering` (session-local) for the primary's
+//! lifetime. The Inno Setup installer uses it as `AppMutex` to detect a running Dockering (REL-024).
 
 use futures::channel::mpsc;
 
@@ -13,6 +16,8 @@ pub struct InstanceGuard {
     focus: Option<mpsc::UnboundedReceiver<()>>,
     #[cfg(unix)]
     _socket: Option<unix::SocketCleanup>,
+    #[cfg(windows)]
+    _app_mutex: Option<win::AppMutex>,
 }
 
 impl InstanceGuard {
@@ -28,6 +33,8 @@ impl InstanceGuard {
             focus: None,
             #[cfg(unix)]
             _socket: None,
+            #[cfg(windows)]
+            _app_mutex: None,
         }
     }
 }
@@ -53,12 +60,19 @@ fn imp_acquire(paths: &Paths) -> Instance {
 
 #[cfg(windows)]
 fn imp_acquire(_paths: &Paths) -> Instance {
-    match win::current_user_sid() {
+    let instance = match win::current_user_sid() {
         Ok(sid) => win::acquire(&win::pipe_name(&sid), &sid),
         Err(e) => {
             tracing::warn!(error = %e, "single-instance: couldn't read the user SID");
             Instance::Primary(InstanceGuard::detached())
         }
+    };
+    match instance {
+        Instance::Primary(mut guard) => {
+            guard._app_mutex = win::AppMutex::create(win::APP_MUTEX_NAME);
+            Instance::Primary(guard)
+        }
+        secondary => secondary,
     }
 }
 
@@ -153,7 +167,8 @@ mod win {
         PIPE_WAIT,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     use super::*;
@@ -411,7 +426,29 @@ mod win {
         Instance::Primary(InstanceGuard {
             _private: (),
             focus: Some(rx),
+            _app_mutex: None,
         })
+    }
+
+    /// Must match `AppMutex` in `packaging/windows/dockering.iss` (REL-024). No `Global\` prefix:
+    /// per-user installs only need to see instances in the installer's own session.
+    pub(super) const APP_MUTEX_NAME: &str = "dev.dockering.Dockering";
+
+    /// Named mutex held (not owned/locked, only existing) while the primary runs.
+    pub(super) struct AppMutex(#[allow(dead_code)] OwnedHandle);
+
+    impl AppMutex {
+        pub(super) fn create(name: &str) -> Option<Self> {
+            let wide = wide_nul(name);
+            // SAFETY: `wide` is a NUL-terminated UTF-16 string that outlives the call; null
+            // security attributes give the default (creator-owned) DACL.
+            let h = unsafe { CreateMutexW(std::ptr::null(), 0, wide.as_ptr()) };
+            if h.is_null() {
+                tracing::warn!("couldn't create the app mutex");
+                return None;
+            }
+            Some(Self(OwnedHandle(h)))
+        }
     }
 
     fn serve(first: Pipe, wide: Vec<u16>, sddl: String, tx: mpsc::UnboundedSender<()>) {
@@ -523,11 +560,23 @@ mod win {
             };
             assert_eq!(status, 0);
             let descriptor = OwnedLocal(descriptor.cast());
+            // `GA` on a pipe maps to FILE_ALL_ACCESS (`FA`); `P` = protected (no inheritance).
+            // The expected text goes through the same conversion because SDDL prints
+            // well-known SIDs as aliases (e.g. the built-in Administrator, as on CI, is `LA`).
+            let expected = SecurityDescriptor::from_sddl(&format!("D:P(A;;FA;;;{sid})")).unwrap();
+            assert_eq!(
+                dacl_sddl(descriptor.0.cast()),
+                dacl_sddl(expected.0.0.cast())
+            );
+        }
+
+        /// The DACL of `descriptor` as SDDL text.
+        fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> String {
             let mut text: *mut u16 = null_mut();
             // SAFETY: `descriptor` is a valid descriptor; `text` is a valid out pointer.
             let ok = unsafe {
                 ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                    descriptor.0.cast(),
+                    descriptor,
                     SDDL_REVISION_1,
                     DACL_SECURITY_INFORMATION,
                     &mut text,
@@ -536,9 +585,7 @@ mod win {
             };
             assert_ne!(ok, 0);
             // SAFETY: on success `text` is a LocalAlloc'ed NUL-terminated string we now own.
-            let sddl = unsafe { take_local_wide(text) };
-            // `GA` on a pipe maps to FILE_ALL_ACCESS (`FA`); `P` = protected (no inheritance).
-            assert_eq!(sddl, format!("D:P(A;;FA;;;{sid})"));
+            unsafe { take_local_wide(text) }
         }
 
         /// A running instance whose server process isn't the expected user isn't trusted:

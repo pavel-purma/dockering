@@ -18,6 +18,7 @@ pub fn set_app_menus(cx: &mut App) {
             name: s::APP_NAME.into(),
             items: vec![
                 MenuItem::action(s::CMD_ABOUT, About),
+                MenuItem::action(s::CMD_CHECK_FOR_UPDATES_MENU, CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(s::CMD_SETTINGS, OpenSettings),
                 MenuItem::separator(),

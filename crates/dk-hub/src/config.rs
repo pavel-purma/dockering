@@ -48,6 +48,7 @@ pub struct Config {
     pub terminal: TerminalSettings,
     pub stats: StatsSettings,
     pub diagnostics: DiagnosticsSettings,
+    pub updates: UpdateSettings,
 }
 
 impl Default for Config {
@@ -61,6 +62,7 @@ impl Default for Config {
             terminal: Default::default(),
             stats: Default::default(),
             diagnostics: Default::default(),
+            updates: Default::default(),
         }
     }
 }
@@ -196,6 +198,20 @@ pub struct DiagnosticsSettings {
     pub log_level: LogLevel,
 }
 
+/// SET-090 / UPD-005
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// *Check for updates automatically* (default on).
+    pub check: bool,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self { check: true }
+    }
+}
+
 /// Window & UI state (`state.json`, SHL-011).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -214,6 +230,8 @@ pub struct UiState {
     pub container_filter: BTreeMap<String, String>,
     /// First-run screen dismissed.
     pub first_run_done: bool,
+    /// Updater bookkeeping (UPD-012).
+    pub updates: crate::updates::UpdateState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
