@@ -108,15 +108,12 @@ mod tests {
 
         let user = install(&lad.join("Programs").join("Dockering"), true);
         assert_eq!(detect(&user, true, Some(&lad), &pfs), InstallKind::InnoUser);
-        // Case-insensitive match.
-        let upper = PathBuf::from(user.to_string_lossy().to_uppercase());
+        // Case-insensitive match. Only the root is uppercased so the uninstaller lookup doesn't
+        // depend on the host filesystem's case sensitivity (APFS is insensitive, ext4 isn't).
+        let upper_lad = PathBuf::from(lad.to_string_lossy().to_uppercase());
         assert_eq!(
-            detect(&upper, true, Some(&lad), &pfs),
-            if cfg!(windows) {
-                InstallKind::InnoUser
-            } else {
-                InstallKind::Portable // the uninstaller lookup is case-sensitive off Windows
-            }
+            detect(&user, true, Some(&upper_lad), &pfs),
+            InstallKind::InnoUser
         );
 
         let machine = install(&pf.join("Dockering"), true);
