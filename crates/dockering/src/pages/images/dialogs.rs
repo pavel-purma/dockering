@@ -154,7 +154,6 @@ impl Render for PullDialog {
                 move |window, cx| {
                     this2.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }
@@ -426,7 +425,6 @@ impl Render for RunDialog {
                 move |window, cx| {
                     this.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }
@@ -560,7 +558,6 @@ impl Render for TagDialog {
                 move |window, cx| {
                     this.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }

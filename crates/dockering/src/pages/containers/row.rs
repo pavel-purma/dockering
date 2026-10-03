@@ -12,7 +12,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div, px};
+use gpui_kit::{AnyElement, App, IntoElement, SharedString, div, px};
 
 use super::model::{GroupInfo, sort_keys};
 use crate::actions::{OnRow, RowCommand};
@@ -244,8 +244,6 @@ impl ListDelegate for ContainersDelegate {
         row: &ListRow<GroupInfo, ContainerSummary>,
         row_ix: usize,
         column: &ColumnSpec,
-        _selected: bool,
-        _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
@@ -408,8 +406,6 @@ impl ListDelegate for ContainersDelegate {
         &self,
         row: &ListRow<GroupInfo, ContainerSummary>,
         menu: PopupMenu,
-        _window: &Window,
-        _cx: &App,
     ) -> PopupMenu {
         let key = row.key.clone();
         let on = |cmd: RowCommand| -> Box<dyn gpui_kit::Action> {
@@ -533,7 +529,7 @@ impl ListDelegate for ContainersDelegate {
         }
     }
 
-    fn render_empty(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         if self.filtered_out {
             return crate::ui::empty_state(
                 IconName::Search,

@@ -67,12 +67,7 @@ impl Collapsible for NavMenu {
 }
 
 impl SidebarItem for NavMenu {
-    fn render(
-        self,
-        id: impl Into<ElementId>,
-        _window: &mut Window,
-        cx: &mut App,
-    ) -> impl IntoElement {
+    fn render(self, id: impl Into<ElementId>, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let collapsed = self.collapsed;
         let heading_fg = cx.theme().sidebar_foreground.opacity(0.7);
         let divider = cx.theme().sidebar_border;

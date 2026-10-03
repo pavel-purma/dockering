@@ -519,7 +519,7 @@ impl ContainersPage {
     // ── menus (KBD-039, Mod+Shift+O, overflow) ─────────────────────────────────────────
 
     /// Opens menus under their trigger (or under the group-by button for key-only menus).
-    fn menu_anchor(&self, focus: &FocusHandle, _window: &Window, _cx: &App) -> MenuAnchor {
+    fn menu_anchor(&self, focus: &FocusHandle) -> MenuAnchor {
         let b = if *focus == self.overflow_focus {
             self.overflow_bounds
         } else {
@@ -535,7 +535,7 @@ impl ContainersPage {
         cx: &mut Context<Self>,
         build: impl FnOnce(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
-        let pos = self.menu_anchor(&anchor, window, cx);
+        let pos = self.menu_anchor(&anchor);
         let restore = self.table.focus_handle(cx);
         self.menu = Some(KeyMenu::open(
             pos,
@@ -1220,11 +1220,7 @@ impl ContainersPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let loading = self.store.read(cx).containers.is_loading();
         let filter = self.filter;
         let group_label = match &self.group_by {
@@ -1281,7 +1277,6 @@ impl ContainersPage {
                     .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx)),
                 |_, window, cx| window.dispatch_action(Box::new(list::GroupBy), cx),
-                window,
                 cx,
             )
             .on_bounds({
@@ -1307,7 +1302,6 @@ impl ContainersPage {
                     this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
                 }
             },
-            window,
             cx,
         )
         .on_bounds({
@@ -1411,8 +1405,8 @@ impl PageView for ContainersPage {
 }
 
 impl Render for ContainersPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let body = self.render_body(cx);
         // Tab order: toolbar controls → table (one stop) → out (KBD-004).
         // The page `⋮` ends the header (right of the search row): Shift+Tab lands on it.

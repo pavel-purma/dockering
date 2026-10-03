@@ -56,7 +56,7 @@ impl Demo {
             return;
         }
         let view = cx.entity();
-        window.on_next_frame(move |_window, cx| {
+        window.on_next_frame(move |_, cx| {
             view.update(cx, |this, cx| {
                 let term = this.terminal.read(cx);
                 let (cols, rows) = term.size();
@@ -153,7 +153,7 @@ impl Demo {
 }
 
 impl Render for Demo {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().size_full().p(px(8.)).child(self.terminal.clone())
     }
 }

@@ -427,7 +427,6 @@ impl Render for VolumeDetailPage {
                     ),
                     header_action("vol-delete", s::DELETE, None, Box::new(list::Delete), ro),
                 ],
-                window,
                 cx,
             ))
             .when(gone, |this| {
@@ -441,7 +440,6 @@ impl Render for VolumeDetailPage {
                     this.update(cx, |p, cx| p.set_tab(TABS[ix], window, cx))
                         .ok();
                 },
-                window,
                 cx,
             ))
             .child(

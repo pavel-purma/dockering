@@ -633,7 +633,7 @@ impl TerminalTab {
             .into_any_element()
     }
 
-    fn render_toolbar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let external = self.external_available(cx);
         let active = self.active;
         let tabs =
@@ -902,7 +902,7 @@ impl Render for TerminalTab {
                 })
                 .into_any_element()
         };
-        let toolbar = self.render_toolbar(window, cx);
+        let toolbar = self.render_toolbar(cx);
         v_flex()
             .id("terminal-tab")
             .size_full()

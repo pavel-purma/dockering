@@ -66,11 +66,7 @@ pub fn view_licenses(window: &mut Window, cx: &mut App) {
         .detach();
 }
 
-pub(super) fn blocks(
-    this: &mut SettingsPage,
-    _window: &mut Window,
-    cx: &mut Context<SettingsPage>,
-) -> Vec<AnyElement> {
+pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> Vec<AnyElement> {
     let hub = AppState::hub(cx);
     let log_dir = hub.paths().log_dir.display().to_string();
     let logging = crate::ui::section(

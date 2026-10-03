@@ -115,7 +115,6 @@ pub fn footer(
     busy: bool,
     on_cancel: impl Fn(&mut Window, &mut App) + Clone + 'static,
     on_ok: impl Fn(&mut Window, &mut App) + Clone + 'static,
-    window: &Window,
     cx: &App,
 ) -> AnyElement {
     let (c1, c2) = (on_cancel.clone(), on_cancel);
@@ -130,7 +129,6 @@ pub fn footer(
                 .label(s::CANCEL)
                 .on_click(move |_, window, cx| c1(window, cx)),
             move |_, window, cx| c2(window, cx),
-            window,
             cx,
         ))
         .child(focus_wrap(
@@ -143,7 +141,6 @@ pub fn footer(
                 .tooltip_with_action(ok_label, &ConfirmDestructive, Some(ctx::DIALOG))
                 .on_click(move |_, window, cx| o1(window, cx)),
             move |_, window, cx| o2(window, cx),
-            window,
             cx,
         ))
         .into_any_element()

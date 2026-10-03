@@ -8,7 +8,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div};
+use gpui_kit::{AnyElement, App, IntoElement, SharedString, div};
 
 use super::model::{NetworkRow, sort_keys};
 use crate::actions::{OnRow, RowCommand, list};
@@ -81,8 +81,6 @@ impl ListDelegate for NetworksDelegate {
         row: &ListRow<(), NetworkRow>,
         row_ix: usize,
         column: &ColumnSpec,
-        _selected: bool,
-        _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
         let RowKind::Item(r) = &row.kind else {
@@ -158,13 +156,7 @@ impl ListDelegate for NetworksDelegate {
         }
     }
 
-    fn context_menu(
-        &self,
-        row: &ListRow<(), NetworkRow>,
-        menu: PopupMenu,
-        _window: &Window,
-        _cx: &App,
-    ) -> PopupMenu {
+    fn context_menu(&self, row: &ListRow<(), NetworkRow>, menu: PopupMenu) -> PopupMenu {
         let key = row.key.clone();
         let can_delete = row.item().is_some_and(|r| self.can_delete(r));
         let lk = ctx::LIST_KEYS;
@@ -194,7 +186,7 @@ impl ListDelegate for NetworksDelegate {
         )
     }
 
-    fn render_empty(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         if self.filtered_out {
             return crate::ui::empty_state(IconName::Search, s::NO_MATCHING_NETWORKS, "", None, cx);
         }

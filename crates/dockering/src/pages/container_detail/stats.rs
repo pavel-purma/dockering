@@ -456,7 +456,6 @@ impl StatsTab {
         title: &'static str,
         value: Vec<(String, Option<Hsla>)>,
         chart: AnyElement,
-        _window: &Window,
         cx: &App,
     ) -> AnyElement {
         v_flex()
@@ -642,7 +641,7 @@ impl Focusable for StatsTab {
 }
 
 impl Render for StatsTab {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let running = self.running(cx);
         let relative = AppState::config(cx).stats.cpu_relative_to_all_cores;
         let samples = self.samples();
@@ -709,14 +708,14 @@ impl Render for StatsTab {
             .child(
                 h_flex()
                     .gap_3()
-                    .child(self.card(0, s::STATS_CPU, cpu_v, cpu, window, cx))
-                    .child(self.card(1, s::STATS_MEMORY, mem_v, mem, window, cx)),
+                    .child(self.card(0, s::STATS_CPU, cpu_v, cpu, cx))
+                    .child(self.card(1, s::STATS_MEMORY, mem_v, mem, cx)),
             )
             .child(
                 h_flex()
                     .gap_3()
-                    .child(self.card(2, s::STATS_NETWORK, net_v, net, window, cx))
-                    .child(self.card(3, s::STATS_DISK, disk_v, disk, window, cx)),
+                    .child(self.card(2, s::STATS_NETWORK, net_v, net, cx))
+                    .child(self.card(3, s::STATS_DISK, disk_v, disk, cx)),
             );
 
         let selector = div()

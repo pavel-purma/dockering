@@ -120,7 +120,6 @@ pub fn focus_wrap(
     handle: &gpui_kit::FocusHandle,
     button: Button,
     on_activate: impl Fn(&gpui_kit::KeyDownEvent, &mut gpui_kit::Window, &mut App) + 'static,
-    _window: &gpui_kit::Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     div()

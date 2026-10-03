@@ -403,13 +403,13 @@ impl TerminalView {
         }
     }
 
-    fn copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
+    fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.model.selection_text() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
-    fn paste(&mut self, _: &Paste, _window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.paste_text(&text, cx);
         }
@@ -424,17 +424,12 @@ impl TerminalView {
         self.user_input(bytes, cx);
     }
 
-    fn scroll_page_up(&mut self, _: &ScrollPageUp, _window: &mut Window, cx: &mut Context<Self>) {
+    fn scroll_page_up(&mut self, _: &ScrollPageUp, _: &mut Window, cx: &mut Context<Self>) {
         self.model.scroll_page_up();
         cx.notify();
     }
 
-    fn scroll_page_down(
-        &mut self,
-        _: &ScrollPageDown,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn scroll_page_down(&mut self, _: &ScrollPageDown, _: &mut Window, cx: &mut Context<Self>) {
         self.model.scroll_page_down();
         cx.notify();
     }
@@ -647,7 +642,7 @@ fn palette_for(cx: &App) -> Palette {
 }
 
 /// The configured family, or the platform default monospace font (TRM-011).
-pub(crate) fn font_family(config: &TerminalConfig, _window: &Window, cx: &App) -> SharedString {
+pub(crate) fn font_family(config: &TerminalConfig, cx: &App) -> SharedString {
     let configured = config.font_family.trim();
     if !configured.is_empty() {
         return SharedString::from(configured.to_string());
@@ -671,7 +666,7 @@ pub(crate) fn font_family(config: &TerminalConfig, _window: &Window, cx: &App) -
 impl EventEmitter<TerminalEvent> for TerminalView {}
 
 impl Focusable for TerminalView {
-    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
@@ -729,7 +724,7 @@ impl Render for TerminalView {
                         .child(Tag::secondary().child(badge)),
                 )
             })
-            .context_menu(move |menu, _window, _cx| {
+            .context_menu(move |menu, _, _| {
                 menu.action_context(menu_focus.clone())
                     .menu_with_disabled("Copy", Box::new(Copy), !has_selection)
                     .menu_with_disabled("Paste", Box::new(Paste), inert)
@@ -742,8 +737,8 @@ impl EntityInputHandler for TerminalView {
         &mut self,
         _range: std::ops::Range<usize>,
         _adjusted_range: &mut Option<std::ops::Range<usize>>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        _: &mut Window,
+        _: &mut Context<Self>,
     ) -> Option<String> {
         None
     }
@@ -751,8 +746,8 @@ impl EntityInputHandler for TerminalView {
     fn selected_text_range(
         &mut self,
         _ignore_disabled_input: bool,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        _: &mut Window,
+        _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         let len = self
             .marked_text
@@ -766,15 +761,15 @@ impl EntityInputHandler for TerminalView {
 
     fn marked_text_range(
         &self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        _: &mut Window,
+        _: &mut Context<Self>,
     ) -> Option<std::ops::Range<usize>> {
         self.marked_text
             .as_ref()
             .map(|text| 0..text.encode_utf16().count())
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         if self.marked_text.take().is_some() {
             cx.notify();
         }
@@ -784,7 +779,7 @@ impl EntityInputHandler for TerminalView {
         &mut self,
         _range: Option<std::ops::Range<usize>>,
         text: &str,
-        _window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.marked_text.take().is_some() {
@@ -802,7 +797,7 @@ impl EntityInputHandler for TerminalView {
         _range: Option<std::ops::Range<usize>>,
         new_text: &str,
         _new_selected_range: Option<std::ops::Range<usize>>,
-        _window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.marked_text = (!new_text.is_empty() && !self.inert()).then(|| new_text.to_string());
@@ -813,8 +808,8 @@ impl EntityInputHandler for TerminalView {
         &mut self,
         _range_utf16: std::ops::Range<usize>,
         _element_bounds: Bounds<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        _: &mut Window,
+        _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         Some(self.cursor_bounds())
     }
@@ -822,13 +817,13 @@ impl EntityInputHandler for TerminalView {
     fn character_index_for_point(
         &mut self,
         _point: Point<Pixels>,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
+        _: &mut Window,
+        _: &mut Context<Self>,
     ) -> Option<usize> {
         None
     }
 
-    fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
         !self.inert()
     }
 }

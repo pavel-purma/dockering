@@ -575,11 +575,7 @@ impl VolumesPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let res = self.store.read(cx).resource(Collection::Volumes);
         let count = self.volumes(cx).len();
         let summary = match &self.usage {
@@ -597,7 +593,6 @@ impl VolumesPage {
                 &self.filter_focus,
                 VolumeFilter::OPTIONS,
                 self.filter.as_str(),
-                window,
                 cx,
             ),
             chrome::header_button(
@@ -615,7 +610,6 @@ impl VolumesPage {
                         ctx::LIST_KEYS,
                     )),
                 Box::new(volume::Create),
-                window,
                 cx,
             )
             .debug_selector(|| "create-volume-trigger".into())
@@ -627,7 +621,6 @@ impl VolumesPage {
             move |window, cx| {
                 this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
             },
-            window,
             cx,
         )
         .on_bounds({
@@ -681,8 +674,8 @@ impl PageView for VolumesPage {
 impl RoutedPage for VolumesPage {}
 
 impl Render for VolumesPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let res = self.store.read(cx).resource(Collection::Volumes);
         let has_data = self.store.read(cx).volumes.data().is_some();
         let body = chrome::list_body(

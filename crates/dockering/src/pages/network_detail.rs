@@ -428,7 +428,6 @@ impl Render for NetworkDetailPage {
                         !can_delete,
                     ),
                 ],
-                window,
                 cx,
             ))
             .when(gone, |this| {
@@ -442,7 +441,6 @@ impl Render for NetworkDetailPage {
                     this.update(cx, |p, cx| p.set_tab(TABS[ix], window, cx))
                         .ok();
                 },
-                window,
                 cx,
             ))
             .child(

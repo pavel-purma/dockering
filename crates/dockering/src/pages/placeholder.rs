@@ -46,7 +46,7 @@ impl PageView for PlaceholderPage {
 }
 
 impl Render for PlaceholderPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id("placeholder-page")
             .size_full()

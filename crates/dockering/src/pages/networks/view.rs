@@ -433,11 +433,7 @@ impl NetworksPage {
         }
     }
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let res = self.store.read(cx).resource(Collection::Networks);
         let count = self.networks(cx).len();
         let this = cx.entity().downgrade();
@@ -447,7 +443,6 @@ impl NetworksPage {
             move |window, cx| {
                 this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
             },
-            window,
             cx,
         )
         .on_bounds({
@@ -502,8 +497,8 @@ impl PageView for NetworksPage {
 impl RoutedPage for NetworksPage {}
 
 impl Render for NetworksPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let res = self.store.read(cx).resource(Collection::Networks);
         let has_data = self.store.read(cx).networks.data().is_some();
         let body = chrome::list_body(

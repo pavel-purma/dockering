@@ -403,7 +403,6 @@ fn engine_row(
     this: &SettingsPage,
     e: &EngineStatus,
     merged: &[(EngineId, String)],
-    window: &Window,
     cx: &App,
 ) -> AnyElement {
     let id = e.id();
@@ -417,7 +416,6 @@ fn engine_row(
     let testing = matches!(test, Some(TestState::Running));
     let name_input = this.engines.name_inputs.get(id).cloned();
     let nav = this.focus.clone();
-    let _ = window;
 
     let header = h_flex()
         .gap_2()
@@ -619,11 +617,7 @@ fn engine_row(
 }
 
 /// The section's content blocks (one per engine, so the focused one scrolls into view).
-pub(super) fn blocks(
-    this: &mut SettingsPage,
-    window: &mut Window,
-    cx: &mut Context<SettingsPage>,
-) -> Vec<AnyElement> {
+pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> Vec<AnyElement> {
     let rescanning = this.engines.rescanning;
     let discovery = crate::ui::section(
         s::ENGINES_DISCOVERY,
@@ -664,7 +658,6 @@ pub(super) fn blocks(
                             .label(s::ADD_ENGINE)
                             .on_click(super::dispatch_here(&this.focus, AddEngine)),
                         |_, w, cx| w.dispatch_action(Box::new(AddEngine), cx),
-                        window,
                         cx,
                     )),
             ),
@@ -686,7 +679,7 @@ pub(super) fn blocks(
         );
     }
     for (e, m) in engines.iter().zip(merged.iter()) {
-        out.push(engine_row(this, e, m, window, cx));
+        out.push(engine_row(this, e, m, cx));
     }
     out
 }

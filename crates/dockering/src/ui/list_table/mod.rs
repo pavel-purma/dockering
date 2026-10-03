@@ -120,14 +120,13 @@ pub trait ListDelegate: 'static {
 
     fn columns(&self) -> Vec<ColumnSpec>;
 
-    /// Renders one cell. `row_ix` lets cells build element ids.
+    /// Renders one cell. `row_ix` lets cells build element ids. The `select` column is
+    /// rendered by the table itself.
     fn render_cell(
         &self,
         row: &ListRow<Self::Group, Self::Item>,
         row_ix: usize,
         col: &ColumnSpec,
-        selected: bool,
-        window: &mut Window,
         cx: &mut App,
     ) -> AnyElement;
 
@@ -135,20 +134,13 @@ pub trait ListDelegate: 'static {
     fn row_text(&self, row: &ListRow<Self::Group, Self::Item>) -> String;
 
     /// The row context menu (KBD-036). Items dispatch [`OnRow`] actions.
-    fn context_menu(
-        &self,
-        row: &ListRow<Self::Group, Self::Item>,
-        menu: PopupMenu,
-        window: &Window,
-        cx: &App,
-    ) -> PopupMenu {
-        let _ = (row, window, cx);
+    fn context_menu(&self, row: &ListRow<Self::Group, Self::Item>, menu: PopupMenu) -> PopupMenu {
+        let _ = row;
         menu
     }
 
     /// Rendered when there are no rows.
-    fn render_empty(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let _ = window;
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         div()
             .size_full()
             .flex()
@@ -396,17 +388,16 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
     fn render_tr(
         &mut self,
         row_ix: usize,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let key = self.model.row(row_ix).map(|r| r.key.clone());
         // The pinned cell (also reserves its width on the filler rows below the data).
         let pinned = self.pinned.as_ref().map(|col| {
-            let cell = self.model.row(row_ix).map(|row| {
-                let selected = self.model.row_selected(row);
-                self.delegate
-                    .render_cell(row, row_ix, col, selected, window, cx)
-            });
+            let cell = self
+                .model
+                .row(row_ix)
+                .map(|row| self.delegate.render_cell(row, row_ix, col, cx));
             (col.width, cell)
         });
         div()
@@ -452,7 +443,7 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         &mut self,
         row_ix: usize,
         col_ix: usize,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let (Some(row), Some(col)) = (self.model.row(row_ix), self.columns.get(col_ix)) else {
@@ -472,10 +463,7 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
             .when(is_cursor, move |this| {
                 this.on_bounds(move |b, _, _| slot.set(Some(b)))
             })
-            .child(
-                self.delegate
-                    .render_cell(row, row_ix, col, selected, window, cx),
-            )
+            .child(self.delegate.render_cell(row, row_ix, col, cx))
             .into_any_element()
     }
 
@@ -483,21 +471,21 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         &mut self,
         row_ix: usize,
         menu: PopupMenu,
-        window: &mut Window,
-        cx: &mut Context<TableState<Self>>,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
     ) -> PopupMenu {
         match self.model.row(row_ix) {
-            Some(row) => self.delegate.context_menu(row, menu, window, cx),
+            Some(row) => self.delegate.context_menu(row, menu),
             None => menu,
         }
     }
 
     fn render_empty(
         &mut self,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        self.delegate.render_empty(window, cx)
+        self.delegate.render_empty(cx)
     }
 
     fn loading(&self, _: &App) -> bool {
@@ -779,8 +767,7 @@ impl<D: ListDelegate> ListTable<D> {
         });
     }
 
-    fn open_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let _ = window;
+    fn open_row(&mut self, ix: usize, cx: &mut Context<Self>) {
         let Some(row) = self.model(cx).row(ix).cloned() else {
             return;
         };
@@ -869,9 +856,9 @@ impl<D: ListDelegate> ListTable<D> {
         }
     }
 
-    fn on_open(&mut self, _: &list::OpenDetail, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_open(&mut self, _: &list::OpenDetail, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.model(cx).cursor_ix() {
-            self.open_row(ix, window, cx);
+            self.open_row(ix, cx);
         }
     }
 
@@ -997,12 +984,12 @@ impl<D: ListDelegate> ListTable<D> {
         self.update_model(cx, |m| m.set_cursor(Some(key)));
     }
 
-    fn on_row(&mut self, action: &OnRow, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_row(&mut self, action: &OnRow, _: &mut Window, cx: &mut Context<Self>) {
         self.focus_row(&action.row, cx);
         match action.action {
             RowCommand::Open => {
                 if let Some(ix) = self.model(cx).cursor_ix() {
-                    self.open_row(ix, window, cx);
+                    self.open_row(ix, cx);
                 }
             }
             RowCommand::ToggleGroup => {
@@ -1121,10 +1108,7 @@ impl<D: ListDelegate> ListTable<D> {
             table_focus,
             window,
             cx,
-            move |menu, window, cx| {
-                let t = table.read(cx);
-                t.delegate().delegate.context_menu(&row, menu, window, cx)
-            },
+            move |menu, _, cx| table.read(cx).delegate().delegate.context_menu(&row, menu),
             |this: &mut Self, _| this.key_menu = None,
         ));
         cx.notify();
@@ -1142,7 +1126,7 @@ impl<D: ListDelegate> Focusable for ListTable<D> {
 }
 
 impl<D: ListDelegate> Render for ListTable<D> {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Report visible-row changes that happened during the last table render.
         let visible = self
             .table

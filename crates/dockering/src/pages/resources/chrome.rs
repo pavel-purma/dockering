@@ -43,7 +43,6 @@ pub fn filter_segment(
     focus: &FocusHandle,
     options: &'static [(&'static str, &'static str)],
     current: &'static str,
-    _window: &Window,
     cx: &App,
 ) -> AnyElement {
     div()
@@ -99,7 +98,6 @@ pub fn header_button(
     focus: &FocusHandle,
     button: Button,
     action: Box<dyn Action>,
-    window: &Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     let on_key = action.boxed_clone();
@@ -108,7 +106,6 @@ pub fn header_button(
         focus,
         button.on_click(move |_, window, cx| window.dispatch_action(action.boxed_clone(), cx)),
         move |_, window, cx| window.dispatch_action(on_key.boxed_clone(), cx),
-        window,
         cx,
     )
 }
@@ -118,7 +115,6 @@ pub fn overflow_trigger(
     id: &'static str,
     focus: &FocusHandle,
     on_activate: impl Fn(&mut Window, &mut App) + Clone + 'static,
-    window: &Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     let click = on_activate.clone();
@@ -132,7 +128,6 @@ pub fn overflow_trigger(
             .tooltip(s::MORE_ACTIONS)
             .on_click(move |_, window, cx| click(window, cx)),
         move |_, window, cx| on_activate(window, cx),
-        window,
         cx,
     )
 }

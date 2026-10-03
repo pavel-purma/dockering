@@ -426,7 +426,7 @@ impl SettingsPage {
         setting_row(title, Some(desc), ctl, None, cx)
     }
 
-    fn blocks_for(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn blocks_for(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         use SettingsSection as S;
         match self.section {
             S::General => vec![
@@ -560,8 +560,8 @@ impl SettingsPage {
                 ],
                 cx,
             )],
-            S::Diagnostics => diagnostics::blocks(self, window, cx),
-            S::Engines => engines::blocks(self, window, cx),
+            S::Diagnostics => diagnostics::blocks(self, cx),
+            S::Engines => engines::blocks(self, cx),
             S::Keyboard => vec![
                 div()
                     .text_sm()
@@ -707,7 +707,7 @@ const CONTENT_MAX_W: gpui_kit::Pixels = px(900.);
 impl Render for SettingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.engines.sync_name_inputs(&self.engine_list, window, cx);
-        let blocks = self.blocks_for(window, cx);
+        let blocks = self.blocks_for(cx);
         while self.blocks.len() < blocks.len() {
             self.blocks.push(cx.focus_handle());
         }

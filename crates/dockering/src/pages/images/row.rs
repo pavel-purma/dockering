@@ -7,7 +7,7 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, SharedString, Window, div};
+use gpui_kit::{AnyElement, App, IntoElement, SharedString, div};
 
 use super::model::{ImageRow, sort_keys};
 use crate::actions::res::RunRow;
@@ -77,8 +77,6 @@ impl ListDelegate for ImagesDelegate {
         row: &ListRow<(), ImageRow>,
         row_ix: usize,
         column: &ColumnSpec,
-        _selected: bool,
-        _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
         let RowKind::Item(r) = &row.kind else {
@@ -157,13 +155,7 @@ impl ListDelegate for ImagesDelegate {
         }
     }
 
-    fn context_menu(
-        &self,
-        row: &ListRow<(), ImageRow>,
-        menu: PopupMenu,
-        _window: &Window,
-        _cx: &App,
-    ) -> PopupMenu {
+    fn context_menu(&self, row: &ListRow<(), ImageRow>, menu: PopupMenu) -> PopupMenu {
         let key = row.key.clone();
         let ro = self.read_only;
         let lk = ctx::LIST_KEYS;
@@ -201,7 +193,7 @@ impl ListDelegate for ImagesDelegate {
         )
     }
 
-    fn render_empty(&self, _window: &mut Window, cx: &mut App) -> AnyElement {
+    fn render_empty(&self, cx: &mut App) -> AnyElement {
         if self.filtered_out {
             return crate::ui::empty_state(IconName::Search, s::NO_MATCHING_IMAGES, "", None, cx);
         }

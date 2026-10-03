@@ -644,11 +644,7 @@ impl ImagesPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_toolbar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let res = self.store.read(cx).resource(Collection::Images);
         let (count, size) = model::totals(self.images(cx));
         let ro = self.read_only(cx);
@@ -659,7 +655,6 @@ impl ImagesPage {
                 &self.filter_focus,
                 ImageFilter::OPTIONS,
                 self.filter.as_str(),
-                window,
                 cx,
             ),
             chrome::header_button(
@@ -677,7 +672,6 @@ impl ImagesPage {
                         ctx::LIST_KEYS,
                     )),
                 Box::new(image::Pull),
-                window,
                 cx,
             )
             .debug_selector(|| "pull-image-trigger".into())
@@ -689,7 +683,6 @@ impl ImagesPage {
             move |window, cx| {
                 this.update(cx, |p, cx| p.on_overflow(window, cx)).ok();
             },
-            window,
             cx,
         )
         .on_bounds({
@@ -743,8 +736,8 @@ impl PageView for ImagesPage {
 impl RoutedPage for ImagesPage {}
 
 impl Render for ImagesPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let toolbar = self.render_toolbar(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let toolbar = self.render_toolbar(cx);
         let res = self.store.read(cx).resource(Collection::Images);
         let has_data = self.store.read(cx).images.data().is_some();
         let body = chrome::list_body(

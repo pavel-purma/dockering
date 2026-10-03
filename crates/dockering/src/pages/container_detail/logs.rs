@@ -267,7 +267,7 @@ impl LogsView {
         self.max_lines = n.max(1);
     }
 
-    pub fn set_visible(&mut self, visible: bool, _cx: &mut Context<Self>) {
+    pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
     }
 
@@ -797,7 +797,7 @@ impl LogsView {
             .into_any_element()
     }
 
-    fn render_lines(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_lines(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme();
         let mono = theme.mono_font_family.clone();
         let fg = theme.foreground;
@@ -815,7 +815,7 @@ impl LogsView {
             .current_match
             .and_then(|m| self.matches.get(m))
             .copied();
-        let lines = list(self.list.clone(), move |ix, _window, cx| {
+        let lines = list(self.list.clone(), move |ix, _, cx| {
             let Some(view) = view.upgrade() else {
                 return div().into_any_element();
             };
@@ -1055,9 +1055,9 @@ impl Focusable for LogsView {
 }
 
 impl Render for LogsView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let toolbar = self.render_toolbar(cx);
-        let body = self.render_lines(window, cx);
+        let body = self.render_lines(cx);
         let footer = self.render_footer(cx);
         let theme = cx.theme();
         let following = self.list.is_following_tail();

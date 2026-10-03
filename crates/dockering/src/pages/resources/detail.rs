@@ -112,7 +112,6 @@ pub fn tab_bar_frame(
     key_context: &str,
     focus: &FocusHandle,
     bar: TabBar,
-    _window: &Window,
     cx: &App,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     div()
@@ -131,13 +130,12 @@ pub fn tab_bar(
     tabs: Vec<TabSpec>,
     selected: usize,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
-    window: &Window,
     cx: &App,
 ) -> AnyElement {
     let bar = segmented_tabs("detail-tab-bar", tabs, selected, move |ix, window, cx| {
         on_select(*ix, window, cx)
     });
-    tab_bar_frame("detail-tabs", ctx::DETAIL_TABS, focus, bar, window, cx).into_any_element()
+    tab_bar_frame("detail-tabs", ctx::DETAIL_TABS, focus, bar, cx).into_any_element()
 }
 
 /// Next enabled tab index after `current` in direction `dir` (wraps).
@@ -166,7 +164,6 @@ pub fn header(
     title: impl Into<SharedString>,
     chips: Vec<AnyElement>,
     actions: Vec<AnyElement>,
-    _window: &Window,
     cx: &App,
 ) -> AnyElement {
     h_flex()
@@ -508,7 +505,7 @@ impl Focusable for InspectView {
 }
 
 impl Render for InspectView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let this = cx.entity().downgrade();
         let this2 = this.clone();
         v_flex()
@@ -530,7 +527,6 @@ impl Render for InspectView {
                     move |_, window, cx| {
                         this2.update(cx, |v, cx| v.copy(window, cx)).ok();
                     },
-                    window,
                     cx,
                 )),
             )

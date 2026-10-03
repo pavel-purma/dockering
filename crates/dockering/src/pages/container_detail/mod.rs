@@ -245,7 +245,7 @@ impl ContainerDetailPage {
             st.update(cx, |t, cx| t.set_visible(tab == ContainerTab::Stats, cx));
         }
         if let Some(t) = &self.tabs.logs {
-            t.update(cx, |t, cx| t.set_visible(tab == ContainerTab::Logs, cx));
+            t.update(cx, |t, _| t.set_visible(tab == ContainerTab::Logs));
         }
     }
 
@@ -588,7 +588,7 @@ impl ContainerDetailPage {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_header(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_header(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let summary = self.summary(cx);
         let removed = self.is_removed(cx);
         let ro = self.read_only(cx);
@@ -642,7 +642,6 @@ impl ContainerDetailPage {
                     .tooltip(s::OPEN_IMAGE)
                     .on_click(move |_, w, cx| w.dispatch_action(Box::new(nav.clone()), cx)),
                 move |_, w, cx| w.dispatch_action(Box::new(nav2.clone()), cx),
-                window,
                 cx,
             )
         });
@@ -679,7 +678,6 @@ impl ContainerDetailPage {
                     )
                 }),
             |_, w, cx| w.dispatch_action(Box::new(list::CopyId), cx),
-            window,
             cx,
         );
         let action_btn = |id: &'static str,
@@ -749,7 +747,6 @@ impl ContainerDetailPage {
                             this.update(cx, |p, cx| p.open_more_menu(w, cx)).ok();
                         }
                     },
-                    window,
                     cx,
                 )
                 .on_bounds({
@@ -856,7 +853,7 @@ impl ContainerDetailPage {
             .into_any_element()
     }
 
-    fn render_tab_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_tab_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let selected = ContainerTab::ALL
             .iter()
             .position(|t| *t == self.tab)
@@ -887,7 +884,6 @@ impl ContainerDetailPage {
             &format!("{} {}", ctx::DETAIL_HEADER, ctx::DETAIL_TABS),
             &self.tab_bar_focus,
             bar,
-            window,
             cx,
         )
         .into_any_element()
@@ -985,9 +981,9 @@ impl PageView for ContainerDetailPage {
 }
 
 impl Render for ContainerDetailPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let header = self.render_header(window, cx);
-        let tab_bar = self.render_tab_bar(window, cx);
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let header = self.render_header(cx);
+        let tab_bar = self.render_tab_bar(cx);
         let body = self.render_body(cx);
         v_flex()
             .id("container-detail")

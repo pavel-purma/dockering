@@ -645,7 +645,6 @@ impl Render for ImageDetailPage {
                     ),
                     header_action("img-delete", s::DELETE, None, Box::new(list::Delete), ro),
                 ],
-                window,
                 cx,
             ))
             .when(gone, |this| {
@@ -663,7 +662,6 @@ impl Render for ImageDetailPage {
                     })
                     .ok();
                 },
-                window,
                 cx,
             ))
             .child(

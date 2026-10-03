@@ -264,7 +264,6 @@ impl Render for CreateVolumeDialog {
                 move |window, cx| {
                     this.update(cx, |d, cx| d.submit(window, cx)).ok();
                 },
-                window,
                 cx,
             ))
     }

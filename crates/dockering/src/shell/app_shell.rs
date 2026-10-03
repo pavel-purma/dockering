@@ -1152,11 +1152,7 @@ impl AppShell {
 
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
-    fn render_title_bar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_title_bar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let status = self.active_status(cx);
         let name: SharedString = status
             .as_ref()
@@ -1318,7 +1314,6 @@ impl AppShell {
                                                 .ok();
                                             }
                                         },
-                                        window,
                                         cx,
                                     )
                                     .on_bounds({
@@ -1430,11 +1425,7 @@ impl AppShell {
             .into_any_element()
     }
 
-    fn render_status_bar(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn render_status_bar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let status = self.active_status(cx);
         let info = self
             .store
@@ -1561,11 +1552,7 @@ impl AppShell {
         .into_any_element()
     }
 
-    fn render_overlay(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<gpui_kit::AnyElement> {
+    fn render_overlay(&mut self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
         let panel = |child: gpui_kit::AnyElement, width: f32, cx: &App| {
             gpui_kit::deferred(
                 div()
@@ -1610,7 +1597,7 @@ impl AppShell {
                 on_detail: self.history.current().is_detail(),
             };
             let shell = cx.entity().downgrade();
-            let el = palette::element(state, ctx, self.store.as_ref(), window, cx)
+            let el = palette::element(state, ctx, self.store.as_ref(), cx)
                 // The item's action was dispatched; close (and restore focus unless the
                 // action moved it, e.g. navigation).
                 .on_confirm(move |_, window, cx| {
@@ -1661,11 +1648,11 @@ impl Render for AppShell {
         } else {
             self.ensure_focus_rendered(window, cx);
         }
-        let title = self.render_title_bar(window, cx);
+        let title = self.render_title_bar(cx);
         let sidebar = self.render_sidebar(window, cx);
         let content = self.render_content(cx);
-        let status = self.render_status_bar(window, cx);
-        let overlay = self.render_overlay(window, cx);
+        let status = self.render_status_bar(cx);
+        let overlay = self.render_overlay(cx);
         // Palette confirm closes the palette (the item action was already dispatched).
         if let Some(state) = self.palette.clone()
             && !state.focus_handle(cx).contains_focused(window, cx)
