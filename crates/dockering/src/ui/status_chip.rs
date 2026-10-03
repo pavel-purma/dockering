@@ -93,6 +93,36 @@ pub fn health_chip(health: Health) -> impl IntoElement {
         .child(health.label())
 }
 
+/// Docker's status text without the health suffix (`Up 2 hours (healthy)` → `Up 2 hours`),
+/// for places that already show the [`health_chip`].
+pub fn status_without_health(text: &str) -> &str {
+    if let Some(i) = text.rfind(" (") {
+        let tail = &text[i + 2..];
+        if tail.ends_with(')') && tail.contains("health") {
+            return text[..i].trim_end();
+        }
+    }
+    text
+}
+
+/// A soft, chalk-like tint for the start (green) and stop (red) action icons: desaturated
+/// pastel in the dark theme, a muted mid tone in the light theme (still ≥ 3:1 for icons).
+pub fn chalk(tone: Tone, cx: &App) -> Hsla {
+    let dark = cx.theme().is_dark();
+    let hue = match tone {
+        Tone::Success => 150.,
+        Tone::Danger => 0.,
+        Tone::Warning => 40.,
+        Tone::Info => 200.,
+        Tone::Neutral => return cx.theme().muted_foreground,
+    };
+    if dark {
+        gpui_kit::hsla(hue / 360., 0.38, 0.72, 1.)
+    } else {
+        gpui_kit::hsla(hue / 360., 0.32, 0.44, 1.)
+    }
+}
+
 /// Status dot colour for engines (ENG-100): green connected, amber connecting/degraded,
 /// red failed, grey disabled/stopped/unsupported.
 pub fn engine_dot_color(state: &EngineState, cx: &App) -> Hsla {
@@ -129,6 +159,24 @@ pub fn dot(color: Hsla) -> gpui_kit::Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_suffix_is_dropped_next_to_the_chip() {
+        assert_eq!(status_without_health("Up 2 hours (healthy)"), "Up 2 hours");
+        assert_eq!(status_without_health("Up 5 s (health: starting)"), "Up 5 s");
+        assert_eq!(
+            status_without_health("Up 1 minute (unhealthy)"),
+            "Up 1 minute"
+        );
+        assert_eq!(
+            status_without_health("Up 2 hours (Paused)"),
+            "Up 2 hours (Paused)"
+        );
+        assert_eq!(
+            status_without_health("Exited (1) 3 min ago"),
+            "Exited (1) 3 min ago"
+        );
+    }
 
     #[test]
     fn engine_labels_cover_all_states() {

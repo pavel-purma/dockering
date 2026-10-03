@@ -8,7 +8,7 @@
 
 | ID | Requirement |
 |---|---|
-| IMG-001 | List columns: ☐ · Name (repository) · Tag · Image ID (short) · Created (relative) · Size · Status (*In use* chip if containers > 0) · Actions (Run, `⋮`; Delete is in the `⋮` menu, SHL-026). An image with N tags shows as N rows, as Docker Desktop does. Dangling images show as `<none>`. |
+| IMG-001 | List columns: ☐ · Name (repository) · Tag · Image ID (short) · Size · Status (*In use* chip if containers > 0) · Created (relative) · Actions (Run — chalk-green play icon, filled on hover — `⋮`; Delete is in the `⋮` menu, SHL-026). An image with N tags shows as N rows, as Docker Desktop does. Dangling images show as `<none>`. |
 | IMG-002 | Sort by name, tag, created, or size. Filter: *All* / *In use* / *Unused* / *Dangling*. Search over repo:tag and id. |
 | IMG-003 | The header shows the total size and the count (distinct images). Overflow: *Prune dangling*, *Prune unused*. The confirmation lists the candidates and the reclaimable size: for *Prune unused* on engines with `DISK_USAGE`, it comes from `disk_usage()`. Without `DISK_USAGE`, for *Prune dangling*, or when the `disk_usage` call fails, it falls back to the sum of the candidates' sizes. |
 | IMG-004 | *Pull image* dialog: reference input (`nginx:latest`). The pull runs in an app-wide `PullManager`, so closing the dialog or leaving the page never cancels it. Progress is shown as one notification per pull, updated in place at most every 100 ms, with per-layer bars (structured when `PULL_PROGRESS`, otherwise a status line). Cancellable from the notification; cancel drops the stream, which cancels the pull on the hub. |

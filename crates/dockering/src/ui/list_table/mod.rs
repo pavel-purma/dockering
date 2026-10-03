@@ -46,6 +46,8 @@ use crate::ui::menu::{KeyMenu, MenuAnchor, TrackBounds as _};
 
 /// Key of the leading checkbox column; its header renders a select-all checkbox.
 pub const SELECT_COLUMN: &str = "select";
+/// Extra left inset of the row and header checkboxes inside the select column.
+const CHECKBOX_INSET: Pixels = px(6.);
 
 /// A column definition.
 #[derive(Debug, Clone)]
@@ -59,6 +61,9 @@ pub struct ColumnSpec {
     pub right: bool,
     /// Pinned to the right edge of the table, outside the horizontal scroll (at most one).
     pub pinned_right: bool,
+    /// Pinned to the left edge, outside the horizontal scroll (GPUI Kit fixed column).
+    /// Pinned-left columns must come first.
+    pub pinned_left: bool,
 }
 
 impl ColumnSpec {
@@ -72,6 +77,7 @@ impl ColumnSpec {
             resizable: true,
             right: false,
             pinned_right: false,
+            pinned_left: false,
         }
     }
     pub fn sortable(mut self) -> Self {
@@ -84,6 +90,11 @@ impl ColumnSpec {
     }
     pub fn right(mut self) -> Self {
         self.right = true;
+        self
+    }
+    /// Pin to the left edge, always visible while the other columns scroll.
+    pub fn pin_left(mut self) -> Self {
+        self.pinned_left = true;
         self
     }
     /// Pin to the right edge, always visible (implies a fixed width).
@@ -111,6 +122,14 @@ fn split_pinned(columns: Vec<ColumnSpec>) -> (Vec<ColumnSpec>, Option<ColumnSpec
         })
         .collect();
     (rest, pinned)
+}
+
+/// The `UiState.column_widths` entry for a table: widths are saved by position, so the key
+/// carries the column order and a reordered or changed column set starts from defaults
+/// instead of applying widths to the wrong columns.
+fn widths_storage_key(base: &str, columns: &[ColumnSpec]) -> String {
+    let keys: Vec<&str> = columns.iter().map(|c| c.key).collect();
+    format!("{base}[{}]", keys.join(","))
 }
 
 /// Supplied by the page: rendering and row text. `G` = group payload, `I` = item payload.
@@ -228,6 +247,7 @@ impl<D: ListDelegate> Adapter<D> {
         h_flex()
             .size_full()
             .items_center()
+            .pl(CHECKBOX_INSET)
             .child(
                 Checkbox::new(("row-check", row_ix))
                     .debug_selector(move || format!("row-check-{row_ix}"))
@@ -285,6 +305,9 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         if spec.right {
             c = c.text_right();
         }
+        if spec.pinned_left {
+            c = c.fixed_left();
+        }
         c
     }
 
@@ -337,7 +360,7 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         let all = !keys.is_empty() && keys.iter().all(|k| self.model.is_selected(k));
         let any = !self.model.selected().is_empty();
         let table = cx.entity().downgrade();
-        Checkbox::new("select-all")
+        let checkbox = Checkbox::new("select-all")
             .debug_selector(|| "select-all".into())
             .checked(all)
             .tooltip(s::CMD_SELECT_ALL)
@@ -357,7 +380,12 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
                         cx.notify();
                     })
                     .ok();
-            })
+            });
+        h_flex()
+            .size_full()
+            .items_center()
+            .pl(CHECKBOX_INSET)
+            .child(checkbox)
             .into_any_element()
     }
 
@@ -392,6 +420,7 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         cx: &mut Context<TableState<Self>>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let key = self.model.row(row_ix).map(|r| r.key.clone());
+        let is_group = self.model.row(row_ix).is_some_and(|r| r.is_group());
         // The pinned cell (also reserves its width on the filler rows below the data).
         let pinned = self.pinned.as_ref().map(|col| {
             let cell = self
@@ -403,6 +432,25 @@ impl<D: ListDelegate> TableDelegate for Adapter<D> {
         div()
             .id(("row", row_ix))
             .cursor_pointer()
+            // Group rows read as headers of their members (CON-011): a tinted band with an
+            // accent stripe on the left edge. The cursor row's highlight still wins.
+            .when(is_group, |this| {
+                let dark = cx.theme().is_dark();
+                this.relative()
+                    .bg(cx
+                        .theme()
+                        .foreground
+                        .opacity(if dark { 0.05 } else { 0.035 }))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(px(3.))
+                            .bg(crate::theme::accent().opacity(0.7)),
+                    )
+            })
             .when_some(pinned, |this, (width, cell)| {
                 this.pr(width).relative().when_some(cell, |this, cell| {
                     this.child(
@@ -547,14 +595,10 @@ impl<D: ListDelegate> ListTable<D> {
             && cx.try_global::<AppState>().is_some()
         {
             // Widths are saved for the table's columns (the pinned one isn't resizable).
-            let mut saved = AppState::ui_state(cx).column_widths.get(key).cloned();
-            // Widths saved before the column was pinned still include it as the last entry.
-            if let Some(w) = saved.as_mut()
-                && pinned.is_some()
-                && w.len() == columns.len() + 1
-            {
-                w.pop();
-            }
+            let saved = AppState::ui_state(cx)
+                .column_widths
+                .get(&widths_storage_key(key, &columns))
+                .cloned();
             if let Some(saved) = saved
                 && saved.len() == columns.len()
             {
@@ -718,7 +762,8 @@ impl<D: ListDelegate> ListTable<D> {
             }
             TableEvent::ColumnWidthsChanged(widths) => {
                 let widths: Vec<f32> = widths.iter().map(|w| w.as_f32()).collect();
-                if let Some(key) = self.widths_key.clone() {
+                if let Some(base) = self.widths_key.clone() {
+                    let key = widths_storage_key(&base, &self.table.read(cx).delegate().columns);
                     let w = widths.clone();
                     AppState::update_ui_state(cx, move |s| {
                         s.column_widths.insert(key, w);
@@ -1218,5 +1263,16 @@ mod tests {
         assert!(!pinned.resizable);
         let keys: Vec<_> = cols.iter().map(|c| c.key).collect();
         assert_eq!(keys, ["name", "created"]);
+    }
+
+    #[test]
+    fn con_002_widths_key_tracks_column_order() {
+        let a = [
+            ColumnSpec::new("name", "Name", 200.),
+            ColumnSpec::new("created", "Created", 100.),
+        ];
+        let b = [a[1].clone(), a[0].clone()];
+        assert_eq!(widths_storage_key("t", &a), "t[name,created]");
+        assert_ne!(widths_storage_key("t", &a), widths_storage_key("t", &b));
     }
 }

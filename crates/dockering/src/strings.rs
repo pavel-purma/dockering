@@ -133,6 +133,7 @@ pub const COL_STATUS: &str = "Status";
 pub const COL_CPU: &str = "CPU %";
 pub const COL_MEMORY: &str = "Memory";
 pub const COL_PORTS: &str = "Port(s)";
+pub const ALL_PORTS: &str = "All ports";
 pub const COL_CREATED: &str = "Created";
 pub const COL_ACTIONS: &str = "Actions";
 pub const FILTER_ALL: &str = "All";
@@ -173,9 +174,6 @@ pub const KEEP_NETWORKS_NOTE: &str =
     "Project networks and volumes are kept. Use `docker compose down` to remove them.";
 pub fn containers_counts(running: usize, stopped: usize) -> String {
     format!("{running} running · {stopped} stopped")
-}
-pub fn group_running(running: usize, total: usize) -> String {
-    format!("{running}/{total} running")
 }
 pub fn confirm_delete_title(n: usize) -> String {
     if n == 1 {
@@ -375,6 +373,14 @@ pub fn in_use_by(n: usize) -> String {
         "In use by 1 container".to_owned()
     } else {
         format!("In use by {n} containers")
+    }
+}
+/// The text after an *In use* pill: `by 2 containers`.
+pub fn by_containers(n: usize) -> String {
+    if n == 1 {
+        "by 1 container".to_owned()
+    } else {
+        format!("by {n} containers")
     }
 }
 pub fn resource_gone(kind: &str) -> String {

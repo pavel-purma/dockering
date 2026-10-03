@@ -14,10 +14,9 @@ use crate::actions::res::RunRow;
 use crate::actions::{OnRow, RowCommand, image, list};
 use crate::assets::Lucide;
 use crate::keymap::ctx;
-use crate::pages::resources::chrome::{
-    hinted, mono_cell, name_cell, row_button, row_menu_button, text_cell,
-};
+use crate::pages::resources::chrome::{hinted, mono_cell, name_cell, row_menu_button, text_cell};
 use crate::strings as s;
+use crate::ui::action_icons::{StateIcon, state_button};
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
 use crate::ui::status_chip::{Tone, tone_tag};
 use crate::ui::widgets::{copy_id, relative_time};
@@ -35,15 +34,17 @@ pub mod col {
 
 pub fn columns() -> Vec<ColumnSpec> {
     vec![
-        ColumnSpec::new(col::SELECT, "", 36.).fixed(),
-        ColumnSpec::new(col::NAME, s::COL_NAME, 240.).sortable(),
+        ColumnSpec::new(col::SELECT, "", 42.).fixed().pin_left(),
+        ColumnSpec::new(col::NAME, s::COL_NAME, 240.)
+            .sortable()
+            .pin_left(),
         ColumnSpec::new(col::TAG, s::COL_TAG, 120.).sortable(),
         ColumnSpec::new(col::ID, s::COL_IMAGE_ID, 140.),
-        ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable(),
         ColumnSpec::new(col::SIZE, s::COL_SIZE, 90.)
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 90.),
+        ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable(),
         ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 90.).pin_right(),
     ]
 }
@@ -131,12 +132,14 @@ impl ListDelegate for ImagesDelegate {
                 let key = row.key.clone();
                 h_flex()
                     .gap_0p5()
-                    .child(row_button(
+                    .child(state_button(
                         ("run", row_ix),
-                        IconName::Play,
+                        format!("row-run-{row_ix}"),
+                        StateIcon::Start,
                         s::RUN,
                         self.read_only,
                         Box::new(RunRow { row: key.clone() }),
+                        cx,
                     ))
                     .child(row_menu_button(
                         ("more", row_ix),

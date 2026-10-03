@@ -4,24 +4,25 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use dk_core::grouping::AggregateState;
 use dk_core::{Capabilities, ContainerState, ContainerSummary};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tag::Tag;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, IntoElement, SharedString, div, px};
+use gpui_kit::{Anchor, AnyElement, App, IntoElement, SharedString, div, px};
 
 use super::model::{GroupInfo, sort_keys};
-use crate::actions::{OnRow, RowCommand};
+use crate::actions::{OnRow, OpenUrl, RowCommand};
 use crate::assets::Lucide;
 use crate::pages::resources::chrome::{name_cell, row_menu_button};
 use crate::strings as s;
+use crate::ui::action_icons::{StateIcon, state_button};
 use crate::ui::list_table::{ColumnSpec, ListDelegate, ListRow, RowKind};
-use crate::ui::status_chip::{Tone, container_chip, health_chip, tone_tag};
-use crate::ui::widgets::{port_link, relative_time};
+use crate::ui::status_chip::{container_chip, health_chip, status_without_health};
+use crate::ui::widgets::{OverflowSet, port_link, port_url, relative_time};
 
 pub mod col {
     pub const SELECT: &str = crate::ui::list_table::SELECT_COLUMN;
@@ -29,7 +30,7 @@ pub mod col {
     pub const IMAGE: &str = super::sort_keys::IMAGE;
     pub const STATUS: &str = super::sort_keys::STATUS;
     pub const CPU: &str = super::sort_keys::CPU;
-    pub const MEM: &str = "mem";
+    pub const MEM: &str = super::sort_keys::MEM;
     pub const PORTS: &str = "ports";
     pub const CREATED: &str = super::sort_keys::CREATED;
     pub const ACTIONS: &str = "actions";
@@ -52,6 +53,8 @@ pub struct ContainersDelegate {
     pub visible: Range<usize>,
     pub has_images: bool,
     pub filtered_out: bool,
+    /// Image and port cells that don't fit their column (tooltip / ports dropdown).
+    pub overflow: OverflowSet,
 }
 
 impl ContainersDelegate {
@@ -65,10 +68,84 @@ impl ContainersDelegate {
             visible: 0..0,
             has_images: false,
             filtered_out: false,
+            overflow: OverflowSet::default(),
         }
     }
 
-    fn row_action_buttons(&self, row_ix: usize, c: &ContainerSummary) -> AnyElement {
+    /// The image name, truncated; the full value shows on hover when it doesn't fit.
+    fn image_cell(&self, row_ix: usize, c: &ContainerSummary) -> AnyElement {
+        let key: SharedString = format!("image:{}", c.id).into();
+        let image: SharedString = c.image.clone().into();
+        let truncated = self.overflow.contains(&key);
+        div()
+            .id(("image", row_ix))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .text_xs()
+            .truncate()
+            .child(image.clone())
+            .child(self.overflow.probe_text(key, image.clone()))
+            .when(truncated, |this| {
+                this.tooltip(move |window, cx| Tooltip::new(image.clone()).build(window, cx))
+            })
+            .into_any_element()
+    }
+
+    /// Port links on one line. When they don't all fit, a small chevron at the end opens a
+    /// menu listing every port, one per line (published ones open in the browser).
+    fn ports_cell(&self, row_ix: usize, c: &ContainerSummary, cx: &App) -> AnyElement {
+        let key: SharedString = format!("ports:{}", c.id).into();
+        let clipped = self.overflow.contains(&key);
+        let links = h_flex().gap_1().children(
+            c.ports
+                .iter()
+                .enumerate()
+                .map(|(i, p)| port_link(("port", row_ix * 64 + i), p, cx)),
+        );
+        let ports = c.ports.clone();
+        h_flex()
+            .size_full()
+            .gap_0p5()
+            .items_center()
+            .child(self.overflow.clip(key, links))
+            .when(clipped, |this| {
+                this.child(
+                    Button::new(("ports-more", row_ix))
+                        .ghost()
+                        .xsmall()
+                        .icon(IconName::ChevronDown)
+                        .tooltip(s::ALL_PORTS)
+                        .tab_stop(false)
+                        // The menu opens on mouse down; don't let the click open the row.
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+                            for p in &ports {
+                                let label = dk_core::format::format_port(p);
+                                let item = match port_url(p) {
+                                    Some(url) => {
+                                        let url: SharedString = url.into();
+                                        PopupMenuItem::new(format!("{label} ↗")).on_click(
+                                            move |_, window, cx| {
+                                                window.dispatch_action(
+                                                    Box::new(OpenUrl { url: url.clone() }),
+                                                    cx,
+                                                )
+                                            },
+                                        )
+                                    }
+                                    None => PopupMenuItem::new(label).disabled(true),
+                                };
+                                menu = menu.item(item);
+                            }
+                            menu.scrollable(true).max_h(px(320.))
+                        }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn row_action_buttons(&self, row_ix: usize, c: &ContainerSummary, cx: &App) -> AnyElement {
         if self.pending.contains(&c.id) {
             return Spinner::new().small().into_any_element();
         }
@@ -102,21 +179,28 @@ impl ContainersDelegate {
         // lives in the ⋮ menu and the selection actions.
         h_flex()
             .gap_0p5()
-            .child(if running {
-                btn(
-                    "stop",
-                    Lucide::Square.into(),
-                    s::ACTION_STOP,
-                    RowCommand::Stop,
-                    key.clone(),
-                )
-            } else {
-                btn(
-                    "start",
-                    IconName::Play.into(),
-                    s::ACTION_START,
-                    RowCommand::Start,
-                    key.clone(),
+            .child({
+                let (id, icon, tip, cmd) = if running {
+                    ("stop", StateIcon::Stop, s::ACTION_STOP, RowCommand::Stop)
+                } else {
+                    (
+                        "start",
+                        StateIcon::Start,
+                        s::ACTION_START,
+                        RowCommand::Start,
+                    )
+                };
+                state_button(
+                    (id, row_ix),
+                    format!("row-{id}-{row_ix}"),
+                    icon,
+                    tip,
+                    disabled,
+                    Box::new(OnRow {
+                        row: key.clone(),
+                        action: cmd,
+                    }),
+                    cx,
                 )
             })
             .child(
@@ -144,6 +228,7 @@ impl ContainersDelegate {
         row_ix: usize,
         key: &SharedString,
         info: &GroupInfo,
+        cx: &App,
     ) -> AnyElement {
         if info.members.iter().any(|m| self.pending.contains(&m.id)) {
             return Spinner::new().small().into_any_element();
@@ -177,19 +262,33 @@ impl ContainersDelegate {
         // partly running group and delete all are in the ⋮ menu).
         h_flex()
             .gap_0p5()
-            .child(if any_running {
-                btn(
-                    "g-stop",
-                    Lucide::Square.into(),
-                    s::ACTION_STOP_ALL,
-                    RowCommand::Stop,
-                )
-            } else {
-                btn(
-                    "g-start",
-                    IconName::Play.into(),
-                    s::ACTION_START_ALL,
-                    RowCommand::Start,
+            .child({
+                let (id, icon, tip, cmd) = if any_running {
+                    (
+                        "g-stop",
+                        StateIcon::Stop,
+                        s::ACTION_STOP_ALL,
+                        RowCommand::Stop,
+                    )
+                } else {
+                    (
+                        "g-start",
+                        StateIcon::Start,
+                        s::ACTION_START_ALL,
+                        RowCommand::Start,
+                    )
+                };
+                state_button(
+                    (id, row_ix),
+                    format!("row-{id}-{row_ix}"),
+                    icon,
+                    tip,
+                    disabled,
+                    Box::new(OnRow {
+                        row: key.clone(),
+                        action: cmd,
+                    }),
+                    cx,
                 )
             })
             .child(btn(
@@ -209,13 +308,17 @@ impl ContainersDelegate {
     }
 }
 
-/// Column specs (CON-002). CPU/Mem only when enabled and supported (STA-006).
+/// Column specs (CON-002). CPU/Mem only when enabled and supported (STA-006). *Created* is
+/// the last data column, as on every list.
 pub fn columns(show_stats: bool) -> Vec<ColumnSpec> {
     let mut v = vec![
-        ColumnSpec::new(col::SELECT, "", 36.).fixed(),
-        ColumnSpec::new(col::NAME, s::COL_NAME, 260.).sortable(),
+        ColumnSpec::new(col::SELECT, "", 42.).fixed().pin_left(),
+        ColumnSpec::new(col::NAME, s::COL_NAME, 260.)
+            .sortable()
+            .pin_left(),
         ColumnSpec::new(col::IMAGE, s::COL_IMAGE, 180.).sortable(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 200.).sortable(),
+        ColumnSpec::new(col::PORTS, s::COL_PORTS, 150.),
     ];
     if show_stats {
         v.push(
@@ -223,9 +326,12 @@ pub fn columns(show_stats: bool) -> Vec<ColumnSpec> {
                 .sortable()
                 .right(),
         );
-        v.push(ColumnSpec::new(col::MEM, s::COL_MEMORY, 90.).right());
+        v.push(
+            ColumnSpec::new(col::MEM, s::COL_MEMORY, 90.)
+                .sortable()
+                .right(),
+        );
     }
-    v.push(ColumnSpec::new(col::PORTS, s::COL_PORTS, 150.));
     v.push(ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable());
     v.push(ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 110.).pin_right());
     v
@@ -268,7 +374,13 @@ impl ListDelegate for ContainersDelegate {
                             .text_color(muted),
                         )
                         .child(
+                            Icon::new(Lucide::Layers)
+                                .small()
+                                .text_color(cx.theme().foreground.opacity(0.7)),
+                        )
+                        .child(
                             div()
+                                .text_sm()
                                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .child(group.group.label.clone()),
                         )
@@ -282,15 +394,6 @@ impl ListDelegate for ContainersDelegate {
                             })
                         })
                         .into_any_element()
-                }
-                col::STATUS => {
-                    let a = group.group.aggregate;
-                    let tone = match a.state {
-                        AggregateState::Running => Tone::Success,
-                        AggregateState::Partial => Tone::Warning,
-                        AggregateState::Exited => Tone::Neutral,
-                    };
-                    tone_tag(tone, s::group_running(a.running, a.total)).into_any_element()
                 }
                 col::CPU if self.show_stats => {
                     let sum: f64 = group
@@ -314,7 +417,7 @@ impl ListDelegate for ContainersDelegate {
                         .child(dk_core::format::format_size(sum))
                         .into_any_element()
                 }
-                col::ACTIONS => self.group_action_buttons(row_ix, &row.key, group),
+                col::ACTIONS => self.group_action_buttons(row_ix, &row.key, group, cx),
                 _ => div().into_any_element(),
             },
             RowKind::Item(c) => match column.key {
@@ -337,24 +440,22 @@ impl ListDelegate for ContainersDelegate {
                         })
                         .into_any_element()
                 }
-                col::IMAGE => div()
-                    .text_xs()
-                    .truncate()
-                    .child(c.image.clone())
-                    .into_any_element(),
-                col::STATUS => h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(container_chip(c.state, c.exit_code))
-                    .when_some(c.health, |this, h| this.child(health_chip(h)))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(muted)
-                            .truncate()
-                            .child(c.status_text.clone()),
-                    )
-                    .into_any_element(),
+                col::IMAGE => self.image_cell(row_ix, c),
+                col::STATUS => {
+                    // The health chip already says "healthy"; don't repeat it in the text.
+                    let text = if c.health.is_some() {
+                        status_without_health(&c.status_text).to_owned()
+                    } else {
+                        c.status_text.clone()
+                    };
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(container_chip(c.state, c.exit_code))
+                        .when_some(c.health, |this, h| this.child(health_chip(h)))
+                        .child(div().text_xs().text_color(muted).truncate().child(text))
+                        .into_any_element()
+                }
                 col::CPU => div()
                     .text_xs()
                     .child(
@@ -373,23 +474,13 @@ impl ListDelegate for ContainersDelegate {
                             .unwrap_or_else(|| "—".into()),
                     )
                     .into_any_element(),
-                col::PORTS => h_flex()
-                    .gap_1()
-                    .overflow_hidden()
-                    .children(
-                        c.ports
-                            .iter()
-                            .enumerate()
-                            .take(3)
-                            .map(|(i, p)| port_link(("port", row_ix * 16 + i), p, cx)),
-                    )
-                    .into_any_element(),
+                col::PORTS => self.ports_cell(row_ix, c, cx),
                 col::CREATED => div()
                     .text_xs()
                     .text_color(muted)
                     .child(relative_time(c.created, cx))
                     .into_any_element(),
-                col::ACTIONS => self.row_action_buttons(row_ix, c),
+                col::ACTIONS => self.row_action_buttons(row_ix, c, cx),
                 _ => div().into_any_element(),
             },
         }

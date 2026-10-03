@@ -34,15 +34,17 @@ pub mod col {
 
 pub fn columns() -> Vec<ColumnSpec> {
     vec![
-        ColumnSpec::new(col::SELECT, "", 36.).fixed(),
-        ColumnSpec::new(col::NAME, s::COL_NAME, 280.).sortable(),
+        ColumnSpec::new(col::SELECT, "", 42.).fixed().pin_left(),
+        ColumnSpec::new(col::NAME, s::COL_NAME, 280.)
+            .sortable()
+            .pin_left(),
         ColumnSpec::new(col::DRIVER, s::COL_DRIVER, 80.),
         ColumnSpec::new(col::COMPOSE, s::COL_COMPOSE, 140.),
-        ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable(),
         ColumnSpec::new(col::SIZE, s::COL_SIZE, 90.)
             .sortable()
             .right(),
         ColumnSpec::new(col::STATUS, s::COL_STATUS, 170.),
+        ColumnSpec::new(col::CREATED, s::COL_CREATED, 120.).sortable(),
         ColumnSpec::new(col::ACTIONS, s::COL_ACTIONS, 60.).pin_right(),
     ]
 }
@@ -122,7 +124,19 @@ impl ListDelegate for VolumesDelegate {
                 }
                 let n = r.in_use();
                 if n > 0 {
-                    tone_tag(Tone::Success, s::in_use_by(n)).into_any_element()
+                    // Pill + muted text, like the Containers status cell.
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .child(tone_tag(Tone::Success, s::IN_USE))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .truncate()
+                                .child(s::by_containers(n)),
+                        )
+                        .into_any_element()
                 } else {
                     div().into_any_element()
                 }

@@ -158,6 +158,7 @@ pub fn page_header(
     });
     v_flex()
         .id(id)
+        .debug_selector(|| "page-header".into())
         .key_context(crate::keymap::ctx::TOOLBAR)
         .gap_2()
         .px_4()
@@ -319,28 +320,6 @@ pub fn hinted(
                 )
             })
     })
-}
-
-/// A small icon button for row cells (not a Tab stop: the table is one stop, KBD-004).
-pub fn row_button(
-    id: impl Into<gpui_kit::ElementId>,
-    icon: impl Into<Icon>,
-    tooltip: &'static str,
-    disabled: bool,
-    action: Box<dyn Action>,
-) -> Button {
-    Button::new(id)
-        .ghost()
-        .xsmall()
-        .icon(icon.into())
-        .tooltip(tooltip)
-        .disabled(disabled)
-        .tab_stop(false)
-        .on_click(move |_, window, cx| {
-            // Don't let the click open the row too.
-            cx.stop_propagation();
-            window.dispatch_action(action.boxed_clone(), cx)
-        })
 }
 
 /// The row ⋮ button (`OnRow` → `ContextMenu`). The row menu it opens is anchored under it

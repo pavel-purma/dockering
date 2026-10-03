@@ -1760,6 +1760,26 @@ impl Render for AppShell {
                     div()
                         .id("content-region")
                         .track_focus(&self.content_focus)
+                        // A click on a page's empty chrome (header background, padding)
+                        // would focus this region, which sits above the page's action
+                        // handlers: header controls (filters, group-by, selection actions)
+                        // don't take focus, so their actions would dispatch past the page.
+                        // Focus the page instead, also when focus is already stranded here.
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                let stranded = window.focused(cx).is_none_or(|f| {
+                                    f == this.content_focus || f == this.root_focus
+                                });
+                                if window.default_prevented() && !stranded {
+                                    return;
+                                }
+                                if let Some(h) = this.page.primary_focus(cx) {
+                                    window.prevent_default();
+                                    window.focus(&h, cx);
+                                }
+                            }),
+                        )
                         .flex_1()
                         .min_w_0()
                         .h_full()

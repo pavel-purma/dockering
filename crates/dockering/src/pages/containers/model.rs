@@ -89,6 +89,7 @@ pub mod sort_keys {
     pub const STATUS: &str = "status";
     pub const CREATED: &str = "created";
     pub const CPU: &str = "cpu";
+    pub const MEM: &str = "mem";
 }
 
 fn state_rank(s: ContainerState) -> u8 {
@@ -104,22 +105,30 @@ fn state_rank(s: ContainerState) -> u8 {
     }
 }
 
-/// Compare two containers by `sort` (ties by name, so order is stable).
+/// Latest list stats lookups for the CPU / Memory sort keys (`None` = no sample yet).
+pub struct StatsLookup<'a> {
+    pub cpu: &'a dyn Fn(&str) -> Option<f64>,
+    pub mem: &'a dyn Fn(&str) -> Option<u64>,
+}
+
+/// Compare two containers by `sort` (ties by name, so order is stable). Rows without a
+/// stats sample sort below every sampled row.
 pub fn compare(
     a: &ContainerSummary,
     b: &ContainerSummary,
     sort: &SortState,
-    cpu: &dyn Fn(&str) -> Option<f64>,
+    stats: &StatsLookup<'_>,
 ) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let ord = match sort.key.as_ref() {
         sort_keys::IMAGE => a.image.to_lowercase().cmp(&b.image.to_lowercase()),
         sort_keys::STATUS => state_rank(a.state).cmp(&state_rank(b.state)),
         sort_keys::CREATED => a.created.cmp(&b.created),
-        sort_keys::CPU => cpu(&a.id)
+        sort_keys::CPU => (stats.cpu)(&a.id)
             .unwrap_or(-1.0)
-            .partial_cmp(&cpu(&b.id).unwrap_or(-1.0))
+            .partial_cmp(&(stats.cpu)(&b.id).unwrap_or(-1.0))
             .unwrap_or(Ordering::Equal),
+        sort_keys::MEM => (stats.mem)(&a.id).cmp(&(stats.mem)(&b.id)),
         _ => Ordering::Equal,
     };
     let ord = if sort.descending { ord.reverse() } else { ord };
@@ -134,7 +143,7 @@ pub struct BuildInput<'a> {
     pub filter: StatusFilter,
     pub query: &'a str,
     pub sort: Option<&'a SortState>,
-    pub cpu: &'a dyn Fn(&str) -> Option<f64>,
+    pub stats: StatsLookup<'a>,
 }
 
 /// The output: tree nodes plus the groups to force open because a member matched the search
@@ -173,7 +182,7 @@ pub fn build(input: BuildInput<'_>) -> BuildOutput {
         descending: false,
     };
     let sort = input.sort.unwrap_or(&default_sort);
-    let cmp = |a: &ContainerSummary, b: &ContainerSummary| compare(a, b, sort, input.cpu);
+    let cmp = |a: &ContainerSummary, b: &ContainerSummary| compare(a, b, sort, &input.stats);
 
     let grouped = grouping::group(&visible, input.group_by, input.interleave);
     let mut nodes = Vec::with_capacity(grouped.len());
@@ -280,7 +289,10 @@ mod tests {
             filter,
             query,
             sort,
-            cpu: &|_| None,
+            stats: StatsLookup {
+                cpu: &|_| None,
+                mem: &|_| None,
+            },
         }
     }
 
@@ -379,6 +391,33 @@ mod tests {
             Some(&sort),
         ));
         assert_eq!(keys(&out)[0], "shop-web-1");
+    }
+
+    #[test]
+    fn con_003_sort_by_memory_usage() {
+        let cs = sample();
+        let mem = |id: &str| -> Option<u64> {
+            if id == cs[2].id {
+                Some(300)
+            } else if id == cs[0].id {
+                Some(100)
+            } else {
+                None
+            }
+        };
+        let sort = SortState {
+            key: sort_keys::MEM.into(),
+            descending: true,
+        };
+        let out = build(BuildInput {
+            stats: StatsLookup {
+                cpu: &|_| None,
+                mem: &mem,
+            },
+            ..input(&cs, &GroupBy::None, StatusFilter::Running, "", Some(&sort))
+        });
+        // Descending: most memory first; rows without a sample last.
+        assert_eq!(keys(&out), ["redis", "shop-web-1", "paused"]);
     }
 
     #[test]

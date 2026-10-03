@@ -32,7 +32,9 @@ pub mod col {
 
 pub fn columns() -> Vec<ColumnSpec> {
     vec![
-        ColumnSpec::new(col::NAME, s::COL_NAME, 220.).sortable(),
+        ColumnSpec::new(col::NAME, s::COL_NAME, 220.)
+            .sortable()
+            .pin_left(),
         ColumnSpec::new(col::DRIVER, s::COL_DRIVER, 80.).sortable(),
         ColumnSpec::new(col::SCOPE, s::COL_SCOPE, 70.),
         ColumnSpec::new(col::SUBNETS, s::COL_SUBNETS, 140.),

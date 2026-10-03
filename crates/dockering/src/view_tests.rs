@@ -335,6 +335,35 @@ fn shl_005_header_checkbox_selects_all(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// A click on the empty part of the page header (next to the filters) used to move focus
+/// to the content region, above the page's handlers, so the filter buttons stopped working.
+/// Focus now lands on the page and the filter still switches by mouse.
+#[gpui_kit::test]
+fn con_004_filter_clicks_work_after_clicking_header_background(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let header = visual.debug_bounds("page-header").expect("header rendered");
+    let running = visual
+        .debug_bounds("filter-running")
+        .expect("filter rendered");
+    // Empty header space: left of the filters, below the title.
+    let blank = gpui_kit::point(running.origin.x - gpui_kit::px(40.), running.center().y);
+    assert!(header.contains(&blank));
+    visual.simulate_click(blank, Default::default());
+    cx.run_until_parked();
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    visual.simulate_click(running.center(), Default::default());
+    cx.run_until_parked();
+    assert_eq!(
+        cx.read(|cx| page.read(cx).filter()),
+        crate::pages::containers::model::StatusFilter::Running
+    );
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn kbd_030_s_starts_stopped_container(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());

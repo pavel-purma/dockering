@@ -10,7 +10,9 @@
 //! | [`widgets`] | Section heading, copy-id, port link, relative time, keyboard hint tooltips |
 //! | [`page`] | The `Page` trait (`primary_focus`, search focus, refresh) |
 //! | [`breadcrumb`] | Detail-page breadcrumb |
+//! | [`action_icons`] | Start/stop row buttons: chalk icon, filled on hover |
 
+pub mod action_icons;
 pub mod breadcrumb;
 pub mod confirm;
 pub mod list_table;

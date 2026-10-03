@@ -325,10 +325,10 @@ impl ContainersPage {
         let filter = self.filter;
         let query = self.query.clone();
         let sort = self.table.read(cx).model(cx).sort.clone();
-        let stats: HashMap<String, f64> =
-            self.stats.iter().map(|(k, v)| (k.clone(), v.cpu)).collect();
+        let stats: HashMap<String, RowStats> = self.stats.clone();
         let job = move || {
-            let cpu = |id: &str| stats.get(id).copied();
+            let cpu = |id: &str| stats.get(id).map(|s| s.cpu);
+            let mem = |id: &str| stats.get(id).map(|s| s.mem);
             model::build(BuildInput {
                 containers: &containers,
                 group_by: &group_by,
@@ -336,7 +336,10 @@ impl ContainersPage {
                 filter,
                 query: &query,
                 sort: sort.as_ref(),
-                cpu: &cpu,
+                stats: model::StatsLookup {
+                    cpu: &cpu,
+                    mem: &mem,
+                },
             })
         };
         let n = self.containers(cx).len();
@@ -1252,6 +1255,7 @@ impl ContainersPage {
                     StatusFilter::ALL.iter().map(|f| {
                         let f = *f;
                         Button::new(f.as_str())
+                            .debug_selector(move || format!("filter-{}", f.as_str()))
                             .label(f.label())
                             .selected(f == filter)
                             .tab_stop(false)
