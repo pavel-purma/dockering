@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-03 · ui/containers · Mounts tab (CDT-020): the separate RW column is folded into Mode (`RW`/`RO` plus other options such as `z`), and Source/Destination get 4× the width of Type/Mode so long paths no longer wrap in a fifth-width column. Detail-panel tables take optional relative column widths (`Section::weights`).
 - 2026-10-03 · ci · Faster CI. Dev/test builds drop debuginfo, the `test` cache is saved even when a test fails (a failure on `main` had left Windows and macOS with no cache), and Windows tests build on a trusted Dev Drive. The `installer` job is folded into the Windows `build` jobs, so each Windows target needs one release build instead of two (REL-014 is unchanged).
 - 2026-10-03 · docker · `DISK_USAGE` is advertised only at negotiated API ≥ 1.52: bollard 0.21 drops the legacy `/system/df` shape, so older daemons (e.g. Docker 28, API 1.48) reported all sizes as 0. Below 1.52 `disk_usage` returns `Unsupported` and Volumes/Images use their fallbacks (spec 21 §2/§6, VOL-002, IMG-003).
 - 2026-10-03 · ci · `ci.yml` runs again on push to `main` and on pull requests (reverts the manual-only change; Actions minutes are free for the public repo); packaging runs on `main` only. Dependabot version updates for `cargo` and `github-actions` (REL-060).
