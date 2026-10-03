@@ -157,12 +157,14 @@ jobs:
         run: cargo xtask package --target ${{ matrix.target }}
       - name: Collect binary
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           mkdir -p upload
-          exe=dockering; [[ "${{ matrix.target }}" == *windows* ]] && exe=dockering.exe
-          cp "target/${{ matrix.target }}/release/$exe" upload/
-          if [[ -d "target/dist/${{ matrix.target }}" ]]; then
-            find "target/dist/${{ matrix.target }}" -maxdepth 1 -type f -exec cp {} upload/ \;
+          exe=dockering; [[ "$TARGET" == *windows* ]] && exe=dockering.exe
+          cp "target/$TARGET/release/$exe" upload/
+          if [[ -d "target/dist/$TARGET" ]]; then
+            find "target/dist/$TARGET" -maxdepth 1 -type f -exec cp {} upload/ \;
           fi
       - uses: actions/upload-artifact@v7
         with:
