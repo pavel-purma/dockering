@@ -19,6 +19,9 @@ env:
   RUST_TOOLCHAIN: "1.98"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # No debuginfo in dev/test builds: linking the ~20 GPUI test binaries with full debuginfo is slow
+  # (PDBs on Windows) and bloats the caches. Panics still report file:line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
   RUST_BACKTRACE: short
 
 jobs:
@@ -81,12 +84,28 @@ jobs:
       - name: Linux prerequisites (GPUI Kit)
         if: runner.os == 'Linux'
         run: bash scripts/bootstrap.sh
+      # Windows: build on a trusted ReFS Dev Drive, so Defender doesn't scan every object file and
+      # PDB as it's written. Mounted beside the checkout (not at target/, which would make the
+      # volume root the cached directory).
+      - name: Dev Drive for the target dir (Windows)
+        if: runner.os == 'Windows'
+        uses: samypr100/setup-dev-drive@v4
+        with:
+          drive-size: 25GB
+          mount-path: ../dev-drive
+          trusted-dev-drive: true
+          env-mapping: |
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          workspaces: ${{ runner.os == 'Windows' && '. -> ../dev-drive/target' || '.' }}
+          # Save the build even when a test fails: a failing test on main otherwise leaves the next
+          # run (and every PR) to compile from scratch.
+          cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       # The lint job lints Linux. This step covers cfg(windows)/cfg(macos) code (dk-wsl, WSLC COM).
@@ -119,6 +138,8 @@ jobs:
         # --no-tests=warn: integration tests land with the engine work (M2); drop it then.
         run: cargo nextest run -p dk-engine-docker --features it --locked --no-tests=warn
 
+  # REL-014: on Windows the job also builds the Inno installer and smoke-tests it on every push and
+  # PR (one release build per target, not two). Unsigned; signing happens only in release.yml.
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -128,8 +149,8 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
-          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025, arch: x64 }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm, arch: arm64 }
           - { target: aarch64-apple-darwin, os: macos-15 }
           - { target: x86_64-apple-darwin, os: macos-15-intel }
     steps:
@@ -147,14 +168,31 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo build --release
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
-      # Packaging smoke test on main (PRs only build, to keep them fast).
+      # Packaging smoke test: Windows always (the installer, REL-014); elsewhere on main only (PRs only
+      # build, to keep them fast).
       - name: Install cargo-packager
         if: github.event_name != 'pull_request' && runner.os != 'Windows'
         shell: bash
         run: cargo packager --version 2>/dev/null || cargo install cargo-packager --locked --version 0.11.8
+      - name: Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version 6.7.1 -y --no-progress
+          }
       - name: cargo xtask package
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' || runner.os == 'Windows'
         run: cargo xtask package --target ${{ matrix.target }}
+      - name: Silent install / uninstall, per user and all users (REL-014)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $setup = "target\dist\${{ matrix.target }}\Dockering-Setup-${{ matrix.arch }}.exe"
+          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version
+          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version -AllUsers
       - name: Collect binary
         shell: bash
         env:
@@ -170,51 +208,5 @@ jobs:
         with:
           name: dockering-${{ matrix.target }}
           path: upload/
-          retention-days: 14
-          if-no-files-found: error
-
-  # REL-014: the Windows installer is built and smoke-tested on every push and PR. Unsigned;
-  # signing happens only in release.yml.
-  installer:
-    name: installer (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: x86_64-pc-windows-msvc, os: windows-2025, arch: x64 }
-          - { target: aarch64-pc-windows-msvc, os: windows-11-arm, arch: arm64 }
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: installer-${{ matrix.target }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Inno Setup
-        shell: pwsh
-        run: |
-          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          if (-not $iscc -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup --version 6.7.1 -y --no-progress
-          }
-      - name: cargo build --release
-        run: cargo build --release --locked -p dockering --target ${{ matrix.target }}
-      - name: cargo xtask package (inno + zip)
-        run: cargo xtask package --target ${{ matrix.target }} --formats inno
-      - name: Silent install / uninstall, per user and all users (REL-014)
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
-          $setup = "target\dist\${{ matrix.target }}\Dockering-Setup-${{ matrix.arch }}.exe"
-          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version
-          pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version -AllUsers
-      - uses: actions/upload-artifact@v7
-        with:
-          name: installer-${{ matrix.target }}
-          path: target/dist/${{ matrix.target }}/Dockering-*
           retention-days: 14
           if-no-files-found: error
