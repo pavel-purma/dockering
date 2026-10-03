@@ -1699,7 +1699,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "windows 0.61.3",
+ "windows 0.62.2",
  "windows-core 0.62.2",
 ]
 
@@ -1718,7 +1718,7 @@ dependencies = [
  "futures",
  "hex",
  "minisign",
- "rand 0.9.5",
+ "rand 0.10.3",
  "semver",
  "serde",
  "serde_json",
@@ -1728,11 +1728,11 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
- "toml 0.8.23",
+ "toml 1.1.6+spec-1.1.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1764,7 +1764,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1776,12 +1776,12 @@ dependencies = [
  "dk-core",
  "dk-engine-docker",
  "futures",
- "rand 0.9.5",
+ "rand 0.10.3",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

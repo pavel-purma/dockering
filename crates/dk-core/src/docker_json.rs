@@ -836,9 +836,11 @@ pub fn disk_usage(v: &Value) -> DiskUsage {
     let volume_usage = get(v, "VolumeUsage");
     let build_usage = get(v, "BuildCacheUsage");
 
-    // Images: `LayersSize` counts shared layers once (what `docker system df` shows).
+    // Images: `LayersSize` counts shared layers once (what `docker system df` shows). The
+    // containerd image store reports 0 there, so a 0 falls through to the per-image sum.
     let images = array(v, "Images").or_else(|| image_usage.and_then(|u| array(u, "Items")));
     du.images_size = size_of(v, "LayersSize")
+        .filter(|n| *n > 0)
         .or_else(|| image_usage.and_then(|u| size_of(u, "TotalSize")))
         .or_else(|| images.map(|items| sum_sizes(items.iter(), "Size")))
         .unwrap_or(0);
@@ -1307,6 +1309,17 @@ mod tests {
             disk_usage(&json!({"Images": 3, "Volumes": {}})).images_size,
             0
         );
+    }
+
+    #[test]
+    fn vol_disk_usage_zero_layers_size_sums_images() {
+        // containerd image store: `LayersSize` is 0 while the images have sizes.
+        let du = disk_usage(&json!({
+            "LayersSize": 0,
+            "Images": [{"Size": 600, "Containers": 1}, {"Size": 500, "Containers": 0}]
+        }));
+        assert_eq!(du.images_size, 1100);
+        assert_eq!(disk_usage(&json!({"LayersSize": 0})).images_size, 0);
     }
 
     #[test]
