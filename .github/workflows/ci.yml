@@ -1,8 +1,10 @@
 # CI per docs/spec/50-build-and-release.md (NFR-001, NFR-040, REL-002, REL-003).
 name: CI
 
-# Manual only (Actions › CI › Run workflow, or `gh workflow run ci.yml --ref <branch>`).
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Keep in sync with rust-toolchain.toml (checked in the lint job).
@@ -145,12 +147,13 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo build --release
         run: cargo build --release --locked --workspace --target ${{ matrix.target }}
-      # Packaging smoke test.
+      # Packaging smoke test on main (PRs only build, to keep them fast).
       - name: Install cargo-packager
-        if: runner.os != 'Windows'
+        if: github.event_name != 'pull_request' && runner.os != 'Windows'
         shell: bash
         run: cargo packager --version 2>/dev/null || cargo install cargo-packager --locked --version 0.11.8
       - name: cargo xtask package
+        if: github.event_name != 'pull_request'
         run: cargo xtask package --target ${{ matrix.target }}
       - name: Collect binary
         shell: bash
@@ -170,7 +173,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  # REL-014: the Windows installer is built and smoke-tested on every CI run. Unsigned;
+  # REL-014: the Windows installer is built and smoke-tested on every push and PR. Unsigned;
   # signing happens only in release.yml.
   installer:
     name: installer (${{ matrix.target }})
