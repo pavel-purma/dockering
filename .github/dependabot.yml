@@ -1,0 +1,29 @@
+# Dependency update PRs (REL-060). Titles are `chore(deps): …` so they pass pr-title.yml.
+# Minor and patch bumps are grouped into one PR per ecosystem; majors (and 0.x minors such as
+# gpui-kit) come as separate PRs so they can be reviewed on their own.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
