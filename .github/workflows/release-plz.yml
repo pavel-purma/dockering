@@ -7,8 +7,9 @@
 #
 # The release-bot GitHub App token is used instead of GITHUB_TOKEN so that the release PR runs CI
 # and the tag push starts release.yml. App permissions: Contents + Pull requests read/write.
-# Secrets (GitHub environment `release-plz`): RELEASE_BOT_APP_ID (the App ID or Client ID; both are
-# accepted as `client-id`), RELEASE_BOT_PRIVATE_KEY.
+# Repository secrets (not an environment: GitHub Free can't use environments in private repos):
+# RELEASE_BOT_APP_ID (the App ID or Client ID; both are accepted as `client-id`),
+# RELEASE_BOT_PRIVATE_KEY.
 # Without them, both jobs emit a notice and skip.
 name: Release-plz
 
@@ -28,7 +29,6 @@ jobs:
   release-pr:
     name: release PR
     runs-on: ubuntu-24.04
-    environment: release-plz
     concurrency:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Release bot configured?
         if: env.RELEASE_BOT_APP_ID == ''
-        run: echo "::notice::RELEASE_BOT_APP_ID is not set in the release-plz environment; skipping the release PR."
+        run: echo "::notice::RELEASE_BOT_APP_ID is not set (repository secret); skipping the release PR."
       - name: Release bot token
         id: app
         if: env.RELEASE_BOT_APP_ID != ''
@@ -67,13 +67,12 @@ jobs:
   release:
     name: release (tag)
     runs-on: ubuntu-24.04
-    environment: release-plz
     env:
       RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
     steps:
       - name: Release bot configured?
         if: env.RELEASE_BOT_APP_ID == ''
-        run: echo "::notice::RELEASE_BOT_APP_ID is not set in the release-plz environment; skipping the release."
+        run: echo "::notice::RELEASE_BOT_APP_ID is not set (repository secret); skipping the release."
       - name: Release bot token
         id: app
         if: env.RELEASE_BOT_APP_ID != ''
