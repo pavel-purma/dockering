@@ -85,6 +85,7 @@ pub fn start_with_factories(
         ),
         discover_on_start: true,
         worker_threads: 2,
+        demo: false,
     })
     .expect("hub starts");
     let config = setup.config;

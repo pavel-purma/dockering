@@ -17,7 +17,12 @@ fn main() {
     println!("cargo:rerun-if-changed={}", icon.display());
 
     let version = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
-    let numeric = |name: &str| env::var(name).ok().and_then(|v| v.parse::<u16>().ok()).unwrap_or(0);
+    let numeric = |name: &str| {
+        env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(0)
+    };
     let (major, minor, patch) = (
         numeric("CARGO_PKG_VERSION_MAJOR"),
         numeric("CARGO_PKG_VERSION_MINOR"),

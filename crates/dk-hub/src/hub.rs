@@ -70,6 +70,11 @@ pub struct HubInner {
     pub(crate) shutdown: CancellationToken,
     /// Generation counter for shared upstream entries.
     pub(crate) generation: AtomicU64,
+    #[cfg_attr(not(feature = "updater"), allow(dead_code))]
+    pub(crate) demo: bool,
+    /// `None` without the `updater` feature or when the HTTP client can't start.
+    #[cfg(feature = "updater")]
+    pub(crate) updates: Option<crate::updates::State>,
 }
 
 impl Drop for HubInner {
@@ -107,6 +112,22 @@ impl HubInner {
     /// Builds the hub on `handle` (the owned runtime, or the test runtime) and spawns the
     /// bootstrap task (spec 10 §7 step 5).
     pub(crate) fn start_on(opts: HubOptions, handle: Handle, rt: Option<Runtime>) -> HubHandle {
+        Self::start_with(
+            opts,
+            handle,
+            rt,
+            #[cfg(feature = "updater")]
+            None,
+        )
+    }
+
+    /// `start_on` with an injected updater (tests use a static source).
+    pub(crate) fn start_with(
+        opts: HubOptions,
+        handle: Handle,
+        rt: Option<Runtime>,
+        #[cfg(feature = "updater")] update_state: Option<crate::updates::State>,
+    ) -> HubHandle {
         let factories = opts.factories.unwrap_or_else(crate::default_factories);
         let (events_tx, _) = broadcast::channel(HUB_EVENTS_CAPACITY);
         let mut reg = Registry::new(View::from_settings(&opts.config.engines), events_tx);
@@ -132,9 +153,18 @@ impl HubInner {
             terminals: terminal::Registry::default(),
             shutdown: CancellationToken::new(),
             generation: AtomicU64::new(1),
+            demo: opts.demo,
+            #[cfg(feature = "updater")]
+            updates: if opts.demo {
+                None
+            } else {
+                update_state.or_else(crate::updates::State::production)
+            },
         });
         inner.handle.spawn(saver_loop(inner.clone()));
         inner.handle.spawn(supervisor::bootstrap(inner.clone()));
+        #[cfg(feature = "updater")]
+        crate::updates::start(&inner);
         HubHandle { inner }
     }
 
@@ -1013,7 +1043,97 @@ pub(crate) fn config_get(inner: &Arc<HubInner>) -> Config {
     lock(&inner.config).clone()
 }
 pub(crate) fn config_update(inner: &Arc<HubInner>, f: impl FnOnce(&mut Config)) {
-    inner.update_config(f)
+    #[cfg(feature = "updater")]
+    let before = lock(&inner.config).updates.check;
+    inner.update_config(f);
+    #[cfg(feature = "updater")]
+    if lock(&inner.config).updates.check != before {
+        crate::updates::settings_changed(inner);
+    }
+}
+
+// ── updates (UPD-*) ─────────────────────────────────────────────────────────────────────────
+
+pub(crate) fn update_status(h: &HubHandle) -> HubStream<crate::updates::UpdateStatus> {
+    use crate::updates::UpdateStatus;
+    #[cfg(feature = "updater")]
+    if let Some(u) = h.inner.updates.as_ref() {
+        let mut rx = u.status.subscribe();
+        let (mut tx, token, stream) = HubStream::channel(STREAM_CAPACITY);
+        h.inner.handle.spawn(async move {
+            loop {
+                let item = rx.borrow_and_update().clone();
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => return,
+                    r = tx.send(Ok(item)) => if r.is_err() { return },
+                }
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => return,
+                    r = rx.changed() => if r.is_err() { return },
+                }
+            }
+        });
+        return stream;
+    }
+    let _ = h;
+    let (mut tx, _token, stream) = HubStream::channel(1);
+    let _ = tx.try_send(Ok(UpdateStatus::Disabled { by_policy: false }));
+    stream
+}
+
+pub(crate) fn check_for_updates(h: &HubHandle) -> HubCall<crate::updates::UpdateCheck> {
+    #[cfg(feature = "updater")]
+    if h.inner.updates.is_some() {
+        let (tx, call) = HubCall::channel();
+        let inner = h.inner.clone();
+        h.inner.handle.spawn(async move {
+            let _ = tx.send(crate::updates::check(&inner, true).await);
+        });
+        return call;
+    }
+    let _ = h;
+    HubCall::ready(Ok(crate::updates::UpdateCheck::Disabled))
+}
+
+pub(crate) fn apply_update(h: &HubHandle) -> HubCall<()> {
+    #[cfg(feature = "updater")]
+    {
+        let (tx, call) = HubCall::channel();
+        let inner = h.inner.clone();
+        h.inner.handle.spawn_blocking(move || {
+            let _ = tx.send(crate::updates::apply(&inner));
+        });
+        call
+    }
+    #[cfg(not(feature = "updater"))]
+    {
+        let _ = h;
+        HubCall::ready(Err(EngineError::protocol(
+            "updates are not available in this build",
+        )))
+    }
+}
+
+pub(crate) fn take_previous_version(h: &HubHandle) -> Option<String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let previous = h.inner.ui_state().updates.last_run_version;
+    if previous.as_deref() == Some(current) {
+        return None;
+    }
+    h.inner
+        .update_ui_state(|s| s.updates.last_run_version = Some(current.to_owned()));
+    previous.filter(|p| crate::updates::older(p, current))
+}
+
+pub(crate) fn mark_update_notified(h: &HubHandle, version: &str) -> bool {
+    if h.inner.ui_state().updates.notified_version.as_deref() == Some(version) {
+        return false;
+    }
+    h.inner
+        .update_ui_state(|s| s.updates.notified_version = Some(version.to_owned()));
+    true
 }
 pub(crate) fn ui_state_get(inner: &Arc<HubInner>) -> UiState {
     inner.ui_state()

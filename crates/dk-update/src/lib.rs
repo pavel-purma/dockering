@@ -12,6 +12,7 @@ pub mod error;
 pub mod install_kind;
 pub mod keys;
 pub mod manifest;
+pub mod policy;
 pub mod source;
 pub mod verify;
 

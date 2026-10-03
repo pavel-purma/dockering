@@ -245,6 +245,7 @@ fn opts(dir: &TempDir, f: Arc<TestFactory>, config: Config, ui_state: UiState) -
         factories: Some(vec![f as Arc<dyn EngineFactory>]),
         discover_on_start: true,
         worker_threads: 2,
+        demo: false,
     }
 }
 

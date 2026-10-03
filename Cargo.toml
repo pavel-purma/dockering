@@ -24,6 +24,7 @@ dk-engine-docker = { path = "crates/dk-engine-docker" }
 dk-engine-wslc = { path = "crates/dk-engine-wslc" }
 dk-wsl = { path = "crates/dk-wsl" }
 dk-terminal = { path = "crates/dk-terminal" }
+dk-update = { path = "crates/dk-update" }
 
 # updater
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream", "http2", "system-proxy"] }

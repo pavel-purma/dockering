@@ -9,12 +9,17 @@ publish.workspace = true
 
 [features]
 test-support = ["dk-core/test-support"]
+# In-app updates from GitHub Releases (UPD-001…012). Off by default: dev and distro builds make
+# no update requests; release.yml enables it for public releases (UPD-005).
+updater = ["dep:dk-update", "dep:semver"]
 
 [dependencies]
 dk-core.workspace = true
 dk-engine-docker.workspace = true
 dk-engine-wslc.workspace = true
 dk-wsl.workspace = true
+dk-update = { workspace = true, optional = true }
+semver = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["fs"] }
 tokio-util.workspace = true
 futures.workspace = true
@@ -34,6 +39,10 @@ tracing-appender.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
+dk-update = { workspace = true, features = ["test-support"] }
+minisign.workspace = true
+sha2.workspace = true
+hex.workspace = true
 dk-core = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3"
