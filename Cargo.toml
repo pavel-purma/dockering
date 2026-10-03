@@ -25,6 +25,15 @@ dk-engine-wslc = { path = "crates/dk-engine-wslc" }
 dk-wsl = { path = "crates/dk-wsl" }
 dk-terminal = { path = "crates/dk-terminal" }
 
+# updater
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream", "http2", "system-proxy"] }
+minisign-verify = "0.3.0"
+minisign = "0.10.0"
+semver = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3"
+
 # UI (only dockering + dk-terminal, ADR-0001)
 gpui-kit = { version = "=0.7.0" }
 

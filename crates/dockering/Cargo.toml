@@ -34,6 +34,9 @@ time.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 
+[build-dependencies]
+embed-resource = "3.0.11"
+
 [dev-dependencies]
 dk-core = { workspace = true, features = ["test-support"] }
 dk-hub = { workspace = true, features = ["test-support"] }

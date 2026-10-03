@@ -1,10 +1,14 @@
 //! `cargo xtask package` / `cargo xtask dist` (spec 50, Packaging; REL-002).
 //!
 //! `package` turns an already-built release binary into the per-OS artifacts:
-//! - Windows: `.msi` (WiX) on x86_64, NSIS `.exe` on aarch64 (WiX 3, which cargo-packager
-//!   uses, can't target ARM64), plus a portable `.zip`
+//! - Windows: Inno Setup installer `Dockering-Setup-<x64|arm64>.exe` (REL-020; format `inno`,
+//!   built by `ISCC.exe` from `packaging/windows/dockering.iss`), plus a portable `.zip`
 //! - macOS: `.dmg` with `Dockering.app`
 //! - Linux: `.deb`, `.AppImage`, plus a portable `.tar.gz`
+//!
+//! Every shipped artifact gets a stable, version-less name (REL-012), so
+//! `releases/latest/download/<name>` links never change. `wix`/`nsis` still work when asked for
+//! explicitly with `--formats` (they keep cargo-packager's names).
 //!
 //! cargo-packager reads `packaging/packager.toml`. With `--config`, cargo-packager doesn't read
 //! Cargo metadata, so this command writes `packaging/packager.generated.toml` (gitignored). It
@@ -26,6 +30,12 @@ const CONFIG: &str = "packaging/packager.toml";
 const GENERATED_CONFIG: &str = "packaging/packager.generated.toml";
 const BIN: &str = "dockering";
 const SIGNING_IDENTITY_ENV: &str = "DOCKERING_MACOS_SIGNING_IDENTITY";
+const INNO_SCRIPT: &str = "packaging/windows/dockering.iss";
+/// Path to `ISCC.exe`, if it isn't on `PATH` or in a standard install dir.
+const ISCC_ENV: &str = "ISCC";
+/// Inno `SignTool` command (passed as `/Ssigntool=<value>`), e.g. `signtool sign /fd sha256 … $f`.
+/// When set, ISCC signs the setup and the uninstaller it embeds.
+const INNO_SIGNTOOL_ENV: &str = "DOCKERING_INNO_SIGNTOOL";
 
 const VALUE_OPTS: &[&str] = &["--target", "--formats"];
 const FLAG_OPTS: &[&str] = &["--no-archive"];
@@ -91,8 +101,7 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
 /// Default cargo-packager formats per target (spec 50 Packaging table).
 pub fn default_formats(triple: &str) -> anyhow::Result<&'static [&'static str]> {
     Ok(match target_os(triple)? {
-        TargetOs::Windows if triple.starts_with("aarch64") => &["nsis"],
-        TargetOs::Windows => &["wix"],
+        TargetOs::Windows => &["inno"],
         TargetOs::MacOs => &["dmg"],
         TargetOs::Linux => &["deb", "appimage"],
     })
@@ -186,7 +195,19 @@ fn package(opts: &Options) -> anyhow::Result<()> {
     let out_dir = meta.target_dir.join("dist").join(&opts.triple);
     fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
-    if !opts.formats.is_empty() {
+    let (inno, packager_formats): (Vec<&str>, Vec<&str>) = opts
+        .formats
+        .iter()
+        .map(String::as_str)
+        .partition(|f| *f == "inno");
+    if !inno.is_empty() {
+        if os != TargetOs::Windows {
+            bail!("format `inno` is Windows-only");
+        }
+        inno_installer(&root, &opts.triple, &meta.version, &bin_path, &out_dir)?;
+    }
+
+    if !packager_formats.is_empty() {
         ensure_packager()?;
         let identity = std::env::var(SIGNING_IDENTITY_ENV)
             .ok()
@@ -204,12 +225,13 @@ fn package(opts: &Options) -> anyhow::Result<()> {
             .arg("--out-dir")
             .arg(&out_dir)
             .args(["--target", &opts.triple])
-            .args(["--formats", &opts.formats.join(",")]);
+            .args(["--formats", &packager_formats.join(",")]);
         run_cmd(&mut cmd)?;
+        rename_packager_outputs(&out_dir, &opts.triple, &meta.version)?;
     }
 
     if opts.archive && os != TargetOs::MacOs {
-        portable_archive(&root, os, &opts.triple, &meta.version, &bin_path, &out_dir)?;
+        portable_archive(&root, os, &opts.triple, &bin_path, &out_dir)?;
     }
     println!("xtask: artifacts in {}", out_dir.display());
     Ok(())
@@ -296,11 +318,10 @@ fn portable_archive(
     root: &Path,
     os: TargetOs,
     triple: &str,
-    version: &str,
     bin_path: &Path,
     out_dir: &Path,
 ) -> anyhow::Result<()> {
-    let name = format!("{BIN}-{version}-{triple}");
+    let name = format!("{BIN}-{triple}");
     let stage = out_dir.join(&name);
     if stage.exists() {
         fs::remove_dir_all(&stage).with_context(|| format!("cleaning {}", stage.display()))?;
@@ -335,10 +356,7 @@ fn portable_archive(
             .with_context(|| format!("copying {} -> {}", src.display(), dst.display()))?;
     }
 
-    let archive = match os {
-        TargetOs::Windows => format!("{name}.zip"),
-        _ => format!("{name}.tar.gz"),
-    };
+    let archive = stable_name(triple, ArtifactKind::Archive)?;
     let archive_path = out_dir.join(&archive);
     if archive_path.exists() {
         fs::remove_file(&archive_path)?;
@@ -365,16 +383,229 @@ fn portable_archive(
     Ok(())
 }
 
+/// What a release asset is, for its stable name (REL-012).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    /// Windows Inno Setup installer.
+    Installer,
+    /// Portable `.zip` (Windows) / `.tar.gz` (Linux).
+    Archive,
+    Dmg,
+    AppImage,
+    Deb,
+}
+
+/// Windows names use Windows architecture names (`x64`, `arm64`); macOS and Linux keep the
+/// Rust ones (`x86_64`, `aarch64`).
+fn arch_label(triple: &str) -> anyhow::Result<&'static str> {
+    let windows = target_os(triple)? == TargetOs::Windows;
+    Ok(match (triple.split('-').next().unwrap_or(""), windows) {
+        ("x86_64", true) => "x64",
+        ("aarch64", true) => "arm64",
+        ("x86_64", false) => "x86_64",
+        ("aarch64", false) => "aarch64",
+        (arch, _) => bail!("unsupported architecture `{arch}` in `{triple}`"),
+    })
+}
+
+/// Stable, version-less asset name (REL-012), e.g. `Dockering-Setup-x64.exe`.
+pub fn stable_name(triple: &str, kind: ArtifactKind) -> anyhow::Result<String> {
+    let os = target_os(triple)?;
+    let arch = arch_label(triple)?;
+    Ok(match (os, kind) {
+        (TargetOs::Windows, ArtifactKind::Installer) => format!("Dockering-Setup-{arch}.exe"),
+        (TargetOs::Windows, ArtifactKind::Archive) => format!("Dockering-{arch}.zip"),
+        (TargetOs::Linux, ArtifactKind::Archive) => format!("Dockering-{arch}.tar.gz"),
+        (TargetOs::MacOs, ArtifactKind::Dmg) => format!("Dockering-{arch}.dmg"),
+        (TargetOs::Linux, ArtifactKind::AppImage) => format!("Dockering-{arch}.AppImage"),
+        (TargetOs::Linux, ArtifactKind::Deb) => format!("Dockering-{arch}.deb"),
+        (os, kind) => bail!("no {kind:?} artifact for {os:?}"),
+    })
+}
+
+/// cargo-packager names outputs after the product, version, and arch. Rename the formats we ship
+/// to their stable names; anything else (explicit `wix`/`nsis`) keeps its name.
+fn rename_packager_outputs(out_dir: &Path, triple: &str, version: &str) -> anyhow::Result<()> {
+    for entry in fs::read_dir(out_dir)? {
+        let path = entry?.path();
+        let Some(file) = path.file_name().and_then(|f| f.to_str()) else {
+            continue;
+        };
+        if !path.is_file() || !file.contains(version) {
+            continue;
+        }
+        let kind = if file.ends_with(".dmg") {
+            ArtifactKind::Dmg
+        } else if file.ends_with(".AppImage") {
+            ArtifactKind::AppImage
+        } else if file.ends_with(".deb") {
+            ArtifactKind::Deb
+        } else {
+            continue;
+        };
+        let target = out_dir.join(stable_name(triple, kind)?);
+        if target.exists() {
+            fs::remove_file(&target)?;
+        }
+        fs::rename(&path, &target)
+            .with_context(|| format!("renaming {} -> {}", path.display(), target.display()))?;
+        println!("xtask: wrote {}", target.display());
+    }
+    Ok(())
+}
+
+/// Builds the Inno Setup installer (REL-020) from `packaging/windows/dockering.iss`.
+fn inno_installer(
+    root: &Path,
+    triple: &str,
+    version: &str,
+    bin_path: &Path,
+    out_dir: &Path,
+) -> anyhow::Result<()> {
+    let iscc = find_iscc()?;
+    // ISCC takes the payload from one directory: the exe plus the licence files (REL-023).
+    let stage = out_dir.join("inno-stage");
+    if stage.exists() {
+        fs::remove_dir_all(&stage)?;
+    }
+    fs::create_dir_all(&stage)?;
+    let file_name = bin_path.file_name().context("binary has no file name")?;
+    fs::copy(bin_path, stage.join(file_name))?;
+    for f in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.html"] {
+        fs::copy(root.join(f), stage.join(f)).with_context(|| format!("copying {f}"))?;
+    }
+
+    let mut cmd = Command::new(&iscc);
+    cmd.arg("/Q")
+        .arg(format!("/DAppVersion={version}"))
+        .arg(format!("/DArch={}", arch_label(triple)?))
+        .arg(define("SourceDir", &stage))
+        .arg(define("OutputDir", out_dir))
+        .arg(define("RepoRoot", root));
+    if let Some(signtool) = std::env::var(INNO_SIGNTOOL_ENV)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    {
+        cmd.arg(format!("/Ssigntool={signtool}")).arg("/DSign");
+    }
+    cmd.arg(root.join(INNO_SCRIPT));
+    run_cmd(&mut cmd)?;
+    fs::remove_dir_all(&stage)?;
+    println!(
+        "xtask: wrote {}",
+        out_dir
+            .join(stable_name(triple, ArtifactKind::Installer)?)
+            .display()
+    );
+    Ok(())
+}
+
+fn define(name: &str, path: &Path) -> String {
+    format!("/D{name}={}", path.display())
+}
+
+/// `ISCC.exe`: `$ISCC`, `PATH`, then the per-machine and per-user Inno Setup 6 install dirs.
+fn find_iscc() -> anyhow::Result<PathBuf> {
+    if let Some(p) = std::env::var_os(ISCC_ENV).map(PathBuf::from) {
+        if p.is_file() {
+            return Ok(p);
+        }
+        bail!("${ISCC_ENV} points to {}, which doesn't exist", p.display());
+    }
+    let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join("ISCC.exe"))
+                .collect()
+        })
+        .unwrap_or_default();
+    for (var, sub) in [
+        ("ProgramFiles(x86)", "Inno Setup 6"),
+        ("ProgramFiles", "Inno Setup 6"),
+        ("LOCALAPPDATA", "Programs/Inno Setup 6"),
+    ] {
+        if let Some(base) = std::env::var_os(var) {
+            candidates.push(Path::new(&base).join(sub).join("ISCC.exe"));
+        }
+    }
+    candidates.into_iter().find(|p| p.is_file()).context(
+        "ISCC.exe (Inno Setup 6.3+) not found; install it (`winget install JRSoftware.InnoSetup`) or set $ISCC",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn rel_012_stable_asset_names_per_target() {
+        let cases = [
+            (
+                "x86_64-pc-windows-msvc",
+                ArtifactKind::Installer,
+                "Dockering-Setup-x64.exe",
+            ),
+            (
+                "aarch64-pc-windows-msvc",
+                ArtifactKind::Installer,
+                "Dockering-Setup-arm64.exe",
+            ),
+            (
+                "x86_64-pc-windows-msvc",
+                ArtifactKind::Archive,
+                "Dockering-x64.zip",
+            ),
+            (
+                "aarch64-pc-windows-msvc",
+                ArtifactKind::Archive,
+                "Dockering-arm64.zip",
+            ),
+            (
+                "aarch64-apple-darwin",
+                ArtifactKind::Dmg,
+                "Dockering-aarch64.dmg",
+            ),
+            (
+                "x86_64-apple-darwin",
+                ArtifactKind::Dmg,
+                "Dockering-x86_64.dmg",
+            ),
+            (
+                "x86_64-unknown-linux-gnu",
+                ArtifactKind::AppImage,
+                "Dockering-x86_64.AppImage",
+            ),
+            (
+                "aarch64-unknown-linux-gnu",
+                ArtifactKind::Deb,
+                "Dockering-aarch64.deb",
+            ),
+            (
+                "x86_64-unknown-linux-gnu",
+                ArtifactKind::Archive,
+                "Dockering-x86_64.tar.gz",
+            ),
+        ];
+        for (triple, kind, expected) in cases {
+            assert_eq!(
+                stable_name(triple, kind).unwrap(),
+                expected,
+                "{triple} {kind:?}"
+            );
+        }
+        assert!(stable_name("aarch64-apple-darwin", ArtifactKind::Installer).is_err());
+        assert!(stable_name("x86_64-pc-windows-msvc", ArtifactKind::Dmg).is_err());
+    }
+
+    #[test]
     fn rel_formats_per_target() {
-        assert_eq!(default_formats("x86_64-pc-windows-msvc").unwrap(), &["wix"]);
+        assert_eq!(
+            default_formats("x86_64-pc-windows-msvc").unwrap(),
+            &["inno"]
+        );
         assert_eq!(
             default_formats("aarch64-pc-windows-msvc").unwrap(),
-            &["nsis"]
+            &["inno"]
         );
         assert_eq!(default_formats("aarch64-apple-darwin").unwrap(), &["dmg"]);
         assert_eq!(

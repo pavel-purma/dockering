@@ -9,7 +9,13 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+resvg = { version = "=0.48.1", default-features = false, features = ["system-fonts", "text"] }
 serde_json.workspace = true
+# release metadata (update manifest, minisign, SHA256SUMS)
+minisign.workspace = true
+sha2.workspace = true
+hex.workspace = true
+time.workspace = true
 
 [lints]
 workspace = true
