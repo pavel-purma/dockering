@@ -220,7 +220,7 @@ fn kbd_033_left_right_collapse_group(cx: &mut TestAppContext) {
     );
     h.press(cx, "left");
     assert!(!expanded(cx), "← on an expanded group collapses it");
-    h.press(cx, "ctrl-right");
+    h.press(cx, "secondary-right");
     assert!(expanded(cx), "Mod+→ expands all");
     h.shutdown();
 }
@@ -399,7 +399,7 @@ fn kbd_008_letters_ignored_in_search_input(cx: &mut TestAppContext) {
     h.select_row(cx, &id_of("scratchpad"));
     h.engine.clear_calls();
     // Mod+F focuses the search input (KBD-025); typing "s" must not start anything.
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     let search_focused = cx
         .update_window(h.any_window(), |_, window, cx| {
             page.read(cx)
@@ -458,7 +458,7 @@ fn con_021_running_delete_needs_force(cx: &mut TestAppContext) {
     assert!(stack.iter().any(|c| c.contains("Dialog")), "{stack:?}");
     assert!(cancel_focused.is_some());
     // Mod+Enter confirms the destructive action (KBD-071); it's a force delete.
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "remove called", |_, _| {
         !h.engine.calls_to("remove_container").is_empty()
     });
@@ -553,7 +553,7 @@ fn kbd_006_escape_priority_order(cx: &mut TestAppContext) {
     h.select_row(cx, &id_of("redis"));
     h.press(cx, "space");
     // 1. An open popup closes first.
-    h.press(cx, "ctrl-k");
+    h.press(cx, "secondary-k");
     assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
     h.press(cx, "escape");
     assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
@@ -569,7 +569,7 @@ fn kbd_006_escape_priority_order(cx: &mut TestAppContext) {
     h.press(cx, "escape");
     assert_eq!(selected(cx), 0);
     // 3. A focused, non-empty search clears before anything else.
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     h.type_text(cx, "red");
     h.press(cx, "escape");
     let value = cx.read(|cx| page.read(cx).search_input().read(cx).value().to_string());
@@ -584,7 +584,7 @@ fn kbd_020_palette_runs_action(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-shift-p");
+    h.press(cx, "secondary-shift-p");
     assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Palette);
     h.type_text(cx, "Go to Images");
     cx.run_until_parked();
@@ -701,9 +701,9 @@ fn kbd_023_mod_digits_navigate_and_back_forward(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-2");
+    h.press(cx, "secondary-2");
     assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Images);
-    h.press(cx, "ctrl-3");
+    h.press(cx, "secondary-3");
     assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Volumes);
     let back = if cfg!(target_os = "macos") {
         "cmd-["
@@ -755,7 +755,7 @@ fn kbd_021_switcher_filter_arrows_enter(cx: &mut TestAppContext) {
     h.wait_until(cx, "two engines listed", |_, cx| {
         h.shell.read(cx).engines().read(cx).engines().len() == 2
     });
-    h.press(cx, "ctrl-k");
+    h.press(cx, "secondary-k");
     assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
     // Typing filters; Enter switches to the (only) match.
     h.type_text(cx, "other");
@@ -816,7 +816,7 @@ fn kbd_039_group_by_none_flattens(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     let page = h.wait_containers(cx);
     h.focus_table(cx);
-    h.press(cx, "ctrl-shift-g");
+    h.press(cx, "secondary-shift-g");
     // Pick "None" from the menu (second item).
     h.press(cx, "down down enter");
     h.wait_until(cx, "flat list", |_, cx| {
@@ -880,7 +880,7 @@ fn con_013_delete_all_lists_members_and_needs_force(cx: &mut TestAppContext) {
     assert!(open);
     // Without Force only the stopped member (the one-off migrate) is removed.
     h.engine.clear_calls();
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "remove called once", |_, _| {
         h.engine.calls_to("remove_container").len() == 1
     });
@@ -967,7 +967,7 @@ fn kbd_020_palette_closes_after_non_navigation_command(cx: &mut TestAppContext) 
         })
     };
     assert!(expanded(cx), "groups start expanded");
-    h.press(cx, "ctrl-shift-p");
+    h.press(cx, "secondary-shift-p");
     h.type_text(cx, "Collapse all groups");
     h.press(cx, "enter");
     h.wait_until(cx, "palette closed", |_, cx| {
@@ -990,14 +990,14 @@ fn kbd_017_028_theme_toggle_and_sidebar(cx: &mut TestAppContext) {
     h.wait_containers(cx);
     h.focus_table(cx);
     let dark_before = cx.read(|cx| cx.theme().is_dark());
-    h.press(cx, "ctrl-shift-l");
+    h.press(cx, "secondary-shift-l");
     let dark_after = cx.read(|cx| cx.theme().is_dark());
     assert_ne!(dark_before, dark_after, "Mod+Shift+L toggles the theme");
     let saved = cx.read(|cx| crate::state::AppState::config(cx).general.theme);
     assert_eq!(saved, crate::theme::toggled(dark_before));
-    h.press(cx, "ctrl-b");
+    h.press(cx, "secondary-b");
     assert!(h.read(cx, |s, _, _| s.sidebar_collapsed()));
-    h.press(cx, "ctrl-b");
+    h.press(cx, "secondary-b");
     assert!(!h.read(cx, |s, _, _| s.sidebar_collapsed()));
     h.shutdown();
 }
@@ -1009,12 +1009,12 @@ fn shl_024_zoom_in_out_reset_persists(cx: &mut TestAppContext) {
     h.focus_table(cx);
     let scale =
         |cx: &mut TestAppContext| cx.read(|cx| crate::state::AppState::config(cx).general.ui_scale);
-    h.press(cx, "ctrl-=");
+    h.press(cx, "secondary-=");
     assert!((scale(cx) - 1.1).abs() < 1e-4, "{}", scale(cx));
-    h.press(cx, "ctrl--");
-    h.press(cx, "ctrl--");
+    h.press(cx, "secondary--");
+    h.press(cx, "secondary--");
     assert!((scale(cx) - 0.9).abs() < 1e-4);
-    h.press(cx, "ctrl-0");
+    h.press(cx, "secondary-0");
     assert!((scale(cx) - 1.0).abs() < 1e-4);
     h.shutdown();
 }
