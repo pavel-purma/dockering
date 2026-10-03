@@ -26,7 +26,7 @@
 | CDT-002 | Tabs: Overview, Logs, Terminal, Stats, Mounts, Network, Inspect. The tab is part of the route, so deep links and back/forward work. |
 | CDT-003 | Detail data (`inspect_container`) refreshes on any engine event for this container id. |
 | CDT-010 | **Overview** (`DescriptionList` sections under `ui::section` headings): *General* (id, name, image + image id, created, started, finished, restart count, restart policy, platform, PID, exit code). *Command* (entrypoint, cmd, working dir, user, tty). *Compose* (project, service, number, working dir, config files), shown if grouped. *Environment* (table of key/value, with values masked if the key matches `pass|secret|token|key` and a reveal toggle per row). *Labels* (table). *Resources* (CPU limit, memory limit, pids limit). *Health* (last 5 results with exit code and output). |
-| CDT-020 | **Mounts**: table with Type (bind/volume/tmpfs), Source (a volume name links to volume detail), Destination, Mode, RW. |
+| CDT-020 | **Mounts**: table with Type (bind/volume/tmpfs), Source (a volume name links to volume detail), Destination, Mode. Mode is `RW`/`RO` from the access flag plus any other mode options (e.g. `RO, Z`). Source and Destination get most of the width; Type and Mode are narrow. |
 | CDT-030 | **Network**: (a) *Port bindings* table: Container port/proto, Host IP, Host port (link). (b) *Networks* table: network name (link), IPv4, IPv6, gateway, MAC, aliases. (c) Hostname, DNS, and network mode. |
 | CDT-040 | **Inspect**: read-only, syntax-highlighted JSON of the raw inspect output (pretty-printed on `background_spawn`) in the GPUI Kit code editor, with *Copy* and the editor's own search (`Ctrl/Cmd+F` within the editor). Env values are **not** masked here, and a warning label says so. |
 | CDT-050 | **Logs**: see [container-logs.md](container-logs.md). |
@@ -44,7 +44,7 @@
 | CDT-002 | `cdt_002_tab_in_route_and_back_forward_keep_tab` |
 | CDT-003 | `cdt_003_refreshes_on_engine_event` |
 | CDT-010 | `cdt_010_overview_masks_secrets_and_reveal_works` |
-| CDT-020 | `cdt_020_mounts_volume_link_opens_volume_detail` |
+| CDT-020 | `cdt_020_mounts_volume_link_opens_volume_detail`, `cdt_020_mode_label_merges_access_and_options` |
 | CDT-030 | `cdt_030_network_link_and_port_link` |
 | CDT-040 | `cdt_040_inspect_shows_pretty_json_unmasked` |
 | CDT-050…070 | See the logs, terminal, and stats specs |

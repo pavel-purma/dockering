@@ -9,12 +9,10 @@ use dk_core::grouping::GroupBy;
 use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineId, StatsSample};
 use dk_hub::Feed;
 use futures::StreamExt;
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Selectable, Sizable, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -39,6 +37,7 @@ use crate::ui::menu::TrackBounds as _;
 use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
+use crate::ui::segmented::{Segment, Segmented};
 use crate::ui::widgets::{focus_wrap, port_url};
 
 /// Search debounce (SHL-006).
@@ -1257,22 +1256,31 @@ impl ContainersPage {
                         cx.stop_propagation();
                     }
                 }))
-                .child(ButtonGroup::new("filter-group").small().children(
-                    StatusFilter::ALL.iter().map(|f| {
-                        let f = *f;
-                        Button::new(f.as_str())
-                            .debug_selector(move || format!("filter-{}", f.as_str()))
-                            .label(f.label())
-                            .selected(f == filter)
-                            .tab_stop(false)
-                            .on_click(dispatch::on_click(
-                                &self.filter_focus,
-                                Box::new(SetFilter {
-                                    filter: f.as_str().into(),
-                                }),
-                            ))
-                    }),
-                ))
+                .child(
+                    Segmented::new("filter-group")
+                        .small()
+                        .selected(
+                            StatusFilter::ALL
+                                .iter()
+                                .position(|f| *f == filter)
+                                .unwrap_or(0),
+                        )
+                        .on_select({
+                            let origin = self.filter_focus.clone();
+                            move |ix: &usize, window, cx| {
+                                // Segments swallow the mouse-down; focus the control so
+                                // arrows work next (CON-004), and dispatch from it (KBD-002).
+                                window.focus(&origin, cx);
+                                let set = SetFilter {
+                                    filter: StatusFilter::ALL[*ix].as_str().into(),
+                                };
+                                dispatch::dispatch_from(&origin, &set, window, cx)
+                            }
+                        })
+                        .segments(StatusFilter::ALL.iter().map(|f| {
+                            Segment::new(f.label()).selector(format!("filter-{}", f.as_str()))
+                        })),
+                )
                 .into_any_element(),
             focus_wrap(
                 "group-by-wrap",

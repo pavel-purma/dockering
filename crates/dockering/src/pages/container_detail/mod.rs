@@ -3,7 +3,7 @@
 //!
 //! Structure:
 //! - [`ContainerDetailPage`] (this file): the routed page. Header (breadcrumb, status, image
-//!   link, short id, ports, health, actions), the `TabBar`, the removed banner, and the tab
+//!   link, short id, ports, health, actions), the tab bar, the removed banner, and the tab
 //!   entities, which stay alive while switching tabs on the same container (CDT-081).
 //! - [`state::ContainerDetailState`]: inspect data + engine events for this id (CDT-003/080).
 //! - Tabs: [`overview`], [`mounts`], [`network`] (focusable [`rows`] panels, KBD-044),

@@ -50,16 +50,15 @@ macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE
 | `lint` | ubuntu-24.04 | `cargo fmt --check` · `cargo clippy --workspace --all-targets -D warnings` · blocking-call grep (NFR-001) over `crates/dockering/src` and `crates/dk-terminal/src/view` · `cargo deny check` (licences, advisories) |
 | `test` | ubuntu-24.04, windows-2025, macos-15 | `cargo nextest run --workspace` (unit, contract with fixtures, gpui `TestAppContext` view tests) |
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
-| `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package |
+| `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package (on `main`). On Windows, every push and PR also builds the Inno installer (x64, arm64) and runs silent install → `--version` → uninstall (REL-014) |
 | `release` | on tag `v*` | Build all, sign, upload artifacts to a GitHub Release. *(Planned: verify → package/sign → update manifest → attest → draft; [distribution.md](features/distribution.md) REL-010…013.)* |
-| `installer` / `installer-smoke` *(planned)* | windows-2025, push to `main` | Build the Inno installer (x64, arm64); silent install → `--version` → uninstall (REL-014) |
 | `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
 | `release-plz` *(planned)* | push to `main` / `release/*` | `release-pr`: open or update the release PR (version + changelog). `release`: after a release PR merges, create the `v*` tag, which starts `release` (REL-010/011) |
 | `pr-title` *(planned)* | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that release-plz reads) |
 | Dependabot | weekly (Mondays), `.github/dependabot.yml` | Version-update PRs for `cargo` and `github-actions`, titled `chore(deps): …`. Minor/patch bumps grouped per ecosystem; majors separate. Security updates are on too. |
 | `wslc-abi-watch` | weekly schedule, ubuntu-24.04 | `cargo xtask wslc-abi-check latest`. If the latest `microsoft/WSL` release changed `wslc.idl`, open an issue (20 §5.7). |
 
-Caching: `Swatinem/rust-cache`. Linux runners install the prerequisites above.
+Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) and restored by PRs. Dev/test builds carry no debuginfo (`CARGO_PROFILE_DEV_DEBUG=0`). The Windows `test` job builds on a trusted ReFS Dev Drive. Linux runners install the prerequisites above.
 
 ## Packaging (`cargo-packager`, config in `packaging/`)
 

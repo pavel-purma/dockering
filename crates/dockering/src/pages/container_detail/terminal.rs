@@ -18,7 +18,6 @@ use futures::StreamExt;
 use futures::channel::mpsc;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -34,6 +33,7 @@ use crate::state::{AppState, ParkedSessions, TerminalRegistry};
 use crate::strings as s;
 use crate::ui::dispatch;
 use crate::ui::notify;
+use crate::ui::segmented::{Segment, Segmented};
 
 /// Shell choices (TRM-004).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -643,19 +643,20 @@ impl TerminalTab {
     fn render_toolbar(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let external = self.external_available(cx);
         let active = self.active;
-        let tabs =
-            TabBar::new("terminal-sessions")
-                .segmented()
-                .small()
-                .selected_index(active)
-                .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                    this.active = *ix;
-                    this.focus_pending = true;
-                    cx.notify();
-                }))
-                .children(self.sessions.iter().enumerate().map(|(i, sess)| {
-                    Tab::new().label(s::terminal_session(i + 1, sess.shell.label()))
-                }));
+        let tabs = Segmented::new("terminal-sessions")
+            .small()
+            .selected(active)
+            .on_select(cx.listener(|this, ix: &usize, _, cx| {
+                this.active = *ix;
+                this.focus_pending = true;
+                cx.notify();
+            }))
+            .segments(
+                self.sessions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, sess)| Segment::new(s::terminal_session(i + 1, sess.shell.label()))),
+            );
         let shell = self.shell;
         h_flex()
             .id("terminal-toolbar")
@@ -734,17 +735,14 @@ impl TerminalTab {
                         cx.stop_propagation();
                     }))
                     .child(
-                        TabBar::new("terminal-shell-picker")
-                            .segmented()
+                        Segmented::new("terminal-shell-picker")
                             .small()
-                            .selected_index(
-                                Shell::ALL.iter().position(|s| *s == shell).unwrap_or(0),
-                            )
-                            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                            .selected(Shell::ALL.iter().position(|s| *s == shell).unwrap_or(0))
+                            .on_select(cx.listener(|this, ix: &usize, _, cx| {
                                 this.shell = Shell::ALL[*ix];
                                 cx.notify();
                             }))
-                            .children(Shell::ALL.iter().map(|s| Tab::new().label(s.label()))),
+                            .segments(Shell::ALL.iter().map(|s| Segment::new(s.label()))),
                     ),
             )
             .when(shell == Shell::Custom, |this| {

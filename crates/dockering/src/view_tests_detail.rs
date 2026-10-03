@@ -197,7 +197,7 @@ fn cdt_001_delete_running_confirms_with_force(cx: &mut TestAppContext) {
     h.press(cx, "delete");
     assert!(h.has_dialog(cx), "destructive actions confirm (SHL-002)");
     h.draw(cx);
-    h.press(cx, "ctrl-enter");
+    h.press(cx, "secondary-enter");
     h.wait_until(cx, "removed + back to list", |_, cx| {
         *h.shell.read(cx).route() == Route::Containers
     });
@@ -354,7 +354,7 @@ fn cdt_010_overview_masks_secrets_and_reveal_works(cx: &mut TestAppContext) {
         Some(crate::strings::MASKED_VALUE)
     );
     // Mod+C copies the focused value (KBD-044), even while masked (explicit action).
-    h.press(cx, "ctrl-c");
+    h.press(cx, "secondary-c");
     let copied = cx.read_from_clipboard().and_then(|c| c.text());
     assert_eq!(copied.as_deref(), Some("secret"));
     // Single letters still work on the non-input panel (KBD-041): C copies the id.
@@ -438,7 +438,7 @@ fn cdt_030_network_link_and_port_link(cx: &mut TestAppContext) {
     let f = cx.read(|cx| net.read(cx).rows().focus.clone());
     h.focus(cx, &f);
     // Row 0 is the port 8080:80 (Mod+C copies its URL), row 1 the bridge network.
-    h.press(cx, "home ctrl-c");
+    h.press(cx, "home secondary-c");
     let copied = cx.read_from_clipboard().and_then(|c| c.text());
     assert_eq!(copied.as_deref(), Some("http://localhost:8080"));
     h.press(cx, "down enter");
@@ -461,7 +461,7 @@ fn cdt_040_inspect_shows_pretty_json_unmasked(cx: &mut TestAppContext) {
     assert!(text.contains("DB_PASSWORD=secret"), "not masked (CDT-040)");
     // Mod+F from the page opens the in-editor search (KBD-025).
     focus_tab_bar(&h, &page, cx);
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     let open = cx.read(|cx| {
         inspect
             .read(cx)
@@ -657,7 +657,7 @@ fn log_004_search_next_prev(cx: &mut TestAppContext) {
     }
     wait_lines(&h, cx, &logs, 4);
     focus_tab_bar(&h, &page, cx);
-    h.press(cx, "ctrl-f");
+    h.press(cx, "secondary-f");
     let search_focused = cx
         .update_window(h.any_window(), |_, window, cx| {
             gpui_kit::Focusable::focus_handle(logs.read(cx).search_input(), cx).is_focused(window)
@@ -709,13 +709,13 @@ fn log_004_toggles_clear_and_copy_all(cx: &mut TestAppContext) {
     if ts1 {
         h.press(cx, "alt-t");
     }
-    h.press(cx, "ctrl-shift-c");
+    h.press(cx, "secondary-shift-c");
     let copied = cx
         .read_from_clipboard()
         .and_then(|c| c.text())
         .unwrap_or_default();
     assert_eq!(copied, "one\ntwo\n");
-    h.press(cx, "ctrl-shift-k");
+    h.press(cx, "secondary-shift-k");
     assert!(
         cx.read(|cx| logs.read(cx).lines().is_empty()),
         "clear is client-side"
@@ -736,7 +736,7 @@ fn log_004_save_writes_through_hub(cx: &mut TestAppContext) {
     let path = dir.path().join("redis.log");
     let f = cx.read(|cx| logs.read(cx).list_focus().clone());
     h.focus(cx, &f);
-    h.press(cx, "ctrl-s");
+    h.press(cx, "secondary-s");
     assert!(cx.did_prompt_for_new_path(), "native save dialog");
     let target = path.clone();
     cx.simulate_new_path_selection(move |_| Some(target));
@@ -1013,7 +1013,7 @@ fn trm_008_session_survives_navigation(cx: &mut TestAppContext) {
     leave_terminal(&h, cx);
     // Our test handles would keep the page alive; the shell's is the only owner.
     drop((page, tab));
-    h.press(cx, "ctrl-2");
+    h.press(cx, "secondary-2");
     h.wait_until(cx, "images page", |_, cx| {
         *h.shell.read(cx).route() == Route::Images
     });
@@ -1066,7 +1066,7 @@ fn trm_008_closed_on_engine_switch(cx: &mut TestAppContext) {
     let view = cx.read(|cx| tab.read(cx).active_view().cloned()).unwrap();
     leave_terminal(&h, cx);
     drop((page, tab));
-    h.press(cx, "ctrl-1");
+    h.press(cx, "secondary-1");
     h.wait_until(cx, "parked", |_, cx| {
         crate::state::TerminalRegistry::parked_count(cx) == 1
     });

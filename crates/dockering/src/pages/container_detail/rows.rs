@@ -20,7 +20,7 @@ use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     Action, AnyElement, App, ClipboardItem, Context, FocusHandle, IntoElement, MouseButton, Pixels,
-    ScrollHandle, SharedString, Window, div, point, px,
+    ScrollHandle, SharedString, Window, div, point, px, relative,
 };
 
 use crate::actions::rows;
@@ -97,8 +97,11 @@ impl Row {
 pub enum Layout {
     /// Key/value pairs (`DescriptionList`).
     List,
-    /// A table with these column headers (Kit `Table`).
-    Table(Vec<SharedString>),
+    /// A table with these column headers (Kit `Table`) and optional relative column widths.
+    Table {
+        headers: Vec<SharedString>,
+        weights: Option<Vec<f32>>,
+    },
 }
 
 pub struct Section {
@@ -131,15 +134,25 @@ impl Section {
         Self {
             id,
             title: title.to_owned().into(),
-            layout: Layout::Table(
-                headers
+            layout: Layout::Table {
+                headers: headers
                     .iter()
                     .map(|h| SharedString::from(h.to_string()))
                     .collect(),
-            ),
+                weights: None,
+            },
             rows,
             empty: empty.to_owned().into(),
         }
+    }
+
+    /// Relative column widths of a table (one per header; the Kit default is equal widths).
+    pub fn weights(mut self, w: &[f32]) -> Self {
+        if let Layout::Table { headers, weights } = &mut self.layout {
+            debug_assert_eq!(headers.len(), w.len());
+            *weights = Some(w.to_vec());
+        }
+        self
     }
 }
 
@@ -403,20 +416,26 @@ fn render_section<V: 'static>(
                     .children(items)
                     .into_any_element()
             }
-            Layout::Table(headers) => {
-                let head = TableHeader::new().child(
-                    TableRow::new()
-                        .children(headers.into_iter().map(|h| TableHead::new().child(h))),
-                );
+            Layout::Table { headers, weights } => {
+                let basis = |ix: usize| weights.as_ref().and_then(|w| w.get(ix)).copied();
+                let head = TableHeader::new().child(TableRow::new().children(
+                    headers.into_iter().enumerate().map(|(ix, h)| {
+                        TableHead::new()
+                            .when_some(basis(ix), |el, w| el.flex_basis(relative(w)))
+                            .child(h)
+                    }),
+                ));
                 let body = TableBody::new().children(section.rows.into_iter().map(|row| {
                     let is_cursor = cursor == Some(&row.key);
                     let key = row.key.clone();
                     TableRow::new()
                         .when(is_cursor, |r| r.bg(cx.theme().accent))
-                        .children(row.cells.into_iter().map(|c| {
-                            TableCell::new().child(cell_element(
-                                c, &key, false, focus, reveal, scroll, state, cx, access,
-                            ))
+                        .children(row.cells.into_iter().enumerate().map(|(ix, c)| {
+                            TableCell::new()
+                                .when_some(basis(ix), |el, w| el.flex_basis(relative(w)))
+                                .child(cell_element(
+                                    c, &key, false, focus, reveal, scroll, state, cx, access,
+                                ))
                         }))
                 }));
                 Table::new()

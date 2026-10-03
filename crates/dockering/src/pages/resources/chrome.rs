@@ -5,7 +5,7 @@
 //! logic stays in the page.
 
 use dk_core::EngineError;
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::spinner::Spinner;
@@ -22,6 +22,7 @@ use crate::strings as s;
 use crate::ui::dispatch;
 use crate::ui::list_table::{ColumnSpec, RowMenuTrigger, SortState};
 use crate::ui::menu::TrackBounds as _;
+use crate::ui::segmented::{Segment, Segmented};
 use crate::ui::widgets::focus_wrap;
 
 /// The search field (SHL-006).
@@ -73,21 +74,25 @@ pub fn filter_segment(
             }
         })
         .child(
-            ButtonGroup::new(SharedString::from(format!("{id}-group")))
+            Segmented::new(SharedString::from(format!("{id}-group")))
                 .small()
-                .children(options.iter().map(|(value, label)| {
-                    let value = *value;
-                    Button::new(SharedString::from(format!("{id}-{value}")))
-                        .label(*label)
-                        .selected(value == current)
-                        .tab_stop(false)
-                        .on_click(dispatch::on_click(
-                            &origin,
-                            Box::new(SetFilter {
-                                filter: value.into(),
-                            }),
-                        ))
-                })),
+                .selected(options.iter().position(|(v, _)| *v == current).unwrap_or(0))
+                .on_select({
+                    move |ix, window, cx| {
+                        // Segments swallow the mouse-down; focus the control so arrows
+                        // work next (CON-004), and dispatch from it (KBD-002).
+                        window.focus(&origin, cx);
+                        let set = SetFilter {
+                            filter: options[*ix].0.into(),
+                        };
+                        dispatch::dispatch_from(&origin, &set, window, cx)
+                    }
+                })
+                .segments(
+                    options.iter().map(|(value, label)| {
+                        Segment::new(*label).selector(format!("{id}-{value}"))
+                    }),
+                ),
         )
         .into_any_element()
 }

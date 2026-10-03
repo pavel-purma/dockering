@@ -128,6 +128,7 @@ fn set_depends(c: &mut dk_core::ContainerSummary, v: &str) {
 pub fn engine() -> Arc<FakeEngine> {
     let e = FakeEngine::new("demo");
     e.set_containers(containers());
+    seed_mount_details(&e);
     let image = |r: &str, size: u64| {
         let mut i = fixtures::image(r, r);
         i.size = size;
@@ -196,6 +197,58 @@ pub fn engine() -> Arc<FakeEngine> {
         network("legacy-net", "bridge", "172.30.0", None),
     ]);
     e
+}
+
+/// Mounts tab data (CDT-020): the summary mounts as volumes, plus a few binds with long
+/// host paths and mode options.
+fn seed_mount_details(e: &FakeEngine) {
+    use dk_core::{MountDetail, MountKind};
+    let bind = |source: &str, destination: &str, mode: &str| MountDetail {
+        kind: MountKind::Bind,
+        source: source.into(),
+        destination: destination.into(),
+        mode: mode.into(),
+        rw: !mode.split(',').any(|o| o == "ro"),
+        propagation: Some("rprivate".into()),
+        volume_name: None,
+    };
+    for c in containers() {
+        let mut mounts: Vec<MountDetail> = c
+            .mounts
+            .iter()
+            .map(|m| MountDetail {
+                kind: MountKind::Volume,
+                source: format!("/var/lib/docker/volumes/{}/_data", m.source),
+                destination: m.destination.clone(),
+                mode: "z".into(),
+                rw: m.rw,
+                propagation: None,
+                volume_name: Some(m.source.clone()),
+            })
+            .collect();
+        match c.name.as_str() {
+            "myshop-db-1" => mounts.push(bind(
+                r"C:\Users\dev\projects\myshop\docker\postgres\init-scripts",
+                "/docker-entrypoint-initdb.d",
+                "ro",
+            )),
+            "myshop-api-1" => {
+                mounts.push(bind(
+                    r"C:\Users\dev\.local\share\copilot-proxy-api",
+                    "/root/.local/share/copilot-proxy-api",
+                    "rw",
+                ));
+                mounts.push(bind("/run/secrets/api-token", "/run/secrets/token", "ro,Z"));
+            }
+            _ => {}
+        }
+        if mounts.is_empty() {
+            continue;
+        }
+        let mut d = fixtures::details_for(c);
+        d.mounts = mounts;
+        e.set_container_details(d);
+    }
 }
 
 /// Factories for `HubOptions.factories` in `--demo` mode, plus the engine (so `main` can
