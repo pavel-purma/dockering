@@ -48,7 +48,7 @@ futures = "0.3.32"
 bytes = { version = "1.11", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8.23"
+toml = "1.1.6"
 thiserror = "2"
 anyhow = "1"
 async-trait = "0.1.89"
