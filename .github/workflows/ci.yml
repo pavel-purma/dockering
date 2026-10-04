@@ -83,6 +83,15 @@ jobs:
         os: [ubuntu-24.04, windows-2025, macos-15]
     steps:
       - uses: actions/checkout@v7
+      - name: macOS packaging recovery under native Bash 3.2 (REL-017)
+        if: runner.os == 'macOS'
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+        env:
+          PACKAGE_MACOS_TEST_BASH: /bin/bash
+        run: |
+          /bin/bash --version
+          /bin/bash -n scripts/package-macos.sh
+          python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
       - name: Linux prerequisites (GPUI Kit)
         if: runner.os == 'Linux'
         run: bash scripts/bootstrap.sh
@@ -191,6 +200,9 @@ jobs:
         if: runner.os == 'macOS' && github.event_name != 'pull_request'
         shell: bash
         run: bash scripts/package-macos.sh "${{ matrix.target }}"
+      - name: Verify every generated distribution file (REL-017)
+        if: github.event_name != 'pull_request' || runner.os == 'Windows'
+        run: cargo xtask verify-assets --assets target/dist/${{ matrix.target }} --target ${{ matrix.target }}
       - name: Silent install / uninstall, per user and all users (REL-014)
         if: runner.os == 'Windows'
         shell: pwsh
