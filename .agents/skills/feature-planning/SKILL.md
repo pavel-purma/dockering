@@ -30,7 +30,7 @@ Read, in this order:
 2. `docs/spec/00-product.md` (scope and **non-goals**)
 3. `docs/spec/10-architecture.md` §3 (threading rules) and `docs/spec/21-engine-api-contract.md` (`Engine` trait, capabilities)
 4. Every feature spec in `docs/spec/features/` that the request touches, plus `docs/spec/30-ui-shell.md` for UI work
-5. `docs/plan/README.md` (milestones), and any existing plan in `docs/plan/features/` for the same area
+5. `docs/plan/README.md` (milestones), if present, and any existing plan in `docs/plan/features/` for the same area
 6. Code: `Grep` for the related modules to learn what exists already (skip if the crate isn't there yet)
 
 ### Step 2: Classify and check scope
@@ -39,7 +39,7 @@ Read, in this order:
 - Does it conflict with an existing requirement or ADR? If so, list the conflicts.
 
 ### Step 3: Clarify (only what changes the design)
-Ask the user at most 3–4 focused questions (use AskUserQuestion), and only when the answer changes the
+Ask the user at most 3–4 focused questions (use AskUserQuestion in Claude Code or question in OpenCode), and only when the answer changes the
 plan. Examples: which engines must support it, UI placement, destructive-action semantics. Use
 sensible defaults for everything else and state them in the plan under *Assumptions*.
 
@@ -62,8 +62,8 @@ Work out, delegating to the `architect` agent for non-trivial designs:
 
 ### Step 6: Write the plan
 Create `docs/plan/features/<slug>.md` from [plan-template.md](plan-template.md) (kebab-case slug,
-status `draft`), and add it to `docs/plan/features/README.md`. If the plan adds tasks to a milestone, also
-update the milestone table in `docs/plan/README.md`.
+status `draft`), and add it to `docs/plan/features/README.md` (create the index if absent). If the plan adds tasks to an existing milestone, also
+update the milestone table in `docs/plan/README.md`, if present.
 
 ### Step 7: Present and stop
 Show the user a short summary: the requirement IDs added or changed, contract changes, the task

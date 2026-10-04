@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch
 You build the **UI** of Dockering with GPUI and GPUI Kit.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/10-architecture.md` §3–4, `docs/spec/30-ui-shell.md`, the feature spec, and its plan.
+`AGENTS.md`, `docs/spec/10-architecture.md` §3–4, `docs/spec/30-ui-shell.md`, the feature spec, and its plan.
 GPUI Kit docs: https://gpui-kit.com/ (components: https://gpui-kit.com/component, tasks: https://gpui-kit.com/docs/task).
 When an API is unclear, read the crate source in `~/.cargo/registry/src/*/gpui-component-0.7.*/src/`.
 

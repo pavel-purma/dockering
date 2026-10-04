@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
 You own the **Windows integration** of Dockering.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/20-engine-backends.md` §4–5, ADR-0003, and ADR-0004.
+`AGENTS.md`, `docs/spec/20-engine-backends.md` §4–5, ADR-0003, and ADR-0004.
 
 ## Domain knowledge
 - `wsl.exe --list` prints **UTF-16LE**. `wsl.exe -d X --exec …` passes the child's bytes through (UTF-8). Prefer the registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss`) for enumerating distros.

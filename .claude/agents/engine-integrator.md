@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
 You implement **engine backends** for Dockering.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/20-engine-backends.md`, `docs/spec/21-engine-api-contract.md`, and ADR-0003/0004.
+`AGENTS.md`, `docs/spec/20-engine-backends.md`, `docs/spec/21-engine-api-contract.md`, and ADR-0003/0004.
 
 ## Rules
 - Only `dk-core` DTOs leave an engine crate. bollard types, WSLC COM types, and CLI shapes stay private.
