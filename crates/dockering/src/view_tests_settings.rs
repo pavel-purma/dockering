@@ -290,7 +290,12 @@ fn set_route_section_arrows_and_back_forward(cx: &mut TestAppContext) {
     // Deep links push history; Back returns to the previous section, same page entity.
     open(&h, cx, SettingsSection::Logs);
     open(&h, cx, SettingsSection::Stats);
-    h.press(cx, "alt-left");
+    let (back, forward) = if cfg!(target_os = "macos") {
+        ("cmd-[", "cmd-]")
+    } else {
+        ("alt-left", "alt-right")
+    };
+    h.press(cx, back);
     h.wait_until(cx, "back to logs", |_, cx| {
         *h.shell.read(cx).route()
             == Route::Settings {
@@ -304,7 +309,7 @@ fn set_route_section_arrows_and_back_forward(cx: &mut TestAppContext) {
         "one entity across sections"
     );
     assert_eq!(cx.read(|cx| same.read(cx).section()), SettingsSection::Logs);
-    h.press(cx, "alt-right");
+    h.press(cx, forward);
     assert_eq!(
         cx.read(|cx| same.read(cx).section()),
         SettingsSection::Stats
