@@ -2,6 +2,7 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-04 · ci · Flaky macOS DMG packaging: `build (x86_64-apple-darwin)` failed twice on `main` with `hdiutil: couldn't eject … Resource busy` inside create-dmg (2 of 14 packaging runs on the Intel runner, 0 of 17 on arm64; the run before each failure passed). `cargo xtask package` now force-detaches the leftover `/Volumes/Dockering` and runs cargo-packager again, up to 3 runs; other failures are not repeated. cargo-packager 0.11.8 is the latest and pins create-dmg 1.1.1, whose eject retry lasts only ~6 s (create-dmg 1.3.0 retries for ~30 s).
 - 2026-10-04 · release · **execution approved** first unsigned `v0.1.0` release for all six targets. REL-016 explicitly permits approved unsigned publication; REL-017 requires all 12 distribution files. Public provenance is independent of signing; unsigned builds disable signing, notarization, updater, and winget. · [plan](../plan/features/unsigned-first-release.md)
 
 - 2026-10-04 · engines · **implemented** fix for engines vanishing after a switch (ENG-009 hid same-daemon engines, e.g. Docker Desktop's two pipes, and Rescan never restored them). ENG-009 now annotates instead of hiding, *Un-merge* removed. New ENG-113 (discovery only at start + explicit Rescan), ENG-114 (stable listing), ENG-115 (per-engine settings survive rescans), ENG-116 (pinned default engine); ENG-103 puts the default first. Rescan leaves the switcher footer. · [plan](../plan/features/engine-scan-and-defaults.md)

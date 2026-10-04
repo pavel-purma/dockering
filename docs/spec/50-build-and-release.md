@@ -80,6 +80,8 @@ Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) 
 
 App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 16…1024). The "Stacked D" icon is generated from SVG masters by `cargo xtask icons` (REL-050/051).
 
+The macOS `.dmg` is built by cargo-packager's pinned `create-dmg` script, which now and then fails to eject its temporary disk image (`hdiutil: couldn't eject "diskN" - Resource busy`). `cargo xtask package` handles it: when cargo-packager fails and `/Volumes/Dockering` is still mounted, it force-detaches the volume and runs cargo-packager again, up to 3 runs in all. A failure that leaves no volume mounted (signing, notarisation, a bad config) is not repeated.
+
 ## Licensing (REL-001…)
 
 - **REL-001** Project licence: **MIT**, in `LICENSE` (changed from MIT OR Apache-2.0 on 2026-10-03, before any public release). Dependencies keep their own licences; their notices are in `THIRD_PARTY_LICENSES.html` (REL-002).
