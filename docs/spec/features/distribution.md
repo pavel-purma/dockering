@@ -1,6 +1,6 @@
 # Feature: Distribution, releases & updates (Windows first)
 
-- **Status:** in-progress (2026-10-04; unsigned release preparation verified locally; publication and signing setup pending)
+- **Status:** in-progress (2026-10-04; unsigned v0.1.0 published and verified on all six targets; signing/notarization, updater, winget, and release-bot activation deferred)
 - **Requirement prefixes:** REL (release, packaging, signing, winget, branding; REL-001…003 licensing stay in [spec 50](../50-build-and-release.md#licensing-rel-001)) · UPD (in-app updates)
 - **Plan:** [windows-distribution](../../plan/features/windows-distribution.md) · **ADR:** [0006](../../plan/adr/0006-windows-installer-and-updates.md)
 
@@ -8,10 +8,11 @@ Dockering ships through **GitHub Releases** (the only storage for binaries), a b
 installer on Windows, **winget**, and an opt-out **in-app updater** that reads a signed manifest
 from the latest GitHub Release. Windows is the first platform to get the full flow. The release
 flow, asset names, icon, and update manifest are cross-platform from day one, so macOS and Linux
-can reuse them later (macOS/Linux get *notify-only* updates now).
+can reuse them later (macOS/Linux use *notify-only* updates when the updater is enabled).
 
-The repository is public. The first release is prepared as an explicitly **unsigned** release
-(REL-016), with signing, notarization, the updater, and winget deferred. Public visibility alone
+The repository is public. The first release, [v0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0),
+was published as an explicitly **unsigned** release (REL-016), with signing, notarization,
+the updater, winget, and release-bot setup deferred. Public visibility alone
 does not enable those features. See [the first-release plan](../../plan/features/unsigned-first-release.md).
 
 ## 1. Release flow (REL-010…015)
@@ -104,13 +105,14 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 
 | ID | Tests |
 |---|---|
+| REL-010, REL-013 | Successful manual-tag [release run 37228719100](https://github.com/pavel-purma/dockering/actions/runs/37228719100), followed by explicit stable/latest publication; all 15 asset attestations verified against the exact source commit, tag ref, and release workflow with self-hosted runners denied. Release-bot App activation remains deferred. |
 | REL-011 | release-plz 0.3.169 dry run (plan §9, S-9); `release.yml` `verify` job |
-| REL-016 | `release.yml` explicit unsigned gates; local embedded verify-script cases and complete fixture assembly rehearsal; GitHub execution pending approval. |
-| REL-017 | `rel_017_all_twelve_distribution_assets_required`, `rel_017_each_target_requires_every_format`, `rel_017_empty_and_non_file_assets_rejected`, `rel_017_unexpected_distribution_rejected_metadata_allowed`; workflow duplicate collector rehearsal. |
+| REL-016 | `release.yml` explicit unsigned gates; nine local verify-script cases and complete fixture assembly rehearsal; successful [release run](https://github.com/pavel-purma/dockering/actions/runs/37228719100), unsigned Windows executables, absent manifest signature, and stable/latest [publication](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0) at `2026-10-04T20:09:38Z`. |
+| REL-017 | Four `rel_017_*` xtask validation tests, duplicate collector rehearsal, and exact-commit CI [37228704953](https://github.com/pavel-purma/dockering/actions/runs/37228704953). Downloaded exact 15-file set; all 14 checksum entries and six manifest platforms/URLs/hash/size/kind verified; all 15 version-pinned and 12 latest distribution URLs return HTTP 200. [Evidence](../../plan/release-checklist.md#evidence-for-v010). |
 | REL-012 | `xtask` `rel_012_stable_asset_names_per_target`, `rel_012_versions_validated` |
-| REL-014, 020…026 | `scripts/installer-smoke.ps1` (CI `installer` job, user + all users; release x64); local update round trip (plan §9, S-9) |
+| REL-014, 020…026 | `scripts/installer-smoke.ps1` in CI `build` and release `package` jobs: per-user and `/ALLUSERS` install/uninstall for native Windows x64 and ARM64; [exact-commit CI](https://github.com/pavel-purma/dockering/actions/runs/37228704953). Real-machine GUI/update walkthrough remains unverified. |
 | REL-027 | `installer-smoke.ps1` VERSIONINFO check |
-| REL-030…032 | `release.yml` "Verify Windows signatures" + the stable-unsigned guard |
+| REL-030…032 | `release.yml` signing conditions, "Verify Windows signatures", and signed-channel stable guard; downloaded x64/ARM64 setup and portable executables report `NotSigned` as required for REL-016. Live signing-provider verification is deferred. |
 | REL-050 | `xtask` `rel_050_ico_header_lists_all_sizes`; CI `cargo xtask icons --check` |
 | UPD-001 | `upd_001_asset_url_pinned_to_repo_and_version`, `upd_010_only_github_hosts` |
 | UPD-002 | `upd_002_manifest_roundtrip_ignores_unknown`, `upd_002_unknown_schema_is_no_update`, `upd_002_accepts_xtask_manifest`, `upd_002_parse_never_panics`, xtask `upd_002_manifest_from_assets` |
@@ -127,11 +129,16 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 
 ## Known gaps
 
+- Signing/notarization credentials, updater keys and channel activation, first winget submission,
+  and release-bot App setup are deferred. The unsigned workflow does not exercise those services.
 - *Restart to update* doesn't list running terminal sessions or image pulls before quitting (the plan's risk table promised a confirmation). Follow-up.
 - Remote signing (SignPath or Azure) signs `dockering.exe` and the setup, but not the uninstaller Inno writes at install time. `SignedUninstaller` needs a local `SignTool` (`DOCKERING_INNO_SIGNTOOL`). Follow-up in S-9.
-- `/ALLUSERS` silent install in CI and the all-users update path through `runas` were not run on a real machine yet (CI `installer` job covers the first; release checklist covers the second).
+- CI verifies native x64/ARM64 per-user and `/ALLUSERS` installer flows. Real-machine GUI
+  installation, the all-users updater path through `runas`, macOS/Linux application launch,
+  and WSL/WSLC integration remain unchecked in the [release checklist](../../plan/release-checklist.md).
 - `PUBLIC_KEYS` in `dk-update/src/keys.rs` is empty until the release keys are generated, so updates fail closed until then (REL-060 checklist).
 
-- macOS and Linux get notify-only updates. In-app install there (Sparkle-style `.app` swap, AppImage replace) is a follow-up.
+- macOS and Linux use notify-only updates when the updater is enabled; v0.1.0 has no updater.
+  In-app installation there (Sparkle-style `.app` swap, AppImage replace) is a follow-up.
 - No *Preview* update channel yet (UPD-001 MAY).
 - No delta updates. A full installer is about 20–30 MB.

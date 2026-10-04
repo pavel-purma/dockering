@@ -1,10 +1,36 @@
 # Releasing Dockering
 
-The repository is public. The first release is **0.1.0**, with unsigned downloads for all six
-supported targets. Code signing, macOS notarization, the updater, and winget are deferred.
+The repository is public. The first release, **[0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0)**,
+is published with unsigned downloads for all six supported targets. Code signing, macOS notarization,
+the updater, winget, and release-bot setup are deferred.
 The workflow always creates a **draft**; publication is a separate maintainer action.
 See [the specification](spec/features/distribution.md) and
 [first-release plan](plan/features/unsigned-first-release.md).
+
+## First-release verification
+
+| Evidence | Result |
+|---|---|
+| Release commit | [`041d8fac06f1a2d26a61ed5e13ad16f47371f628`](https://github.com/pavel-purma/dockering/commit/041d8fac06f1a2d26a61ed5e13ad16f47371f628). |
+| Preparation and fixes | Merged [PR #24](https://github.com/pavel-purma/dockering/pull/24), [#25](https://github.com/pavel-purma/dockering/pull/25), and [#27](https://github.com/pavel-purma/dockering/pull/27). |
+| Exact-commit CI | [37228704953](https://github.com/pavel-purma/dockering/actions/runs/37228704953), successful: six packages, three platform test jobs, lint, Docker integration, and eight packaging tests under native macOS Bash 3.2. |
+| Tag build | [37228719100](https://github.com/pavel-purma/dockering/actions/runs/37228719100), successful at the exact release commit: six packages, assembly, provenance, and draft creation. |
+| Downloaded Windows/Linux packages | Expected PE/ELF and Debian architectures/version; Windows setup/portable executables are `NotSigned`; portable archives contain license/notices; downloaded x64 `--version` prints `dockering 0.1.0`. |
+| Complete assets, checksums and manifest | Downloaded all 15 files. All 14 [checksum entries](https://github.com/pavel-purma/dockering/releases/download/v0.1.0/SHA256SUMS) match. Manifest schema/version, six platform filenames/kinds/hashes/sizes/version URLs, and notes URL verified. No `.minisig`. |
+| macOS and Debian format checks | Both DMGs are nonempty with a UDIF `koly` trailer. Linux Debian payload ELF architectures match their targets as well as the metadata. |
+| Provenance | All 15 attestations verified with source digest pinned to the exact release SHA, ref `refs/tags/v0.1.0`, `release.yml` signer, and self-hosted runners denied. |
+| Publication | [Dockering 0.1.0 (unsigned)](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0), published `2026-10-04T20:09:38Z`, stable/latest, `draft=false`, `prerelease=false`; latest API returns this tag and all 15 files. |
+| Public downloads | Anonymous requests follow redirects to HTTP 200 for all 15 version-pinned asset URLs and all 12 latest distribution links. |
+| Channel configuration | Repository variable list remains empty; signing/updater/winget variables are unset. |
+
+The initial unpublished-tag run failed after macOS Bash 3.2 rejected the packaging wrapper;
+it did not produce a release. After native Bash 3.2 recovery/syntax tests and local actionlint
+passed, the unpublished tag was repointed with a lease. Main CI and the replacement tag build
+then ran in parallel; exact-commit CI was green before publication. No published release was changed.
+
+Available verification currently covers automated installer tests and binary/archive inspection.
+Real GUI, physical macOS/Linux launch, and WSL/WSLC walkthroughs remain unchecked in the
+[release checklist](plan/release-checklist.md).
 
 ## First-release setup
 
@@ -28,10 +54,12 @@ builds generate provenance attestations independently of code signing. macOS pac
 the observed busy DMG eject failure at most three times, with cleanup restricted to its own image. Packages bundle the
 MIT license and third-party notices.
 
-## Execute after approval
+## First-release procedure
 
-Preparation is local. **Wait for the user's approval before pushing preparation changes,
-creating a release tag, dispatching release builds, or publishing.** After approval:
+The user approved execution and publication on 2026-10-04. The preparation changes are merged,
+and `v0.1.0` is published and verified. The commands below are the historical first-release
+procedure. Later releases use their new workspace version and tag; never recreate or upload to
+the published `v0.1.0` release.
 
 1. Commit the prepared changes, open a PR, and merge after CI passes. Set the `0.1.0`
    changelog date to the actual release date before merging. Register the PR with the thread.
@@ -91,8 +119,8 @@ creating a release tag, dispatching release builds, or publishing.** After appro
    gh release view v0.1.0 --json isDraft,isPrerelease,url,assets
    ```
 
-   Verify the published assets and permanent download links. Never rerun uploads against a
-   published release; publish a new version for corrections. The release URL will be
+   Verify the published assets and permanent download links. The workflow refuses tags that
+   already have a published release; publish a new version for corrections. The release URL is
    `https://github.com/pavel-purma/dockering/releases/tag/v0.1.0`.
 
 ## Dry runs and retries
@@ -106,10 +134,10 @@ gh workflow run release.yml --ref main -f unsigned=true
 
 The review bundle has the same distributions, metadata, and notes as a tag release. Its manifest
 URLs describe the eventual version tag and resolve only after publication. Dispatching on an
-existing version tag creates or resumes its draft:
+existing **unpublished** version tag creates or resumes its draft. Substitute that version's tag:
 
 ```sh
-gh workflow run release.yml --ref v0.1.0 -f unsigned=true
+gh workflow run release.yml --ref vX.Y.Z -f unsigned=true
 ```
 
 The `unsigned` input defaults to true and skips signing/notarization even if secrets exist.

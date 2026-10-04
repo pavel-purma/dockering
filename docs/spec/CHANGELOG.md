@@ -2,6 +2,8 @@
 
 Newest first. One line per change: date · area · summary · link to plan or PR.
 
+- 2026-10-04 · release · **implemented** first unsigned cross-platform release `v0.1.0`, published stable/latest at `2026-10-04T20:09:38Z` from `041d8fac06f1a2d26a61ed5e13ad16f47371f628`. Exact-commit CI and release builds passed all six targets; all 15 assets, 14 checksum entries, six manifest platforms, attestations pinned to the source/tag/workflow, and public download links were verified. REL-010/013/016/017 and unsigned-channel guards are reconciled. Signing/notarization, updater, winget, release-bot activation, and manual GUI/WSL walkthroughs remain deferred or unverified. · [plan](../plan/features/unsigned-first-release.md)
+
 - 2026-10-04 · ci · Flaky macOS DMG packaging: `build (x86_64-apple-darwin)` failed twice on `main` with `hdiutil: couldn't eject … Resource busy` inside create-dmg (2 of 14 packaging runs on the Intel runner, 0 of 17 on arm64; the run before each failure passed). `cargo xtask package` now force-detaches the leftover `/Volumes/Dockering` and runs cargo-packager again, up to 3 runs; other failures are not repeated. cargo-packager 0.11.8 is the latest and pins create-dmg 1.1.1, whose eject retry lasts only ~6 s (create-dmg 1.3.0 retries for ~30 s).
 - 2026-10-04 · release · **execution approved** first unsigned `v0.1.0` release for all six targets. REL-016 explicitly permits approved unsigned publication; REL-017 requires all 12 distribution files. Public provenance is independent of signing; unsigned builds disable signing, notarization, updater, and winget. · [plan](../plan/features/unsigned-first-release.md)
 
