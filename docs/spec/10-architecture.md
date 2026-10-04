@@ -289,7 +289,7 @@ file and rename. The schema is versioned (`version = 1`) with forward-compatible
 2. `gpui_kit::application().with_assets(Assets).run(|cx| { gpui_kit::init(cx); … })`.
 3. Register the `HubHandle` global, apply the theme, register actions and keybindings.
 4. `gpui_kit::open_window(options_from_state, cx, |window, cx| AppShell::new(window, cx))`.
-5. `AppShell` creates `EngineListStore`. The hub runs discovery ([spec 20 §2](20-engine-backends.md#2-discovery-eng-001eng-010)) in the background, and the last-used engine connects first.
+5. `AppShell` creates `EngineListStore`. The hub runs discovery ([spec 20 §2](20-engine-backends.md#2-discovery-eng-001eng-010)) once in the background; then the pinned default engine (ENG-116), else the last-used engine, connects first (ENG-103). Discovery doesn't run again until an explicit *Rescan* (ENG-113).
    If no engine is found, the **first-run screen** (ENG-111) is shown.
 6. First frame shows the shell with skeleton tables. Data streams in as it arrives.
 

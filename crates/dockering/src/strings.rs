@@ -61,7 +61,7 @@ pub const MANAGE_ENGINES: &str = "Manage engines…";
 pub const START_AND_CONNECT: &str = "Start & connect";
 pub const NO_MATCHING_ENGINES: &str = "No matching engines";
 pub fn also_reachable_via(endpoints: &str) -> String {
-    format!("Also reachable via {endpoints}")
+    format!("Same daemon as {endpoints}")
 }
 
 // ── first run (ENG-111) ─────────────────────────────────────────────────────────────────
@@ -711,7 +711,17 @@ pub const TESTING: &str = "Testing…";
 pub const REMOVE: &str = "Remove";
 pub const HIDE: &str = "Hide";
 pub const UNHIDE: &str = "Unhide";
-pub const UNMERGE: &str = "Un-merge";
+pub const SET_DEFAULT: &str = "Set as default";
+pub const CLEAR_DEFAULT: &str = "Clear default";
+pub const TAG_DEFAULT: &str = "Default";
+pub const TAG_DEFAULT_UNAVAILABLE: &str = "Default (unavailable)";
+pub const CMD_SET_ACTIVE_DEFAULT: &str = "Make active engine the default";
+pub fn default_engine_unavailable(name: &str) -> String {
+    format!("{name} can't be the default engine while it's disabled, hidden, or unsupported")
+}
+pub fn default_engine_set(name: &str) -> String {
+    format!("{name} is now the default engine")
+}
 pub const TAG_HIDDEN: &str = "Hidden";
 pub const TAG_ACTIVE: &str = "Active";
 pub const ORIGIN_MANUAL: &str = "Manual";

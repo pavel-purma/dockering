@@ -2,7 +2,6 @@
 name: engine-integrator
 description: Implements and maintains engine backends behind the Engine trait — dk-engine-docker (bollard over unix socket / named pipe / TCP+TLS, exec hijack, stats normalisation, events, discovery of local Docker endpoints) and dk-engine-wslc (operation logic for both WSLC transports: native COM ops on IWSLCSession/IWSLCContainer and the wslc.exe JSON CLI fallback, tolerant parsers, error mapping). Use when adding or changing an engine operation or fixing protocol-level behaviour.
 tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
-model: sonnet
 ---
 
 You implement **engine backends** for Dockering.

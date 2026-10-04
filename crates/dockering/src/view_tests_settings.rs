@@ -761,19 +761,82 @@ fn eng_109_show_all_toggles_persist(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// ENG-116: *Set as default* pins the engine; *Clear default* unpins it. Idempotent.
 #[gpui_kit::test]
-fn eng_009_unmerge_adds_id_to_config(cx: &mut TestAppContext) {
+fn eng_116_set_and_clear_default_persist(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     open(&h, cx, SettingsSection::Engines);
-    engine_op(&h, cx, "wsl-ubuntu", EngineOpKind::Unmerge);
-    assert_eq!(
-        hub_config(&h).engines.unmerged,
-        vec![EngineId::new("wsl-ubuntu")]
-    );
-    // Idempotent.
-    engine_op(&h, cx, "wsl-ubuntu", EngineOpKind::Unmerge);
-    assert_eq!(hub_config(&h).engines.unmerged.len(), 1);
+    let id = h.hub.active_engine().expect("an active engine");
+    assert_eq!(hub_config(&h).engines.default, None);
+    engine_op(&h, cx, id.as_str(), EngineOpKind::SetDefault);
+    assert_eq!(hub_config(&h).engines.default, Some(id.clone()));
+    // The engine's config is stored too, so it exists before a slow startup scan finishes.
+    assert!(hub_config(&h).engines.entries.iter().any(|e| e.id == id));
+    engine_op(&h, cx, id.as_str(), EngineOpKind::SetDefault);
+    assert_eq!(hub_config(&h).engines.default, Some(id.clone()));
+    engine_op(&h, cx, id.as_str(), EngineOpKind::ClearDefault);
+    assert_eq!(hub_config(&h).engines.default, None);
+    h.shutdown();
+}
+
+/// ENG-116: the palette entry pins the active engine.
+#[gpui_kit::test]
+fn eng_116_palette_command_pins_active_engine(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let active = h.hub.active_engine().expect("an active engine");
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::SetActiveEngineDefault), cx)
+    });
+    assert_eq!(hub_config(&h).engines.default, Some(active));
+    h.shutdown();
+}
+
+/// ENG-116: the palette entry refuses an engine the hub would skip at startup.
+#[gpui_kit::test]
+fn eng_116_palette_command_refuses_a_disabled_engine(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    open(&h, cx, SettingsSection::Engines);
+    let active = h.hub.active_engine().expect("an active engine");
+    engine_op(&h, cx, active.as_str(), EngineOpKind::ToggleEnabled);
+    h.wait_until(cx, "active engine disabled", |_, cx| {
+        h.shell
+            .read(cx)
+            .engines()
+            .read(cx)
+            .get(&active)
+            .is_some_and(|e| !e.config.enabled)
+    });
+    h.update(cx, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::actions::SetActiveEngineDefault), cx)
+    });
+    assert_eq!(hub_config(&h).engines.default, None);
+    h.shutdown();
+}
+
+/// ENG-116: the UI snapshot follows a default the hub changed on its own (it clears the pin
+/// when a manual engine is removed), so a reused id never inherits a stale *Default* tag.
+#[gpui_kit::test]
+fn eng_116_refresh_config_follows_a_default_changed_by_the_hub(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let id = h.hub.active_engine().expect("an active engine");
+    let pin = id.clone();
+    h.update(cx, move |_, _, cx| {
+        crate::state::AppState::update_config(cx, move |c| c.engines.default = Some(pin))
+    });
+    h.hub.config().update(|c| c.engines.default = None);
+    let stale = h.update(cx, |_, _, cx| {
+        crate::state::AppState::config(cx).engines.default.clone()
+    });
+    assert_eq!(stale, Some(id), "the snapshot is only refreshed on demand");
+    h.update(cx, |_, _, cx| crate::state::AppState::refresh_config(cx));
+    let fresh = h.update(cx, |_, _, cx| {
+        crate::state::AppState::config(cx).engines.default.clone()
+    });
+    assert_eq!(fresh, None);
     h.shutdown();
 }
 
@@ -1122,8 +1185,9 @@ fn a11y_tab_walk_reaches_all_interactive_settings(cx: &mut TestAppContext) {
     let page = open(&h, cx, SettingsSection::Engines);
     h.draw(cx);
     let engines = tab_walk(&h, cx, &page);
-    // 2 discovery switches, Rescan, Add, then per engine: name, enabled, test, hide.
-    assert!(engines >= 4 + 2 * 4, "{engines}");
+    // 2 discovery switches, Rescan, Add, then per engine: name, enabled, test, set as
+    // default, hide.
+    assert!(engines >= 4 + 2 * 5, "{engines}");
     h.shutdown();
 }
 

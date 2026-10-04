@@ -29,7 +29,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Region | GPUI Kit component | Notes |
 |---|---|---|
 | Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings |
-| Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…", "Rescan" |
+| Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…" (Rescan lives in Settings → Engines, ENG-113) |
 | Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
 | Page header | `v_flex` of two rows: the title on the left and the view controls (filters, group-by, page buttons) on the right; then the search `Input` on the left and, on the right, the summary counts (or the selection actions while rows are checked, SHL-005) followed by the page `⋮`. A small gap separates the header from the table | `chrome::page_header` |
 | Lists | `DataTable` (`TableState` + `TableDelegate`) | Grouped containers: the delegate flattens a tree into rows with `depth` and `expanded`, and renders a disclosure chevron in column 0 (CON-011) |

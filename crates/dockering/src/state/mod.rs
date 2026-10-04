@@ -8,7 +8,9 @@ mod terminals;
 mod ticker;
 mod updates;
 
-pub use engine_list::{EngineListEvent, EngineListStore};
+pub use engine_list::{
+    DefaultMark, EngineListEvent, EngineListStore, can_be_default, default_mark,
+};
 pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
 pub use terminals::{ParkedSessions, TerminalRegistry};
@@ -53,6 +55,27 @@ impl AppState {
         let handle = cx.global::<AppState>().hub.config();
         handle.update(f);
         let fresh = handle.get();
+        cx.global_mut::<AppState>().config = fresh;
+    }
+
+    /// Pins `status` as the startup default (ENG-116). Its config is stored too, so the hub
+    /// registers the engine at startup before discovery runs: a slow or timed-out scan can't
+    /// make the app open a different engine.
+    pub fn pin_default(cx: &mut App, status: &dk_core::EngineStatus) {
+        let cfg = status.config.clone();
+        Self::update_config(cx, move |c| {
+            c.engines.default = Some(cfg.id.clone());
+            if !c.engines.entries.iter().any(|e| e.id == cfg.id) {
+                c.engines.entries.push(cfg);
+            }
+        });
+    }
+
+    /// Re-reads the snapshot from the hub. The hub also edits its config on its own
+    /// (`add_engine`, `remove_engine` clear or store entries, and the default engine), so a
+    /// caller that just awaited one of those calls refreshes before the next render.
+    pub fn refresh_config(cx: &mut App) {
+        let fresh = cx.global::<AppState>().hub.config().get();
         cx.global_mut::<AppState>().config = fresh;
     }
 

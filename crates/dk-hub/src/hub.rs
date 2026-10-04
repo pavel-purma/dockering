@@ -231,8 +231,11 @@ impl HubInner {
                 disconnect_locked(&mut reg, old);
                 match reg.get(old) {
                     Some(e) if reg.visible(e) => reg.emit_status(old),
-                    // e.g. merged into another engine (ENG-009) while it was active.
-                    Some(_) => reg.emit(HubEvent::Removed(old.clone())),
+                    // Not listed (e.g. a distro without Docker while *Show all* is off).
+                    Some(_) => {
+                        reg.emit(HubEvent::Removed(old.clone()));
+                        reg.refresh_daemon_notes();
+                    }
                     None => {}
                 }
             }
@@ -302,10 +305,10 @@ impl HubInner {
             let mut reg = lock(&self.reg);
             let view = View::from_settings(&e);
             let changed = view.show_all_wsl_distros != reg.view.show_all_wsl_distros
-                || view.show_all_wslc_sessions != reg.view.show_all_wslc_sessions
-                || view.unmerged != reg.view.unmerged;
+                || view.show_all_wslc_sessions != reg.view.show_all_wslc_sessions;
             reg.view = view;
             if changed {
+                reg.refresh_daemon_notes();
                 reg.emit_snapshot();
             }
         }
@@ -329,12 +332,15 @@ impl HubInner {
             let c = lock(&self.config).clone();
             if let Err(e) = config::save_config(&self.paths, &c) {
                 tracing::warn!(error = %e, "failed to save config.toml");
+                // Keep it dirty: the next change or the shutdown flush retries.
+                self.saver.config_dirty.store(true, Ordering::SeqCst);
             }
         }
         if self.saver.state_dirty.swap(false, Ordering::SeqCst) {
             let s = lock(&self.ui_state).clone();
             if let Err(e) = config::save_ui_state(&self.paths, &s) {
                 tracing::warn!(error = %e, "failed to save state.json");
+                self.saver.state_dirty.store(true, Ordering::SeqCst);
             }
         }
     }
@@ -638,7 +644,12 @@ pub(crate) fn update_engine(h: &HubHandle, cfg: EngineConfig) -> HubCall<()> {
                 e.state = registry::initial_state(&e.config, e.factory, None);
             }
             let stored = e.config.clone();
+            if endpoint_changed {
+                e.daemon_id = None;
+            }
             reg.emit_status(&cfg.id);
+            // Renames, the enabled flag, and endpoint changes all alter the same-daemon notes.
+            reg.refresh_daemon_notes();
             (stored, is_active && (endpoint_changed || toggled))
         };
         inner.store_entry(stored);
@@ -672,11 +683,13 @@ pub(crate) fn remove_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                     c.token.cancel();
                 }
                 reg.emit(HubEvent::Removed(id.clone()));
+                reg.refresh_daemon_notes();
                 None
             } else {
                 reg.entries[i].config.hidden = true;
                 let cfg = reg.entries[i].config.clone();
                 reg.emit_status(id);
+                reg.refresh_daemon_notes();
                 Some(cfg)
             }
         };
@@ -686,6 +699,11 @@ pub(crate) fn remove_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                 inner.update_config(|c| c.engines.entries.retain(|e| &e.id != id));
                 if inner.ui_state().last_engine.as_ref() == Some(id) {
                     inner.update_ui_state(|s| s.last_engine = None);
+                }
+                // ENG-116: the default goes with its (manual) engine. A hidden discovered
+                // engine stays pinned and shows as unavailable.
+                if inner.default_engine().as_ref() == Some(id) {
+                    inner.update_config(|c| c.engines.default = None);
                 }
             }
             Some(cfg) => inner.store_entry(cfg),
@@ -728,9 +746,7 @@ pub(crate) fn rescan(h: &HubHandle) -> HubCall<()> {
     let (tx, call) = HubCall::channel();
     h.inner.handle.spawn(async move {
         supervisor::discover(&inner).await;
-        if inner.active_id().is_none() {
-            supervisor::autoselect(&inner).await;
-        }
+        supervisor::select_engine(&inner).await;
         let _ = tx.send(Ok(()));
     });
     call
@@ -1036,6 +1052,11 @@ pub(crate) fn shutdown(h: &HubHandle) {
 impl HubInner {
     pub(crate) fn ui_state(&self) -> UiState {
         lock(&self.ui_state).clone()
+    }
+
+    /// The pinned default engine (ENG-116).
+    pub(crate) fn default_engine(&self) -> Option<EngineId> {
+        lock(&self.config).engines.default.clone()
     }
 }
 

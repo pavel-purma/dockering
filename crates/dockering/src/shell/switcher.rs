@@ -1,8 +1,8 @@
 //! Engine switcher popover (`Mod+K`, ENG-101/KBD-021/075): grouped Local / WSL distros /
 //! WSL containers / Remote; status dot, version, OS/arch tooltip, "also reachable via"
 //! (ENG-009), unsupported entries greyed with the reason (ENG-112), stopped WSL distros
-//! offer *Start & connect* (ENG-106); filter as you type; arrows + Enter; Rescan and
-//! Manage engines… in the footer.
+//! offer *Start & connect* (ENG-106); filter as you type; arrows + Enter; Manage engines… in
+//! the footer. Rescan lives in Settings › Engines (ENG-113).
 
 use dk_core::{EngineGroup, EngineKind, EngineState, EngineStatus};
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -14,9 +14,9 @@ use gpui_kit::{
     SharedString, Subscription, Window, div, px,
 };
 
-use crate::actions::{ManageEngines, Rescan, switcher};
+use crate::actions::{ManageEngines, switcher};
 use crate::keymap::ctx;
-use crate::state::EngineListStore;
+use crate::state::{DefaultMark, EngineListStore, default_mark};
 use crate::strings as s;
 use crate::ui::dispatch;
 use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
@@ -175,6 +175,7 @@ impl Focusable for EngineSwitcher {
 impl Render for EngineSwitcher {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entries = self.entries(cx);
+        let default = crate::state::AppState::config(cx).engines.default.clone();
         let mut last_group = None;
         let mut children = Vec::new();
         for (ix, e) in entries.iter().enumerate() {
@@ -218,6 +219,7 @@ impl Render for EngineSwitcher {
                 }
                 t
             };
+            let mark = default_mark(e, default.as_ref());
             let state_label = engine_state_label(&e.state);
             let dot_color = engine_dot_color(&e.state, cx);
             let kind = e.config.endpoint.kind();
@@ -245,7 +247,24 @@ impl Render for EngineSwitcher {
                     .child(
                         v_flex()
                             .flex_1()
-                            .child(div().text_sm().child(e.config.name.clone()))
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(div().text_sm().child(e.config.name.clone()))
+                                    .when(mark != DefaultMark::None, |this| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(if mark == DefaultMark::Default {
+                                                    s::TAG_DEFAULT
+                                                } else {
+                                                    s::TAG_DEFAULT_UNAVAILABLE
+                                                }),
+                                        )
+                                    }),
+                            )
                             .child(
                                 div()
                                     .text_xs()
@@ -305,14 +324,6 @@ impl Render for EngineSwitcher {
                     .gap_2()
                     .border_t_1()
                     .border_color(cx.theme().border)
-                    .child(
-                        Button::new("switcher-rescan")
-                            .small()
-                            .ghost()
-                            .icon(IconName::RefreshCw)
-                            .label(s::RESCAN)
-                            .on_click(dispatch::on_click(&self.focus, Box::new(Rescan))),
-                    )
                     .child(
                         Button::new("switcher-manage")
                             .small()

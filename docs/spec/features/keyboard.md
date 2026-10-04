@@ -100,7 +100,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-073 | Menus, popovers, and selects: arrows navigate, `Enter` / `Space` activate, `Esc` closes and returns focus to the invoker. Type-ahead selects items. |
 | KBD-074 | Notifications (toasts): `Mod+Shift+N` focuses the newest notification. Its actions (*Copy details*, *Retry*) are Tab-reachable, and `Esc` dismisses it. Toasts with actions don't auto-dismiss while focused. |
 | KBD-076 | Updates: *Check for Updates*, *Restart to Update* (enabled only when an update is ready), and *View Release Notes* are command-palette entries with no default chord. The status-bar update button is reachable through the status-bar focus region (`F6`). On macOS, *Check for Updates…* is also in the app menu (SHL-020). |
-| KBD-075 | Engine switcher and Settings → Engines: all engine actions (Rescan, Test, Start & connect, Remove) are reachable with Tab, arrows, and `Enter`. |
+| KBD-075 | Engine switcher and Settings → Engines: all engine actions (Rescan, Test, Start & connect, Set as default, Remove) are reachable with Tab, arrows, and `Enter`. *Rescan engines* and *Make active engine the default* are also command-palette entries with no default chord. |
 
 ## Customisation (v1 scope)
 

@@ -2,7 +2,6 @@
 name: qa-engineer
 description: Writes and maintains tests for Dockering — unit/proptest for dk-core, fixture snapshot tests for engine parsers, the engine contract suite, FakeEngine-driven hub and GPUI view tests, fake wslc.exe test binary, fake in-process WSLC COM server, fixture recording via xtask (fixture content), performance checks, and the release checklist (`docs/plan/release-checklist.md`, which you own). Use after implementation of a plan task or when coverage for a requirement ID is missing.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: sonnet
 ---
 
 You own **test quality** for Dockering.

@@ -410,6 +410,8 @@ impl AddEngineDialog {
                 this.busy = false;
                 match r {
                     Ok(_) => {
+                        // A reused id must not inherit a stale default tag.
+                        AppState::refresh_config(cx);
                         close(window, cx);
                         notify::success(window, cx, s::engine_added(&display));
                     }
