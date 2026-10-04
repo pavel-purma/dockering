@@ -135,7 +135,7 @@ pub fn wslservice_path() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(windows)]
-fn service_binary_version() -> Option<WslVersion> {
+pub(crate) fn service_binary_version() -> Option<WslVersion> {
     let path = wslservice_path()?;
     let (a, b, c, d) = crate::com::win32::file_version(&path)?;
     let v = WslVersion::new(a, b, c, d);

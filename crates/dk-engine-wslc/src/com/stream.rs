@@ -87,6 +87,7 @@ pub fn pump_handle(
             Ok(ReadOutcome::Eof) => return Ok(true),
             Ok(ReadOutcome::Cancelled) => return Ok(false),
             Err(e) => {
+                super::dispatch::record(e.code().0);
                 return Err(EngineError::protocol(format!(
                     "read failed: 0x{:08X} {}",
                     e.code().0 as u32,

@@ -133,6 +133,8 @@ process, and supports TLS certificates.
 
 ## 5. WSLC backend (`dk-engine-wslc`)
 
+> **Status: implemented repair (2026-10-04).** [WSLC integration repair](../plan/features/wslc-integration-repair.md) completion records ENG-126…136, actual code/tests and final Windows evidence: workspace PASS (WSLC 183 pass/18 live opt-in ignores, hub 77/UI 243), expanded four-Run normal-user acceptance PASS on service FileVersion **3.0.1.0**, reviewer approve. The earlier broad ABI-range/whole-delegate selection/blind retries are historical, not current behavior. **Cross-OS release gate remains open:** Linux cross-check blocked by missing compiler for ring; macOS not run. Native CreateContainer remains separately unverified/disabled; no three-OS green or full DoD claim.
+
 ### 5.1 Background (research 2026-10-01, `microsoft/WSL` @ `c34e75a`)
 
 - WSL containers (WSLC) are GA as of 2026-09-29 and need WSL ≥ 2.9.3. The user-facing CLI is `wslc.exe` (alias `container.exe`).
@@ -147,53 +149,60 @@ process, and supports TLS certificates.
 
 - **Why the public SDK can't power Dockering.** A management UI needs to see the containers the user created with `wslc` in their **default session**. The SDK can only *create* sessions. Its `WslcCreateSession` always passes `WSLCSessionFlagsNone`, so naming an existing session fails with `ERROR_ALREADY_EXISTS`. It also lacks list, logs, stats, and events. It's designed for apps that *embed* their own private containers.
 
-**Decision (ADR-0003, revised 2026-10-01):** `WslcEngine` has two transports behind one `Engine` impl:
+**Architecture (ADR-0003 direction; implemented 2026-10-04):** the factory returns one private `router::WslcEngine` behind `Arc<dyn Engine>` (ENG-126), owning `WslcComEngine` / `WslcCliEngine` delegates. Transport details stay inside the backend crate; public trait signatures are unchanged.
 
-1. **Primary: native COM** (`WslcComTransport`). Direct calls to the `IWSLC*` interfaces through the `windows` crate. No child processes; full fidelity.
-2. **Fallback: CLI** (`WslcCliTransport`). `wslc.exe … --format json`. Used automatically when the COM path is unavailable or untrusted (§5.3).
+1. **Primary: native COM.** Direct calls to verified `IWSLC*` operations through the `windows` crate, without child processes.
+2. **Fallback: CLI.** Existing argv-based `wslc.exe` commands, JSON where supported and verified text where not. Selected per operation in Auto (§5.3), not as a blanket response to any COM error. Lazy CLI preparation MUST allow healthy COM operations to work when CLI is missing.
 
 ### 5.2 Discovery (ENG-008)
 
 1. **Detect without COM.** Read the WSL version from the file version of `%ProgramFiles%\WSL\wslservice.exe`, falling back to `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI\Version` (spike F-9). Check that CLSID `a9b7a1b9-…ce8f` is registered and that `wslc.exe` exists. If the version is below 2.9.3 or nothing is registered, WSLC is absent: show the hint "WSL containers available with `wsl --update`".
-2. A COM failure of `WSLC_E_CONTAINER_DISABLED` (`0x8004060C`) means WSLC is disabled by Group Policy. Show it as *disabled by policy*; never fall back to the CLI.
-3. `ListSessions` enumerates the sessions (COM). CLI fallback: `wslc system session list` (table output only, with columns `ID`, `Creator PID`, `Display Name`, verified on 3.0.1). Sessions named `wslc-cli-<user>` / `wslc-cli-admin-<user>` are the CLI's default sessions for normal and elevated callers.
-4. Create one engine for the **default session** (`OpenSessionByName(NULL)` resolves the caller's default). Create one engine for each other session owned by the user when "Show all WSLC sessions" is on (ENG-109). "Owned by the user" means the session's creator SID equals the current user's SID; other users' sessions are filtered out.
+2. A COM failure of `WSLC_E_CONTAINER_DISABLED` (`0x8004060C`) means WSLC is disabled by Group Policy. Show it as *disabled by policy*; never fall back to CLI, **including during session enumeration** (ENG-135). Keep the default engine visible; connection surfaces the policy hint. Do not invent a new discovery return type.
+3. `ListSessions` enumerates sessions only through an exact trusted ABI module selected before internal activation (§5.3). CLI offers `wslc system session list` (table columns `ID`, `Creator PID`, `Display Name`, verified on 3.0.1), but discovery does **not** invoke it: no creator SID means no ownership proof for extras. Unknown ABI or failed COM enumeration yields default-only discovery, including policy failures with no CLI invocation. Observed normal/elevated default naming is not ownership proof or a target-name synthesis rule.
+4. Create one engine for the **default session** (`OpenSessionByName(NULL)` resolves the caller's default). Additional sessions appear with "Show all WSLC sessions" only when the creator SID and caller SID are present, valid and equal (ENG-109/135). Missing/invalid SID MUST fail closed. With CLI-only enumeration, list default only until a verified ownership mechanism exists. Preserve already-listed registry entries under ENG-114; a routing/trust failure MUST NOT silently remove an engine.
 
 ### 5.3 Transport selection & version gating (ENG-013)
 
-- `dk-engine-wslc` ships `com/abi/` modules, one per **supported WSL ABI version**: hand-written `#[windows::core::interface]` vtables, generated from `wslc.idl` at a pinned WSL tag. Each module records the WSL version range it was verified against. v1 ships **`v3_0`** for `3.0.0..=3.0.x` (vendored IDL from 3.0.1, byte-identical to 3.0.0 and 2.9.13; see §5.7).
-- At connect: **select the ABI module from the non-COM version** (§5.2 step 1). Only *after* selection, and only through
-  the selected module, run a **self-check**: `GetVersion` must equal the file version, `ListSessions` must return a sane count with NUL-terminated names, and `OpenSessionByName(NULL)` must succeed. If all succeed, use COM.
-  The self-check is a confirmation, not a safety mechanism. Safety comes from the version → module mapping, which CI validates (§5.7).
-- Use the CLI when any of these happen:
-  - no ABI module matches the version (newer WSL than we know);
-  - `QueryInterface` for an internal IID returns `E_NOINTERFACE`. This is a hint only: IIDs are not guaranteed to change on ABI breaks;
-  - the self-check fails;
-  - the user chose transport *CLI* for the engine. The options are *Auto* (default), *COM*, and *CLI*. In v1 the choice is made in the *Add engine* dialog (ENG-105), and it's stored in `EngineEndpoint::Wslc.transport`. Discovered WSLC engines use *Auto*, and an existing engine's transport isn't editable.
-- The chosen transport and WSL version show in the engine tooltip and in Diagnostics.
-- **Safety.** Internal-ABI calls only ever run with a verified ABI module. An unverified vtable is never called, because a mismatched vtable would be undefined behaviour, not just an error. CI checks the vendored IDL against the WSL release tag (§5.7).
+- **ENG-013 / ENG-132:** `com/abi/` modules contain hand-written `#[windows::core::interface]` vtables/structs from a pinned WSL IDL tag. Trust is an explicit **exact-version allowlist**, not a major/minor range. Current entry: **service FileVersion `3.0.1.0` → `v3_0`, IDL tag `3.0.1` only**. Unknown patch/build/version MUST NOT activate internal interfaces. Historical `3.0.0..=3.0.x` selection is removed; byte-identical IDL for other releases does not admit them. MSI fallback can establish presence but cannot authorize native activation when service FileVersion is unreadable; selection is rechecked on the MTA activation worker.
+- Select from non-COM version (§5.2) **before activation**, including discovery. Then self-check through the selected module: `GetVersion` major/minor/revision equals the file version triple, sane session count/NUL-terminated names, and successful target-session open. `GetVersion` does not attest the fourth FileVersion component. Self-check confirms trust; it does not make an unknown ABI safe. Revalidate non-COM version before reconnect/reopen after a WSL update.
+- Preferences are stored in `EngineEndpoint::Wslc.transport`, chosen in Add engine (ENG-105); discovered engines use Auto and existing engines' preferences remain uneditable in v1:
+
+  | Preference | Required behavior |
+  |---|---|
+  | Auto | Trusted COM first per verified operation. Unknown/unavailable ABI or eligible activation/self-check transport failure may select CLI. Known unverified native Run goes to CLI before dispatch. Domain, policy, authorization and cancellation errors are final. |
+  | COM | Strict COM-only for this connection: no CLI construction, probe, spawn or fallback. Unknown ABI or failed connect returns error; native Run remains descriptive 501. |
+  | CLI | CLI-only for this connection: no internal COM activation or self-check. |
+
+- `E_NOINTERFACE` may indicate unavailable COM; an unchanged IID is not ABI evidence. Recognized self-check failure may select Auto CLI but MUST NOT authorize further native calls. Do not catch arbitrary 500/501 errors as transport availability.
+- **Exact target (ENG-127):** keep configured identity separate from resolved target. Resolve/pin exact name, runtime u32 session ID, creator PID/SID; validate one matching owned row, and reopen that target under the same caller context. CLI uses `--session <name>` before the subcommand; revalidate before crossing/spawn after permit waits, on every stats poll and inside queued exec spawn after inspect. Do not re-resolve NULL on reopen, synthesize USERNAME defaults, create a session or elevate. Unproven identity preserves opened native proxy but refuses crossing/reopen; explicit name contradiction is final. CLI-only default retains caller-default behavior. **Residual race:** no atomic CLI identity-check-and-dispatch API exists; replacement after last validation cannot be excluded. No durable UUID/atomic guarantee is claimed.
+- **Read fallback (ENG-129):** one COM read, at most one same-session reopen/read for an allowlisted disconnect fault, then at most one CLI read. Preserve typed original HRESULT/class before public error mapping; never classify by message/hint parsing. Policy/access/elevation, missing target/resource, conflict, validation, cancellation and malformed payload/protocol errors MUST NOT trigger fallback. A persistent operation fault makes that route CLI-sticky until reconnect; the native Run exception does not demote unrelated operations.
+- **Mutation fallback (ENG-130):** only a proven predispatch transport preparation failure may select CLI in Auto, with equivalent target/options. Once a mutating RPC is entered or CLI child spawned, outcome may be committed: no automatic repeat. Reconcile by bounded reads where meaningful; otherwise return existing `Unreachable { reason, hint }` explicitly saying outcome is unknown and to refresh before retry. Successful mutation plus failed enrichment retries the read only. Do not fabricate IDs, deletion/prune reports, signals or reclaimed bytes. Timeout/cancellation or a negative inspect is not proof that an in-flight create cannot commit later.
+- **Implemented reconciliation:** 5 s bounded reads can establish start/stop on the same full ID, primary container removal without ancillary volume deletion, volume/network absence, or inspect recovery using a successful CreateVolume's returned name. Restart/kill/tag/ambiguous creates/pull/exec and lost reports/Run IDs remain unknown where completion cannot be proved; no generalized postcondition reconstruction is claimed.
+- **Streams (ENG-131):** logs/stats/events may fall back before the first source item on classified transport failure; cancel the old producer before starting CLI. Track source activity before filtering. After the first item a transport fault ends the subscription, without source splicing; explicit resubscription/refetch uses current route. Clean EOF is not a fallback trigger. Events-lost remains a gap/refetch signal, not a transport switch. Pull additionally requires proven predispatch failure, even with zero progress; exec MUST NOT recreate a process after a possibly dispatched call. Live TerminalSession methods remain transport-pinned.
+- **Safety.** Unverified vtables are never called; mismatched ABI can be undefined behavior. Operation-specific trust is separate from module trust, initially disabling native CreateContainer. IDL review and real marshalling/contract evidence are required to admit a new exact version (§5.7).
+- Primary/mixed/degraded route reasons and WSL version appear in existing tooltip/chip/Diagnostics metadata (ENG-110/136; §5.6).
 
 ### 5.4 COM transport (`WslcComTransport`)
 
 **Threading.** COM calls are blocking RPCs. The COM machinery lives in `dk-engine-wslc::com` (not in `dk-hub`):
 - **Short RPCs** (list, inspect, actions, `Stats()` polls) run on a small **RPC pool** of 3 OS threads, each `CoInitializeEx(COINIT_MULTITHREADED)`.
 - **Long-lived blocking streams** each get a **dedicated thread** (MTA): the events `GetNext` loop, each logs pipe reader, and each exec TTY reader/writer. This way a detail page with events + logs + terminal can't starve the RPC pool. Cancellation: signal the cancel event (`GetNext`) or `CancelIoEx` on the handle, then close it.
-- Handles from `Logs`/`Exec` are **sockets** (`WSLCHandleTypeSocket`), so `WSAStartup` must have run (spike F-7). They're read with `ReadFile`.
+- Handles from `Logs`/`Exec` are **sockets** (`WSLCHandleTypeSocket`), so `WSAStartup` must have run (spike F-7). Existing `ReadFile` I/O is verified; tagged ownership uses `closesocket` for sockets and `CloseHandle` for kernel events/files. CancelIoEx is followed by completion drain on dedicated threads before freeing buffers/OVERLAPPED resources (ENG-134). Unknown/contradictory tags are rejected/quarantined rather than guessing a destructor.
 - Process-wide `CoInitializeSecurity(…, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, …, EOAC_STATIC_CLOAKING)` runs in `main()` **before GPUI starts**, mirroring `wslc.exe` (spec 10 §7; after GPUI it fails with `RPC_E_TOO_LATE`, spike F-8). It runs on a throwaway MTA thread, so `main()` first calls **`CoIncrementMTAUsage`** to keep the process MTA alive. Without it, COM is uninitialised when that thread exits, the security settings are lost, and `OpenSessionByName` later fails with `0x80070542` (`ERROR_BAD_IMPERSONATION_LEVEL`). Every obtained proxy gets `CoSetProxyBlanket(… RPC_C_IMP_LEVEL_IMPERSONATE …)`, the equivalent of WSL's `ConfigureForCOMImpersonation`. Async callers await a oneshot; the UI never touches COM.
 
-**Lifetime.** One `IWSLCSession` proxy per engine is cached. A `BeginContainerOperation` token is held for the duration of each container mutation, and for the lifetime of each logs, exec, and events stream, as `wslc.exe` does, so idle VM termination can't disconnect mid-operation. `RPC_E_DISCONNECTED` / `RPC_S_SERVER_UNAVAILABLE` → reopen the session once and retry; otherwise `Unreachable`.
+**Lifetime.** One session proxy per resolved target is cached. Required `BeginContainerOperation` returns a checked token before the protected call; failure blocks it. Hold tokens for protected mutations and full logs/exec/events lifetime. Generic helpers do not reopen/retry mutation closures. Read retry is bounded by §5.3; ambiguous mutations use read-only reconciliation. Canceled queued RPCs are skipped; atomic admission defines whether cancellation or dispatch wins. Dispatch winning permits later completion, not rollback. MTA startup failure is explicitly reported. Pool/stream teardown does not join blocking threads on UI/hub workers. Before fallback/sticky stream replacement, native producer completion (including sibling logs readers) is awaited up to 5 s; failure prevents replacement (ENG-131/134).
 
-**Memory.** Strings and arrays returned by `[out]` params are freed with `CoTaskMemFree` (via RAII wrappers). `system_handle` outputs (pipes, events) are wrapped in `OwnedHandle`.
+**Memory.** Strings/arrays use `CoTaskMemFree` RAII; tagged sockets use `closesocket`, kernel/event/file handles use `CloseHandle`. Partial out-params are adopted before HRESULT handling; compatible aliases deduplicate by destructor category. Contradictory/unknown tags are quarantined because neither destructor can safely be inferred. Owners/buffers/OVERLAPPED/events remain alive through cancellation completion. Synthetic malformed-output tests do not prove live marshalling/leak stress.
 
 | Engine op | COM call | Notes |
 |---|---|---|
 | `info` | `IWSLCSessionManager::GetVersion` + session state | No docker `/info`. `api_version = "COM ABI v3_0"` (the ABI module). `cpus` / `mem_total` are `None`. |
 | `list_containers` | `IWSLCSession::ListContainers(opts{all})` → `WSLCContainerEntry[]` + `WSLCContainerPortMapping[]` | Labels, networks, and mounts are strings; parse them (Docker CLI-like `k=v,…`). |
-| `inspect_container` | `OpenContainer(id)` → `IWSLCContainer::Inspect(size) → LPSTR` | Docker-inspect-shaped JSON (`docker_schema`) |
+| `inspect_container` | `OpenContainer(id)` → `IWSLCContainer::Inspect(size) → LPSTR` | Shared `inspect::container_details` adapts WSLC top-level `Ports` for summary/bindings while preserving original parsed `raw` (ENG-133, CDT-030/040). |
 | start / stop / restart / kill | `IWSLCContainer::Start(flags, NULL, cb)` / `Stop(signal, timeout)` / `Restart` / `Kill(signal)` | `WSLC_STOP_TIMEOUT_DEFAULT` when no timeout is given |
 | pause / unpause | — | `Unsupported(PAUSE)` |
 | `remove_container` / `prune_containers` | `Delete(flags)` / `IWSLCSession::PruneContainers` | |
-| `logs` | `IWSLCContainer::Logs(flags{follow,timestamps}, since, until, tail) → stdout/stderr WSLCHandle` | Pipe handles read on a dedicated thread, then chunks go to `EngineStream`. Close the handles to cancel. |
+| `logs` | `IWSLCContainer::Logs(flags{follow,timestamps}, since, until, tail) → stdout/stderr WSLCHandle` | Tagged socket outputs read on dedicated threads; cancellation/completion and type-correct closure follow ENG-134. First-item fallback boundary follows §5.3. |
 | `stats` | `IWSLCContainer::Stats() → LPSTR` (raw Docker stats JSON with cumulative counters, verified F-7) | Polled every 2 s on the RPC pool; reuses the Docker CPU % / rate normaliser in `dk-core::stats` |
 | `exec` (terminal) | `IWSLCContainer::Exec(WSLCProcessOptions{tty}, StartOptions{TtyRows, TtyColumns}) → IWSLCProcess` → `GetStdHandle` / `ResizeTty` / `GetExitEvent` / `GetState` | **Real TTY with resize, no ConPTY needed** |
 | `events` | `IWSLCSession::GetEvents(since, 0, filters) → IWSLCEventStream::GetNext(cancelEvent)` | Blocking pull loop on a dedicated thread; the cancel event is signalled on drop. With no `since`, pass `since = now`: `0` replays the server's whole buffered history. `WSLC_E_EVENTS_LOST` → the stream yields `Protocol("events lost")` and continues (the server resets the reader); the store does a full refetch. |
@@ -203,10 +212,12 @@ process, and supports TLS certificates.
 | `list_volumes` / `inspect_volume` | `ListVolumes(filters) → LPSTR` / `InspectVolume → LPSTR` | JSON |
 | `create_volume` / `remove_volume` / `prune_volumes` | `CreateVolume` / `DeleteVolume` / `PruneVolumes` | `remove_volume(force)`: `force` is ignored (`DeleteVolume` has no force flag). |
 | `list_networks` / `inspect_network` / `remove_network` / `prune_networks` | `ListNetworks → LPSTR` (`wslc_schema::NetworkListEntry[]`) / `InspectNetwork` / `DeleteNetwork` / `PruneNetworks` | |
-| `run_image` | `CreateContainer(WSLCContainerOptions)` → `IWSLCContainer::Start` | **Known limitation (v1):** the `WSLCContainerOptions` layout is not verified, so this returns `Api { status: 501, message: "Run via COM is not verified for this WSL version" }` and `EngineInfo.transport_note` says so. *Follow-up:* verify the layout against a live session, then enable. |
+| `run_image` | `CreateContainer(WSLCContainerOptions)` → `IWSLCContainer::Start` is declared but **not called** | Direct/strict COM returns `Api { status: 501, message: "Run via COM is not verified for this WSL version" }` without CLI. Auto routes directly to pinned-session CLI before dispatch. Declaration appears to match IDL; native creation/layout semantics are not live verified. Separate deferred spike/evidence/approval required to enable it. |
 | `top` / `image_history` / `disk_usage` | — | `Unsupported`. VOL-002 shows "—" for sizes (WSLC reports `Size: N/A`) |
 
 **HRESULT mapping**: `WSLC_E_CONTAINER_NOT_FOUND` / `IMAGE_NOT_FOUND` / `VOLUME_NOT_FOUND` / `NETWORK_NOT_FOUND` / `SESSION_NOT_FOUND` → `NotFound`. `WSLC_E_CONTAINER_IS_RUNNING` / `NOT_RUNNING` → `Conflict`. `WSLC_E_CONTAINER_PREFIX_AMBIGUOUS` → `Conflict`. `WSLC_E_VM_NOT_RUNNING`, `RPC_E_DISCONNECTED` → `Unreachable`. `WSLC_E_CONTAINER_DISABLED` → `Unreachable{hint: policy}`. `WSLC_E_REGISTRY_BLOCKED_BY_POLICY` → `Api`. Anything else → `Api { status: 500, message: "0x<hr> <IErrorInfo text>" }`. The HRESULT goes in the message because `status` is a `u16`; the `IErrorInfo` text is included when present (the server supports `ISupportErrorInfo`).
+
+The router retains original allowlisted HRESULT/dispatch phase and typed connect classification internally **before** this lossy public mapping. `EngineError` variants and Engine signatures remain unchanged. Generic `Unreachable` or an HRESULT formatted in a message MUST NOT authorize fallback/retry. Live COM elevation-required still surfaces generic Api 500 with exact HRESULT (unlike CLI's hint); rejection is final and never bypassed.
 
 ### 5.5 CLI fallback transport (`WslcCliTransport`)
 
@@ -219,7 +230,7 @@ Every invocation: `wslc.exe [--session <s>] <cmd…>`, with `CREATE_NO_WINDOW`, 
 | Session flag position | `--session <s>` MUST come right after `wslc`, before the subcommand. |
 | No `--` | `wslc` treats `--` as an id. Argument safety relies on per-kind validation (NFR-022) only; additionally, the first exec command word MUST NOT start with `-`. |
 | Line endings | Output is CRLF, except `logs` (LF). Parsers accept both. |
-| Credentials | Not supported: `wslc` has no auth flags, and secrets are never put in argv. `pull_image(_, Some(auth))` ignores `auth`; WSLC uses its own registry store (IMG-007). |
+| Credentials | `wslc` has no auth flags; secrets MUST NOT enter argv. CLI rejects supplied `Some(auth)` before spawn; Auto cannot discard it to fall back. `None` uses WSLC registry state (IMG-007). |
 
 **Errors.** A failed command exits with code 1. stderr is a message line, then `Error code: <SYMBOL>`, then a boilerplate line. Lookup commands such as `inspect` print only the message, with `[]` on stdout.
 
@@ -236,7 +247,7 @@ Every invocation: `wslc.exe [--session <s>] <cmd…>`, with `CREATE_NO_WINDOW`, 
 | Engine op | wslc invocation | Notes |
 |---|---|---|
 | `info` | `system info --format json` + `version --format json` | `version` returns only `{"Client":{"Version":…}}`. `system info` gives the kernel, session-manager version, and sessions; no CPU or memory (`None`). |
-| `list_containers` / `inspect_container` | `container list --all --no-trunc --format json` (**NDJSON**) / `container inspect <id>` (JSON array) | List dates contain localised TZ names such as `SELČ`, so prefer `inspect` timestamps. Labels are a `k=v,…` string that includes `com.microsoft.wsl.container.metadata={json}`; the UI hides that label. `inspect` has `Ports` at the **top level** (not under `NetworkSettings`) and no `Config.Tty`. |
+| `list_containers` / `inspect_container` | `container list --all --no-trunc --format json` (**NDJSON**) / `container inspect <id>` (JSON array) | Dates may contain localized TZ names; prefer inspect timestamps. UI hides internal metadata label. Inspect has top-level `Ports`, no `Config.Tty`; shared typed normalization leaves original selected object unchanged in `raw`. Only valid empty arrays mean NotFound; malformed inspect JSON remains Protocol (ENG-129/133). |
 | start / stop / restart / kill / remove | `container start|stop|restart|kill|remove …` | |
 | `prune_*` | `container|image|volume|network prune --force` | Without `-f`, `prune` prompts and silently declines with no stdin, so `--force` is always passed. |
 | `logs` | `container logs [-f] [--timestamps] [--tail N] [--since T] <id>` (long-running child) | `--tail 0` is rejected, so tail 0 becomes `--since now`. No `Config.Tty` → frames are always `Stdout`/`Stderr`. |
@@ -253,6 +264,8 @@ Every invocation: `wslc.exe [--session <s>] <cmd…>`, with `CREATE_NO_WINDOW`, 
 
 Parsers are tolerant: unknown fields are ignored, and human-formatted sizes and times are parsed with fallbacks.
 
+**Option-parity gate (ENG-130/131).** Mixed volume-prune fallback is disabled (COM all-unused vs CLI anonymous-only). Mixed create-volume fallback with explicit `local` driver is refused (CLI substitutes default, COM forwards driver); supplied pull auth is rejected by CLI before spawn. CLI-only prune/driver behavior remains explicit. Request filters/options MUST NOT silently weaken. CLI child timeout/lost response is an unknown mutation outcome, never automatic replay. CLI ping tests session-bound container health, not only `version`.
+
 ### 5.6 Capabilities by transport
 
 | Capability | COM | CLI |
@@ -262,19 +275,23 @@ Parsers are tolerant: unknown fields are ignored, and human-formatted sizes and 
 | STATS_STREAM (native) | ✘ (polled) | ✘ (polled) |
 | PAUSE, TOP, IMAGE_HISTORY, DISK_USAGE | ✘ | ✘ |
 
-Capabilities are recomputed whenever the transport changes.
+**Router metadata (ENG-136).** Capabilities/info come from one coherent operation-route snapshot. `PULL_PROGRESS` follows future pull routes; CLI stats use `list_stats_limit = 0`. Run's CLI exception does not demote COM pull/stats. `transport = "com"` means COM-primary, with mixed/degraded note (e.g. "COM primary; Run uses CLI — native Run unverified"); strict COM note is "COM only; native Run unverified". Degraded names are sorted/deduplicated; CLI-only uses `"cli"`. No last-call transport label.
+
+Full EngineInfo refresh runs after successful active health ping under a bounded timeout outside registry locks, current-connection guarded. Existing StatusChanged publishes metadata changes even with unchanged flags; CapabilitiesChanged remains for real flag changes. Info-only failure preserves prior snapshot without degrading a healthy engine. Local EngineListEvent::InfoChanged/EngineStore::apply_info updates active store, Settings, status bar and Diagnostics without reconnect/remount/focus movement. No new Engine method or public hub event was added.
 
 ### 5.7 Keeping up with WSL releases
 
 - `crates/dk-engine-wslc/idl/<wsl-tag>/{wslc.idl,WSLCShared.idl}` are vendored copies. `xtask wslc-abi-check <tag>` diffs a new WSL tag's IDL against the newest vendored one and reports changed vtables and structs.
-- A scheduled CI job (weekly) runs the check against the latest WSL release tag and opens an issue when the ABI changed. Until a new ABI module ships, users on the new WSL automatically use the CLI fallback, so nothing breaks; it only degrades.
-- Releasing a new ABI module requires running the WSLC contract suite on a real Windows machine with that WSL version (release checklist).
-- **Status (2026-10-02):** vendored IDL `3.0.1` is byte-identical to `3.0.0` and `2.9.13`. ABI module `v3_0` covers `3.0.0..=3.0.x`. `xtask wslc-abi-check` reports `2.9.5` as different (shifted session slots, no event stream). WSL versions outside `3.0.x` have no matching module and use the CLI.
+- A scheduled CI job (weekly) checks the latest release IDL and opens an issue on change. Until its exact version is admitted, Auto uses CLI if available; forced COM refuses. CLI availability/compatibility must still be reported accurately, not promised universally.
+- Admitting a new exact version requires pinned IDL/vtable/struct review plus real Windows marshalling/contract evidence for that version. Byte-identical IDL alone is insufficient. Maintain per-operation evidence, including disabled native Run; fake COM tests cannot establish out-of-process marshalling.
+- **Historical baseline (2026-10-02):** vendored `3.0.1` IDL is byte-identical to `3.0.0`/`2.9.13`; `2.9.5` differs. Broad `3.0.x` code trust was removed on 2026-10-04. Current allowlist is **`3.0.1.0` only** using `v3_0`; other patch/build versions remain untrusted until admitted. IDL equality does not prove native Run.
 
 ### 5.8 Spikes
 
 - **S-2 (CLI):** ✅ done. Real `wslc` 3.0.1 output, exit codes, and stderr texts are recorded as fixtures (§5.5).
-- **S-3 (COM):** ✅ done except `CreateContainer`. Verified live in Rust: session manager → `OpenSessionByName(NULL)` → `ListContainers`, `Logs` (pipe read), `Exec` + `ResizeTty`, `GetEvents`, and `PullImage` with a Rust-implemented `IProgressCallback`, from a non-WSL-signed process. Remaining: the `WSLCContainerOptions` layout for `run_image` (§5.4).
+- **S-3 (COM):** prior live evidence covers session manager/default open, ListContainers, Logs (socket ReadFile), Exec+ResizeTty, GetEvents and PullImage callbacks from a non-WSL-signed process. **CreateContainer remains unverified live**; declaration/IDL agreement is not enablement evidence (§5.4).
+- **Final repair evidence (2026-10-04):** Windows workspace passed (WSLC 183/18 live opt-in ignores, hub 77/UI 243), clippy/fmt/check-blocking passed. Expanded maintained `repair_live` harness passed 1 in 20.03 s: default Auto, explicit Auto/CLI and pinned raw CLI Runs, both typed inspect/log paths Exited/0 `/hello`/Hello from Docker, six preference paths, strict COM 501, admin rejection without elevation, four own containers removed and image retained. See [plan completion](../plan/features/wslc-integration-repair.md) for full IDs/provenance; initial external probe and smaller counters are historical.
+- **Deferred/release limits:** native CreateContainer spike remains separately approved/evidence-only before enablement. Linux compiler provisioning/macOS validation remain release gates; live replacement/fault/marshalling stress and nonempty-baseline cleanup preservation are not claimed.
 
 ## 6. Connection supervisor (ENG-020…ENG-025)
 

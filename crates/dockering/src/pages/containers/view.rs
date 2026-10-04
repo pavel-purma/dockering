@@ -181,6 +181,11 @@ impl ContainersPage {
         &self.table
     }
 
+    #[cfg(test)]
+    pub(crate) fn stats_subscription_count(&self) -> usize {
+        self.stats_tasks.len()
+    }
+
     pub fn search_input(&self) -> &Entity<InputState> {
         &self.search
     }

@@ -1,8 +1,8 @@
 # Feature: Images
 
-- **Status:** implemented (2026-10-02)
+- **Status:** implemented (2026-10-04, including IMG-005 WSLC repair; cross-OS release validation remains open in the plan)
 - **Requirement prefix:** IMG
-- **Plan:** no per-feature plan; built in milestone M6 of the [v1 plan](../../plan/README.md)
+- **Plan:** baseline built in milestone M6; WSLC Run repair: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates)
 
 ## Requirements
 
@@ -12,7 +12,7 @@
 | IMG-002 | Sort by name, tag, created, or size. Filter: *All* / *In use* / *Unused* / *Dangling*. Search over repo:tag and id. |
 | IMG-003 | The header shows the total size and the count (distinct images). Overflow: *Prune dangling*, *Prune unused*. The confirmation lists the candidates and the reclaimable size: for *Prune unused* on engines with `DISK_USAGE`, it comes from `disk_usage()`. Without `DISK_USAGE`, for *Prune dangling*, or when the `disk_usage` call fails, it falls back to the sum of the candidates' sizes. |
 | IMG-004 | *Pull image* dialog: reference input (`nginx:latest`). The pull runs in an app-wide `PullManager`, so closing the dialog or leaving the page never cancels it. Progress is shown as one notification per pull, updated in place at most every 100 ms, with per-layer bars (structured when `PULL_PROGRESS`, otherwise a status line). Cancellable from the notification; cancel drops the stream, which cancels the pull on the hub. |
-| IMG-005 | *Run* dialog (simple): container name, port mappings (host:container rows), env vars (rows), volume mounts (rows), *Remove when stopped*, *Start*. → `run_image`. On success, navigate to the new container detail. **WSLC (v1):** the CLI transport supports run. The COM transport returns `Api { status: 501 }` ("Run via COM is not verified for this WSL version", 20 §5.4), which shows as an error notification. The transport note says so (ENG-110). |
+| IMG-005 | *Run* dialog (simple): container name, port mappings (host:container rows), env vars (rows), volume mounts (rows), *Remove when stopped*, *Start*. → `run_image`. On success, navigate to the new container detail, including an already-exited container. **WSLC:** Auto MUST route Run to CLI before dispatch, in the same resolved session, while native Run is unverified (ENG-127/128). Forced COM MUST return descriptive `Api { status: 501 }` without any CLI execution; forced CLI runs through CLI. An unknown mutation outcome MUST NOT trigger automatic resubmission (ENG-130). Existing dialog/actions/focus behavior remain unchanged; mixed routing is shown through ENG-110/136 metadata. |
 | IMG-006 | Delete: confirm. If in use → error explaining which containers use it, with a *Force* option. |
 | IMG-007 | **Registry auth (v1).** Pull/push credentials are read from the user's Docker config (`~/.docker/config.json`): `auths` entries directly, and `credsStore` / `credHelpers` by running `docker-credential-<helper> get` (argv, stdin = server, on the hub runtime, 10 s timeout). For WSLC, the engine's own registry store is used (`wslc registry login`, outside Dockering). If no credentials are found, the pull is anonymous. An auth failure (401, or registry errors such as ghcr's 500 `denied` and Hub's `pull access denied`; 21 §6) shows "Authentication required: run `docker login <registry>`". In-app login UI is post-v1. Credentials are never logged or persisted by Dockering (NFR-020). |
 | IMG-010 | **Detail tabs**: *Overview* (id, digests, tags, created, size, arch/os/variant, author, entrypoint, cmd, env, exposed ports, workdir, user, volumes, labels). *Layers* (history table: created by, size, created, comment; capability-gated, skipped without `IMAGE_HISTORY`). *Used by* (containers list, links). *Inspect* (raw JSON). |
@@ -34,7 +34,12 @@
 
 Four states: `img_000_four_states`.
 
+### IMG-005 repair verification (2026-10-04)
+
+Actual passing tests: `eng_126_strict_preferences_and_eng_128_run_exception`, `eng_130_img_005_cli_lost_run_id_not_fabricated`, `img_005_run_exited_detail_cdt_030_040`, `img_005_run_501_and_unknown_outcome_do_not_resubmit_restore_focus`, `img_005_raw_run_id_requires_one_full_id`. Maintained `eng_127_128_normal_user_hello_world_acceptance` separately passed all four Run paths (default Auto, explicit Auto, explicit CLI, independent pinned raw CLI); both typed inspect/log paths verified Exited/0 `/hello` and Hello from Docker. Four own containers removed; image retained. Windows UI suite 243 passed. See [plan](../../plan/features/wslc-integration-repair.md) for full IDs, provenance and release limits.
+
 ## Known gaps (v1)
 
-- IMG-005 run over WSLC COM returns 501 until `CreateContainer` is verified (spike S-3 follow-up). Workaround: add the WSLC session again as a manual engine with transport *CLI* (ENG-105). The transport of an existing engine can't be changed in v1.
+- Native `CreateContainer` appears to match IDL but is not live verified; strict COM Run remains 501 intentionally. Auto CLI routing fixes the historical whole-COM delegate failure; a duplicate manual CLI engine is no longer needed for Auto Run. Native enablement is separately deferred, not an incomplete repair requirement.
+- CLI lacks atomic identity-check-and-spawn; mixed-session revalidation cannot exclude replacement after its last check. Lost-ID/timeout outcomes require refresh before manual retry. Cross-OS release validation is still open; no live published-port Run or full RunSpec-options acceptance is claimed by hello-world.
 - IMG-011 *Copy digest* has no view test.

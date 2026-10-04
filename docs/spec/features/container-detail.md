@@ -1,8 +1,8 @@
 # Feature: Container detail
 
-- **Status:** implemented (2026-10-02)
+- **Status:** implemented (2026-10-04, including WSLC inspect parity CDT-030/040; cross-OS release validation remains open in the plan)
 - **Requirement prefix:** CDT
-- **Plan:** no per-feature plan; built in milestone M3 of the [v1 plan](../../plan/README.md)
+- **Plan:** baseline built in milestone M3; WSLC inspect repair: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates)
 
 ## Layout
 
@@ -27,8 +27,8 @@
 | CDT-003 | Detail data (`inspect_container`) refreshes on any engine event for this container id. |
 | CDT-010 | **Overview** (`DescriptionList` sections under `ui::section` headings): *General* (id, name, image + image id, created, started, finished, restart count, restart policy, platform, PID, exit code). *Command* (entrypoint, cmd, working dir, user, tty). *Compose* (project, service, number, working dir, config files), shown if grouped. *Environment* (table of key/value, with values masked if the key matches `pass|secret|token|key` and a reveal toggle per row). *Labels* (table). *Resources* (CPU limit, memory limit, pids limit). *Health* (last 5 results with exit code and output). |
 | CDT-020 | **Mounts**: table with Type (bind/volume/tmpfs), Source (a volume name links to volume detail), Destination, Mode. Mode is `RW`/`RO` from the access flag plus any other mode options (e.g. `RO, Z`). Source and Destination get most of the width; Type and Mode are narrow. |
-| CDT-030 | **Network**: (a) *Port bindings* table: Container port/proto, Host IP, Host port (link). (b) *Networks* table: network name (link), IPv4, IPv6, gateway, MAC, aliases. (c) Hostname, DNS, and network mode. |
-| CDT-040 | **Inspect**: read-only, syntax-highlighted JSON of the raw inspect output (pretty-printed on `background_spawn`) in the GPUI Kit code editor, with *Copy* and the editor's own search (`Ctrl/Cmd+F` within the editor). Env values are **not** masked here, and a warning label says so. |
+| CDT-030 | **Network**: (a) *Port bindings* table: Container port/proto, Host IP, Host port (link). (b) *Networks* table: network name (link), IPv4, IPv6, gateway, MAC, aliases. (c) Hostname, DNS, and network mode. WSLC top-level inspect `Ports` MUST populate both typed summary ports and port bindings through COM and CLI, including IPv4/IPv6 and protocol mappings (ENG-133); normalize typed fields without modifying original `raw` (CDT-040). |
+| CDT-040 | **Inspect**: read-only, syntax-highlighted JSON of raw inspect output (pretty-printed on `background_spawn`) in the GPUI Kit code editor, with *Copy* and search (`Ctrl/Cmd+F` within the editor). Env values are **not** masked here; a warning says so. `ContainerDetails.raw` MUST retain the original parsed inspect object; typed normalization copies MUST NOT add/move `Ports` or otherwise alter raw JSON (ENG-133). Pretty-printing is allowed; transport framing arrays may be unwrapped to the selected original object. |
 | CDT-050 | **Logs**: see [container-logs.md](container-logs.md). |
 | CDT-060 | **Terminal**: see [container-terminal.md](container-terminal.md). |
 | CDT-070 | **Stats**: see [container-stats.md](container-stats.md). |
@@ -53,3 +53,8 @@
 | CDT-082 | `kbd_042_alt_up_focuses_row_in_parent_list`, `kbd_044_rows_arrows_and_enter_follows_image_link`, `kbd_040_step_tab_skips_disabled` |
 
 Loading and error states: `cdt_states_loading_and_error_with_retry`.
+
+## WSLC repair verification / limits (2026-10-04)
+
+- Both delegates use shared `inspect::container_details`; typed normalization copies the original JSON and restores untouched `raw`. Passing tests: `eng_133_ports_and_cdt_040_original_raw`, `eng_133_recorded_com_cli_inspect_raw_deep_equality`, `eng_133_cdt_030_040_published_ports_both_delegate_paths`, `img_005_run_exited_detail_cdt_030_040`, plus existing Network/Inspect view tests.
+- Expanded live harness passed both typed inspect/log paths for four hello-world containers, Exited/0 `/hello`, original COM raw deep equality. Published-port coverage is synthetic/recorded fixture and fake-delegate evidence (IPv4/IPv6, TCP/UDP, exposed-only, absent NetworkSettings); live hello-world has empty ports. No live published-port Run is claimed. See [plan completion/release gates](../../plan/features/wslc-integration-repair.md); cross-OS validation remains open.

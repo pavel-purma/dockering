@@ -1,0 +1,13 @@
+{
+  "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "Name": "/repair-ports",
+  "Config": {"Image": "example.invalid/web:fixture", "Cmd": ["/web"], "Env": [], "Labels": {"fixture": "sanitised"}},
+  "State": {"Status": "exited", "Running": false, "ExitCode": 0},
+  "Mounts": [],
+  "Ports": {
+    "80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18080"}, {"HostIp": "::1", "HostPort": "18081"}],
+    "53/udp": [{"HostIp": "0.0.0.0", "HostPort": "15353"}],
+    "9000/tcp": null
+  },
+  "FutureField": {"ignored": [1, 2, 3]}
+}

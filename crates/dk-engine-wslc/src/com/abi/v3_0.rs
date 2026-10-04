@@ -27,9 +27,9 @@ use crate::version::WslVersion;
 
 /// Lowest WSL version this module was verified against (IDL identical since 2.9.13; live-tested
 /// on 3.0.1 only, so the range starts at 3.0.0).
-pub const VERIFIED_MIN: WslVersion = WslVersion::new(3, 0, 0, 0);
+pub const VERIFIED_MIN: WslVersion = WslVersion::new(3, 0, 1, 0);
 /// Highest WSL version (inclusive): any 3.0.x patch release.
-pub const VERIFIED_MAX: WslVersion = WslVersion::new(3, 0, u32::MAX, u32::MAX);
+pub const VERIFIED_MAX: WslVersion = WslVersion::new(3, 0, 1, 0);
 /// Vendored IDL directory this module was written from.
 pub const IDL_TAG: &str = "3.0.1";
 

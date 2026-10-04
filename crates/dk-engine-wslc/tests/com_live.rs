@@ -82,7 +82,7 @@ fn live_factory_discover_connect_auto_uses_com() {
     assert_eq!(info.transport.as_deref(), Some("com"));
     assert_eq!(
         info.transport_note.as_deref(),
-        Some(dk_engine_wslc::com::engine::COM_TRANSPORT_NOTE)
+        Some("COM primary; Run uses CLI — native Run unverified")
     );
 }
 
