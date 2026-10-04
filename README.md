@@ -5,10 +5,10 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
 <p align="center">
   <a href="https://github.com/pavel-purma/dockering/actions/workflows/ci.yml"><img src="https://github.com/pavel-purma/dockering/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://github.com/pavel-purma/dockering/actions/workflows/release.yml"><img src="https://github.com/pavel-purma/dockering/actions/workflows/release.yml/badge.svg" alt="Release"></a>
-  <!-- Enable version/download badges after the first release and winget badge after signing:
+  <a href="#license"><img src="https://img.shields.io/github/license/pavel-purma/dockering" alt="License"></a>
   <a href="https://github.com/pavel-purma/dockering/releases/latest"><img src="https://img.shields.io/github/v/release/pavel-purma/dockering" alt="Latest release"></a>
   <a href="https://github.com/pavel-purma/dockering/releases"><img src="https://img.shields.io/github/downloads/pavel-purma/dockering/total" alt="Downloads"></a>
-  <a href="#license"><img src="https://img.shields.io/github/license/pavel-purma/dockering" alt="License"></a>
+  <!-- winget is deferred until the first signed submission:
   <a href="https://winstall.app/apps/PavelPurma.Dockering"><img src="https://img.shields.io/winget/v/PavelPurma.Dockering" alt="winget"></a>
   -->
 </p>
@@ -17,18 +17,23 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
 
 ## Download
 
+**[Dockering 0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0)** is available
+for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
+
 | Windows | macOS | Linux |
 |---|---|---|
 | [Installer (x64)](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-Setup-x64.exe) · [ARM64](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-Setup-arm64.exe) | [Apple silicon](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.dmg) · [Intel](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.dmg) | [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x86_64.tar.gz) |
-| winget: planned after signing | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) |
+| winget: planned after signing | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.tar.gz) |
 | Portable: [x64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x64.zip) · [ARM64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-arm64.zip) | | |
 
-All versions and checksums are on the [Releases](https://github.com/pavel-purma/dockering/releases) page.
+Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.1.0/SHA256SUMS).
+See [all releases](https://github.com/pavel-purma/dockering/releases) and the
+[verification record](docs/plan/release-checklist.md#evidence-for-v010).
 Public GitHub release builds generate build-provenance attestations: `gh attestation verify <file> -R pavel-purma/dockering`.
 
 > The first release uses unsigned downloads. Windows may show SmartScreen prompts; macOS builds
 > are not notarized and may require approval in Privacy & Security. See [installation details](docs/release.md#unsigned-installation).
-> Automatic updates and winget are deferred until a signed release. Download links become available when the first release is published.
+> Automatic updates and winget are deferred until a signed release.
 
 ### Install on Windows
 
@@ -150,10 +155,11 @@ Windows, so the MSVC environment is loaded automatically):
 
 ## Releases
 
-Releases follow a standard flow. [release-plz](https://release-plz.dev) keeps a release PR open
-with the next version and its changelog. Merging that PR tags `vX.Y.Z`, and the release workflow
-then builds all six targets and drafts the GitHub Release. The first release is unsigned; signing
-is optional configuration for later releases. [docs/release.md](docs/release.md) has the details,
+The first release used the manual-tag flow: the release workflow built all six targets and
+created a draft GitHub Release, which was verified and published under maintainer approval.
+[release-plz](https://release-plz.dev) automation can create release PRs and version tags after
+the release-bot App is configured. The first release is unsigned; signing is optional
+configuration for later releases. [docs/release.md](docs/release.md) has the details,
 including the publication checklist and future signing setup. PR titles use
 [conventional commits](https://www.conventionalcommits.org/), because they become the changelog.
 
