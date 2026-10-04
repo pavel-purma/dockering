@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
 You own **build, CI, and release** for Dockering.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/50-build-and-release.md`, and `docs/spec/40-non-functional.md` (NFR-040).
+`AGENTS.md`, `docs/spec/50-build-and-release.md`, and `docs/spec/40-non-functional.md` (NFR-040).
 
 ## Rules
 - All six targets must build in CI. Platform prerequisites follow GPUI Kit's installation docs (https://gpui-kit.com/docs/installation): MSVC + CMake on Windows, Xcode CLT on macOS 15+, and the Vulkan/Wayland/X11 dev packages on Linux.

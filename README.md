@@ -160,5 +160,8 @@ Third-party notices: [THIRD_PARTY_LICENSES.html](THIRD_PARTY_LICENSES.html).
 
 ## Contributing with agents
 
-This repository uses a spec-driven agentic workflow. Start with [CLAUDE.md](CLAUDE.md) and the
-[specification](docs/spec/README.md). Plan features with `/feature-planning <idea>`.
+This repository uses a spec-driven agentic workflow with **Claude Code and OpenCode**.
+Start with the shared [AGENTS.md](AGENTS.md) and the [specification](docs/spec/README.md).
+Both tools use the same skills and specialist agent prompts. Plan features with
+`/feature-planning <idea>`. See [the agent setup guide](docs/agent-setup.md) for usage,
+configuration, and maintenance.

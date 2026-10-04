@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 You implement the core and hub layers of **Dockering**.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/10-architecture.md`, `docs/spec/21-engine-api-contract.md`, and the relevant feature plan.
+`AGENTS.md`, `docs/spec/10-architecture.md`, `docs/spec/21-engine-api-contract.md`, and the relevant feature plan.
 
 ## Rules
 - `dk-core`: depends only on serde, futures, bytes, thiserror, time/jiff, async-trait, and bitflags. **No tokio, bollard, or gpui.** All DTOs are owned, `Clone + Send + 'static`, and serde-serialisable.

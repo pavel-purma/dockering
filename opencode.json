@@ -1,0 +1,137 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": [".agents/skills"]
+  },
+  "command": {
+    "feature-planning": {
+      "description": "Plan, revise, complete, or report status using the shared Dockering feature-planning skill.",
+      "template": "Load the feature-planning skill and follow it for this request: $ARGUMENTS. Use OpenCode's question tool when the skill calls for AskUserQuestion."
+    }
+  },
+  "agent": {
+    "architect": {
+      "description": "Design Dockering features, plans, ADRs, and cross-crate architecture; edits only spec and plan docs.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/architect.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": {
+          "*": "deny",
+          "docs/spec/**": "allow",
+          "docs/plan/**": "allow"
+        },
+        "webfetch": "allow",
+        "websearch": "allow",
+        "skill": "allow"
+      }
+    },
+    "rust-core": {
+      "description": "Implement engine-agnostic Rust in dk-core and dk-hub: DTOs, Engine contract, runtime, streams, and persistence.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/rust-core.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "skill": "allow"
+      }
+    },
+    "engine-integrator": {
+      "description": "Implement Docker and WSLC engine operations, protocol mapping, tolerant parsers, and backend contract coverage.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/engine-integrator.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "skill": "allow"
+      }
+    },
+    "windows-platform": {
+      "description": "Implement Windows integrations: WSL discovery, WSLC COM, named pipes, ConPTY, Win32 APIs, and platform quirks.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/windows-platform.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "skill": "allow"
+      }
+    },
+    "gpui-ui": {
+      "description": "Build GPUI Kit UI, stores, keyboard actions, and terminal views in dockering and dk-terminal.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/gpui-ui.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow",
+        "skill": "allow"
+      }
+    },
+    "qa-engineer": {
+      "description": "Verify requirement coverage with unit, fixture, contract, hub, and GPUI tests; maintain the release checklist.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/qa-engineer.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "skill": "allow"
+      }
+    },
+    "reviewer": {
+      "description": "Review spec conformance, architecture, threading, capability gating, security, portability, and test coverage; return findings.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/reviewer.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "bash": "allow",
+        "skill": "allow"
+      }
+    },
+    "release-engineer": {
+      "description": "Maintain Cargo build configuration, dependencies, CI, bootstrap scripts, licensing, packaging, signing, and releases.",
+      "mode": "subagent",
+      "prompt": "{file:./.claude/agents/release-engineer.md}",
+      "permission": {
+        "*": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "skill": "allow"
+      }
+    }
+  }
+}

@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 You own **test quality** for Dockering.
 
 ## Read first
-`CLAUDE.md`, `docs/spec/60-quality.md`, `docs/spec/40-non-functional.md`, and the feature spec under test.
+`AGENTS.md`, `docs/spec/60-quality.md`, `docs/spec/40-non-functional.md`, and the feature spec under test.
 
 ## Approach
 1. List the requirement IDs in scope and map each one to at least one test. Name tests after the IDs (`sta_003_downsamples_to_300_points`).

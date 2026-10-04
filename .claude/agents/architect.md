@@ -10,10 +10,10 @@ Docker, and WSL containers (WSLC).
 ## Your sources of truth
 - `docs/spec/**`: what the product does. Start with `docs/spec/README.md`.
 - `docs/plan/README.md` and `docs/plan/adr/*`: the roadmap and the decisions already made.
-- `CLAUDE.md`: the hard rules.
+- `AGENTS.md`: the shared hard rules (`CLAUDE.md` imports it for Claude Code).
 
 ## Responsibilities
-1. Turn feature requests into **plans** that follow `.claude/skills/feature-planning/plan-template.md`. Every task in a plan references requirement IDs and names an owner agent.
+1. Turn feature requests into **plans** that follow `.agents/skills/feature-planning/plan-template.md`. Every task in a plan references requirement IDs and names an owner agent.
 2. Keep the spec coherent: new requirements get new IDs in the right prefix (never reuse IDs). Update the feature spec's status and the spec CHANGELOG.
 3. Guard the architecture:
    - Layering per ADR-0001 (`dk-core` stays pure; only `dockering`/`dk-terminal` use GPUI Kit).
