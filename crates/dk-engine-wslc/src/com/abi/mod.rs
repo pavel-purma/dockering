@@ -1,6 +1,6 @@
 //! Version-gated ABI modules for the internal `IWSLC*` interfaces (spec 20 §5.3, ADR-0003).
 //!
-//! One submodule per **verified** WSL range. [`select`] maps the WSL version read from
+//! One submodule per verified exact WSL version. [`select`] maps the WSL version read from
 //! `wslservice.exe` (no COM) to a module; anything else returns `None` and the caller must use
 //! the CLI. Code outside `com/` never names a vtable directly.
 
@@ -16,7 +16,7 @@ pub mod v3_0;
 /// A verified ABI module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiModule {
-    /// `idl/3.0.1`, WSL 3.0.0 ..= 3.0.x.
+    /// `idl/3.0.1`, service FileVersion 3.0.1.0 only (ENG-132).
     V3_0,
 }
 
@@ -34,8 +34,8 @@ pub struct AbiInfo {
 /// Every verified module, newest first.
 pub const MODULES: &[AbiInfo] = &[AbiInfo {
     module: AbiModule::V3_0,
-    min: WslVersion::new(3, 0, 0, 0),
-    max: WslVersion::new(3, 0, u32::MAX, u32::MAX),
+    min: WslVersion::new(3, 0, 1, 0),
+    max: WslVersion::new(3, 0, 1, 0),
     idl_tag: "3.0.1",
 }];
 
@@ -67,11 +67,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selects_only_verified_ranges() {
+    fn eng_132_exact_allowlist() {
         let v = |s| WslVersion::parse(s).expect("valid");
         assert_eq!(select(&v("3.0.1.0")), Some(AbiModule::V3_0));
-        assert_eq!(select(&v("3.0.0")), Some(AbiModule::V3_0));
-        assert_eq!(select(&v("3.0.17.3")), Some(AbiModule::V3_0));
+        assert_eq!(select(&v("3.0.0")), None);
+        assert_eq!(select(&v("3.0.17.3")), None);
+        assert_eq!(select(&v("3.0.1.1")), None);
+        assert_eq!(select(&v("3.0.2.0")), None);
         // Newer / older than anything verified → CLI.
         assert_eq!(select(&v("3.1.0")), None);
         assert_eq!(select(&v("4.0.0")), None);

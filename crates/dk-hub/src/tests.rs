@@ -129,6 +129,9 @@ impl EngineFactory for TestFactory {
 struct SameDaemon {
     fake: Arc<FakeEngine>,
     daemon: String,
+    /// A coherent metadata snapshot plus an optional paused-time refresh gate.
+    metadata: Mutex<Option<EngineInfo>>,
+    info_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 #[async_trait]
@@ -148,6 +151,13 @@ impl Engine for SameDaemon {
     async fn info(&self) -> EngineResult<EngineInfo> {
         let mut i = self.fake.info().await?;
         i.daemon_id = Some(self.daemon.clone());
+        if let Some(snapshot) = lock(&self.metadata).clone() {
+            i = snapshot;
+        }
+        let gate = lock(&self.info_gate).clone();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
         Ok(i)
     }
     fn events(&self, filter: EventFilter) -> EngineStream<EngineEvent> {
@@ -635,10 +645,14 @@ fn same_daemon_factory() -> Arc<TestFactory> {
     let ctx: Arc<dyn Engine> = Arc::new(SameDaemon {
         fake: FakeEngine::new("ctx"),
         daemon: "DAEMON-1".into(),
+        metadata: Mutex::new(None),
+        info_gate: Mutex::new(None),
     });
     let dd: Arc<dyn Engine> = Arc::new(SameDaemon {
         fake: FakeEngine::new("dd"),
         daemon: "DAEMON-1".into(),
+        metadata: Mutex::new(None),
+        info_gate: Mutex::new(None),
     });
     f.add(ctx, preference::DOCKER_CONTEXT);
     f.add(dd, preference::LOCAL_SOCKET);
@@ -1342,6 +1356,188 @@ async fn eng_020_capability_change_detected_on_ping() {
             other => panic!("{other:?}"),
         }
     }
+    hub.shutdown();
+}
+
+async fn metadata_hub() -> (HubHandle, TempDir, Arc<SameDaemon>, Arc<TestFactory>) {
+    let f = TestFactory::new();
+    let engine = Arc::new(SameDaemon {
+        fake: FakeEngine::new("a"),
+        daemon: "metadata-daemon".into(),
+        metadata: Mutex::new(None),
+        info_gate: Mutex::new(None),
+    });
+    f.add(engine.clone(), 20);
+    let (hub, dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    (hub, dir, engine, f)
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_136_info_without_caps_change_and_cli_stats_limit() {
+    let (hub, _dir, engine, factory) = metadata_hub().await;
+    let id = EngineId::new("a");
+    let initial = status_of(&hub, "a").await.info.unwrap();
+    let generation = hub.inner.conn(&id).unwrap().generation;
+    let mut events = lock(&hub.inner.reg).events.subscribe();
+    // Individually verify each metadata-only transition, not just a flag-triggered update.
+    for field in ["note", "transport", "list_stats_limit"] {
+        let mut expected = status_of(&hub, "a").await.info.unwrap();
+        match field {
+            "note" => expected.transport_note = Some("COM primary; stats uses CLI".into()),
+            "transport" => expected.transport = Some("com".into()),
+            _ => expected.list_stats_limit = 0,
+        }
+        *lock(&engine.metadata) = Some(expected.clone());
+        let event = tokio::time::timeout(Duration::from_secs(15), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let HubEvent::StatusChanged(status) = event else {
+            panic!("{event:?}")
+        };
+        assert_eq!(status.state, EngineState::Connected);
+        assert!(status.active);
+        assert_eq!(status.info.as_ref(), Some(&expected));
+        assert_eq!(expected.capabilities, initial.capabilities);
+        assert_eq!(status_of(&hub, "a").await.info, Some(expected));
+        assert!(
+            events.try_recv().is_err(),
+            "no capability/reconnect event for metadata"
+        );
+    }
+    // An unchanged full snapshot is quiet. No reconnect, re-exec or generation change.
+    let calls = engine.fake.calls_to("info").len();
+    until(Duration::from_secs(15), || {
+        engine.fake.calls_to("info").len() > calls
+    })
+    .await;
+    assert!(events.try_recv().is_err());
+    assert_eq!(hub.inner.conn(&id).unwrap().generation, generation);
+    assert_eq!(factory.connects(), vec!["a"]);
+    assert_eq!(engine.fake.exec_count(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_136_caps_and_metadata_commit_one_coherent_snapshot() {
+    let (hub, _dir, engine, _) = metadata_hub().await;
+    let mut expected = status_of(&hub, "a").await.info.unwrap();
+    expected.capabilities.remove(Capabilities::PULL_PROGRESS);
+    expected.transport_note = Some("pull_image uses CLI".into());
+    expected.list_stats_limit = 0;
+    // capabilities() deliberately still returns the old flags: use info's snapshot.
+    *lock(&engine.metadata) = Some(expected.clone());
+    let mut events = lock(&hub.inner.reg).events.subscribe();
+    let event = tokio::time::timeout(Duration::from_secs(15), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(event, HubEvent::CapabilitiesChanged { capabilities, .. } if capabilities == expected.capabilities)
+    );
+    let HubEvent::StatusChanged(status) = events.recv().await.unwrap() else {
+        panic!("status missing")
+    };
+    assert_eq!(status.info, Some(expected.clone()));
+    assert_eq!(status_of(&hub, "a").await.info, Some(expected));
+    assert!(events.try_recv().is_err());
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_136_refresh_failure_timeout_and_panic_preserve_snapshot() {
+    let (hub, _dir, engine, factory) = metadata_hub().await;
+    let id = EngineId::new("a");
+    let initial = status_of(&hub, "a").await.info;
+    let generation = hub.inner.conn(&id).unwrap().generation;
+    let mut events = lock(&hub.inner.reg).events.subscribe();
+    engine.fake.set_capabilities(Capabilities::empty());
+    engine.fake.set_error(
+        "info",
+        Some(EngineError::unreachable("metadata unavailable")),
+    );
+    let calls = engine.fake.calls_to("info").len();
+    until(Duration::from_secs(15), || {
+        engine.fake.calls_to("info").len() > calls
+    })
+    .await;
+    assert_eq!(status_of(&hub, "a").await.info, initial);
+    engine.fake.set_error("info", None);
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *lock(&engine.info_gate) = Some(gate);
+    let calls = engine.fake.calls_to("info").len();
+    until(Duration::from_secs(15), || {
+        engine.fake.calls_to("info").len() > calls
+    })
+    .await;
+    // The registry remains available while info is waiting; timeout is virtual time.
+    assert_eq!(status_of(&hub, "a").await.info, initial);
+    tokio::time::sleep(crate::supervisor::INFO_TIMEOUT + Duration::from_millis(1)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Connected));
+    assert_eq!(status_of(&hub, "a").await.info, initial);
+    *lock(&engine.info_gate) = None;
+    engine.fake.panic_on("info");
+    let calls = engine.fake.calls_to("info").len();
+    until(Duration::from_secs(15), || {
+        engine.fake.calls_to("info").len() > calls
+    })
+    .await;
+    assert_eq!(status_of(&hub, "a").await.info, initial);
+    assert_eq!(hub.inner.conn(&id).unwrap().generation, generation);
+    assert_eq!(factory.connects(), vec!["a"]);
+    assert!(
+        events.try_recv().is_err(),
+        "refresh failure is not connection failure"
+    );
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_136_stale_connection_info_ignored() {
+    let (hub, _dir, engine, _) = metadata_hub().await;
+    let id = EngineId::new("a");
+    let old_conn = hub.inner.conn(&id).unwrap();
+    let mut late = status_of(&hub, "a").await.info.unwrap();
+    late.transport_note = Some("obsolete route".into());
+    late.capabilities = Capabilities::empty();
+    *lock(&engine.metadata) = Some(late);
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *lock(&engine.info_gate) = Some(gate.clone());
+    let calls = engine.fake.calls_to("info").len();
+    until(Duration::from_secs(15), || {
+        engine.fake.calls_to("info").len() > calls
+    })
+    .await;
+    // Replace the connection while the old refresh is in flight. Deliberately leave its
+    // token live to model completion racing cancellation: generation is the last guard.
+    let replacement = FakeEngine::new("a");
+    let mut fresh = replacement.info().await.unwrap();
+    fresh.transport_note = Some("replacement route".into());
+    let new_generation = hub.inner.next_generation();
+    {
+        let mut reg = lock(&hub.inner.reg);
+        let e = reg.get_mut(&id).unwrap();
+        e.conn = Some(crate::registry::Conn {
+            engine: replacement,
+            token: hub.inner.shutdown.child_token(),
+            generation: new_generation,
+        });
+        e.info = Some(fresh.clone());
+    }
+    let mut events = lock(&hub.inner.reg).events.subscribe();
+    gate.notify_one();
+    until(Duration::from_secs(1), || old_conn.token.is_cancelled()).await;
+    assert_eq!(status_of(&hub, "a").await.info, Some(fresh));
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Connected));
+    assert_eq!(hub.inner.conn(&id).unwrap().generation, new_generation);
+    assert!(
+        events.try_recv().is_err(),
+        "stale result must not publish events"
+    );
     hub.shutdown();
 }
 

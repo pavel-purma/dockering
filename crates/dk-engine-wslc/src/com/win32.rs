@@ -150,7 +150,9 @@ pub fn process_running(exe: &str) -> bool {
     let Ok(snap) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
         return false;
     };
-    let snap = OwnedHandle(snap);
+    let Some(snap) = OwnedHandle::new(snap) else {
+        return false;
+    };
     let mut entry = PROCESSENTRY32W {
         dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
         ..Default::default()
@@ -223,10 +225,13 @@ pub fn current_user_sid() -> Option<String> {
 
 // ───────────────────────────── handles & events ─────────────────────────────
 
-/// An owned kernel handle (`CloseHandle` on drop). Used for `system_handle` outputs (events,
-/// pipes, sockets returned by `IWSLC*`; sockets are closable with `CloseHandle` too).
+/// Type-correct owned resource. Kernel events/files/pipes use CloseHandle; WSLC sockets
+/// MUST use closesocket. Borrowers retain ownership until overlapped completion is drained.
 #[derive(Debug)]
-pub struct OwnedHandle(HANDLE);
+pub struct OwnedHandle {
+    handle: HANDLE,
+    socket: bool,
+}
 
 // SAFETY: a kernel handle value is just an index into the process handle table; Win32 handle
 // operations are thread-safe. Ownership (who closes) is tracked by this type.
@@ -235,24 +240,83 @@ unsafe impl Send for OwnedHandle {}
 unsafe impl Sync for OwnedHandle {}
 
 impl OwnedHandle {
+    pub(crate) fn pair(
+        a: super::abi::v3_0::WSLCHandle,
+        mut b: super::abi::v3_0::WSLCHandle,
+    ) -> dk_core::EngineResult<(Option<Self>, Option<Self>)> {
+        use super::abi::v3_0::*;
+        fn category(tag: i32) -> Option<bool> {
+            match tag {
+                WSLC_HANDLE_TYPE_FILE | WSLC_HANDLE_TYPE_PIPE => Some(false),
+                WSLC_HANDLE_TYPE_SOCKET => Some(true),
+                _ => None,
+            }
+        }
+        if a.Handle == b.Handle && !a.Handle.0.is_null() && !a.Handle.is_invalid() {
+            if category(a.Type).is_none() || category(a.Type) != category(b.Type) {
+                // Contradictory union metadata cannot authorize either destructor. Quarantine
+                // this invalid output; never close a possibly unrelated handle-table entry.
+                return Err(dk_core::EngineError::protocol(
+                    "Contradictory aliased WSLC handle tags",
+                ));
+            }
+            b = WSLCHandle::default();
+        }
+        // Adopt both independently before propagating errors so valid partial outputs close.
+        let a = Self::from_wslc(a);
+        let b = Self::from_wslc(b);
+        Ok((a?, b?))
+    }
     /// Takes ownership of `h`. Null / `INVALID_HANDLE_VALUE` → `None`.
     pub fn new(h: HANDLE) -> Option<Self> {
         if h.is_invalid() || h.0.is_null() {
             None
         } else {
-            Some(Self(h))
+            Some(Self {
+                handle: h,
+                socket: false,
+            })
         }
     }
 
     pub fn raw(&self) -> HANDLE {
-        self.0
+        self.handle
+    }
+
+    pub(crate) fn from_wslc(
+        h: super::abi::v3_0::WSLCHandle,
+    ) -> dk_core::EngineResult<Option<Self>> {
+        use super::abi::v3_0::*;
+        if h.Handle.is_invalid() || h.Handle.0.is_null() {
+            return Ok(None);
+        }
+        match h.Type {
+            WSLC_HANDLE_TYPE_SOCKET => Ok(Some(Self {
+                handle: h.Handle,
+                socket: true,
+            })),
+            WSLC_HANDLE_TYPE_FILE | WSLC_HANDLE_TYPE_PIPE => Ok(Self::new(h.Handle)),
+            // Unknown union discriminant cannot be safely closed by guessing an API.
+            _ => Err(dk_core::EngineError::protocol(
+                "Unknown WSLC handle tag; refused I/O",
+            )),
+        }
     }
 }
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
-        // SAFETY: `self.0` is owned by this value and closed exactly once.
-        let _ = unsafe { CloseHandle(self.0) };
+        if self.socket {
+            // SAFETY: tag identifies an owned Winsock socket, closed once after borrowers end.
+            let _ = unsafe {
+                windows::Win32::Networking::WinSock::closesocket(
+                    windows::Win32::Networking::WinSock::SOCKET(self.handle.0 as usize),
+                )
+            };
+        } else {
+            // SAFETY: owned kernel handle, closed exactly once.
+            let _ = unsafe { CloseHandle(self.handle) };
+        }
     }
 }
 
@@ -319,6 +383,15 @@ pub fn read_cancellable(
     buf: &mut [u8],
     cancel: &Event,
 ) -> windows::core::Result<ReadOutcome> {
+    read_cancellable_pending(h, buf, cancel, || {})
+}
+
+fn read_cancellable_pending(
+    h: &OwnedHandle,
+    buf: &mut [u8],
+    cancel: &Event,
+    pending: impl FnOnce(),
+) -> windows::core::Result<ReadOutcome> {
     if cancel.is_set() {
         return Ok(ReadOutcome::Cancelled);
     }
@@ -346,7 +419,9 @@ pub fn read_cancellable(
         Err(e) if e.code() == ERROR_OPERATION_ABORTED.to_hresult() => {
             return Ok(ReadOutcome::Cancelled);
         }
-        Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
+            pending();
+        }
         Err(e) => return Err(e),
     }
     let handles = [io_event.raw(), cancel.raw()];
@@ -444,9 +519,164 @@ fn is_eof(e: &windows::core::Error) -> bool {
         || c == windows::core::HRESULT::from_win32(10101)
 }
 
+/// Owned thread handle for interrupting a registered synchronous ConPTY writer.
+pub(crate) fn current_io_thread() -> windows::core::Result<OwnedHandle> {
+    use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread};
+    let mut out = HANDLE::default();
+    // SAFETY: duplicate current pseudo handle into an independently owned real handle.
+    unsafe {
+        DuplicateHandle(
+            GetCurrentProcess(),
+            GetCurrentThread(),
+            GetCurrentProcess(),
+            &mut out,
+            0,
+            false,
+            DUPLICATE_SAME_ACCESS,
+        )
+    }?;
+    OwnedHandle::new(out).ok_or_else(windows::core::Error::from_thread)
+}
+pub(crate) fn cancel_sync_thread(thread: &OwnedHandle) {
+    // SAFETY: registration cannot finish/reuse its thread until this call returns.
+    let _ = unsafe { windows::Win32::System::IO::CancelSynchronousIo(thread.raw()) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aliases_require_matching_destructor_category() {
+        use super::super::abi::v3_0::*;
+        let event = Event::new().unwrap();
+        let a = WSLCHandle {
+            Type: WSLC_HANDLE_TYPE_PIPE,
+            Handle: event.raw(),
+        };
+        let b = WSLCHandle {
+            Type: WSLC_HANDLE_TYPE_SOCKET,
+            Handle: event.raw(),
+        };
+        assert!(OwnedHandle::pair(a, b).is_err());
+        event.set();
+        assert!(event.is_set());
+        // SAFETY: owned event transfers to the compatible-tag pair below.
+        let raw = unsafe { CreateEventW(None, true, false, PCWSTR::null()) }.unwrap();
+        let (one, two) = OwnedHandle::pair(
+            WSLCHandle {
+                Type: WSLC_HANDLE_TYPE_FILE,
+                Handle: raw,
+            },
+            WSLCHandle {
+                Type: WSLC_HANDLE_TYPE_PIPE,
+                Handle: raw,
+            },
+        )
+        .unwrap();
+        assert!(one.is_some());
+        assert!(two.is_none());
+        drop(one);
+        // SAFETY: closed handle probe, never take ownership or close it again.
+        assert!(unsafe { SetEvent(raw) }.is_err());
+    }
+
+    #[test]
+    fn eng_134_socket_cancel_drains_overlapped_before_close() {
+        use super::super::abi::v3_0::*;
+        use std::os::windows::io::IntoRawSocket;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_peer, _) = listener.accept().unwrap();
+        let socket = client.into_raw_socket();
+        let owner = OwnedHandle::from_wslc(WSLCHandle {
+            Type: WSLC_HANDLE_TYPE_SOCKET,
+            Handle: HANDLE(socket as *mut c_void),
+        })
+        .unwrap()
+        .unwrap();
+        let cancel = std::sync::Arc::new(Event::new().unwrap());
+        let signal = cancel.clone();
+        let (pending_tx, pending_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut buf = [0u8; 128];
+            let result = read_cancellable_pending(&owner, &mut buf, &cancel, || {
+                pending_tx.send(()).unwrap();
+            })
+            .unwrap();
+            assert_eq!(result, ReadOutcome::Cancelled);
+            // Both OVERLAPPED/event and buffer may now be freed; resource drops on this thread.
+            drop(owner);
+        });
+        pending_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("actual ERROR_IO_PENDING admission");
+        signal.set();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn eng_134_socket_close_once_and_kernel_tags() {
+        use super::super::abi::v3_0::*;
+        use windows::Win32::Networking::WinSock::{
+            AF_INET, INVALID_SOCKET, IPPROTO_TCP, SOCK_STREAM, WSA_FLAG_OVERLAPPED, WSADATA,
+            WSASocketW, WSAStartup,
+        };
+        let mut data = WSADATA::default();
+        // SAFETY: valid WSADATA; process test startup, sockets need Winsock initialized.
+        assert_eq!(unsafe { WSAStartup(0x202, &mut data) }, 0);
+        // SAFETY: creates one owned overlapped TCP socket; never connected.
+        let socket = unsafe {
+            WSASocketW(
+                AF_INET.0 as i32,
+                SOCK_STREAM.0,
+                IPPROTO_TCP.0,
+                None,
+                0,
+                WSA_FLAG_OVERLAPPED,
+            )
+        }
+        .unwrap();
+        assert_ne!(socket, INVALID_SOCKET);
+        let owner = OwnedHandle::from_wslc(WSLCHandle {
+            Type: WSLC_HANDLE_TYPE_SOCKET,
+            Handle: HANDLE(socket.0 as *mut c_void),
+        })
+        .unwrap()
+        .unwrap();
+        assert!(owner.socket);
+        drop(owner);
+        // SAFETY: querying a closed socket must fail; no second ownership/close.
+        let mut kind = [0u8; 4];
+        let mut len = 4;
+        assert_ne!(
+            unsafe {
+                windows::Win32::Networking::WinSock::getsockopt(
+                    socket,
+                    windows::Win32::Networking::WinSock::SOL_SOCKET,
+                    windows::Win32::Networking::WinSock::SO_TYPE,
+                    windows::core::PSTR(kind.as_mut_ptr()),
+                    &mut len,
+                )
+            },
+            0
+        );
+        let event = Event::new().unwrap();
+        assert!(!event.0.socket);
+        assert!(
+            OwnedHandle::from_wslc(WSLCHandle {
+                Type: 99,
+                Handle: event.raw()
+            })
+            .is_err()
+        );
+        event.set();
+        assert!(
+            event.is_set(),
+            "unknown tag did not close borrowed resource"
+        );
+    }
 
     #[test]
     fn file_version_of_kernel32() {

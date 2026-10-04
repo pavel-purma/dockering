@@ -68,6 +68,38 @@ impl std::fmt::Debug for WslcCliEngine {
 }
 
 impl WslcCliEngine {
+    /// Keep the completed write separate from enrichment so callers never replay Create.
+    pub(crate) async fn create_volume_raw(&self, spec: VolumeSpec) -> EngineResult<String> {
+        let mut args: Vec<String> = vec!["volume".into(), "create".into()];
+        if let Some(d) = &spec.driver
+            && d != "local"
+        {
+            validate_name(d)?;
+            args.extend(["--driver".into(), d.clone()]);
+        }
+        for (k, v) in &spec.driver_opts {
+            validate_env_key(k)?;
+            args.extend(["--opt".into(), format!("{k}={v}")]);
+        }
+        for (k, v) in &spec.labels {
+            validate_env_key(k)?;
+            args.extend(["--label".into(), format!("{k}={v}")]);
+        }
+        if let Some(n) = &spec.name {
+            validate_name(n)?;
+            args.push(n.clone());
+        }
+        let out = self.run(&args, None).await?;
+        let name = out
+            .lines()
+            .map(str::trim)
+            .rfind(|l| !l.is_empty())
+            .map(str::to_owned)
+            .or(spec.name)
+            .ok_or_else(|| EngineError::protocol("wslc volume create printed no name"))?;
+        validate_name(&name)?;
+        Ok(name)
+    }
     /// Verify `wslc.exe` works for `session` (None = the caller's default session) and build
     /// the engine. `transport_note` explains why the CLI is used (ENG-110 chip), e.g.
     /// "WSL 3.1.0 not yet verified — using CLI". `wsl_version` is shown in diagnostics.
@@ -77,12 +109,22 @@ impl WslcCliEngine {
         wsl_version: Option<String>,
         transport_note: Option<String>,
     ) -> EngineResult<WslcCliEngine> {
+        Self::connect_guarded(id, session, wsl_version, transport_note, None).await
+    }
+
+    pub(crate) async fn connect_guarded(
+        id: EngineId,
+        session: Option<String>,
+        wsl_version: Option<String>,
+        transport_note: Option<String>,
+        guard: Option<runner::SpawnGuard>,
+    ) -> EngineResult<WslcCliEngine> {
         let exe = wslc_exe()
             .ok_or_else(|| EngineError::unreachable_with_hint("wslc.exe not found", UPDATE_HINT))?;
         if let Some(s) = &session {
             validate_session(s)?;
         }
-        let runner = Runner::new(exe, session.clone());
+        let runner = Runner::new(exe, session.clone()).with_guard(guard);
         let engine = WslcCliEngine {
             inner: Arc::new(Inner {
                 id,
@@ -153,29 +195,32 @@ impl WslcCliEngine {
                 Some(ErrCtx::new(kind, id)),
             )
             .await?;
-        parse::first_object(&out).map_err(|_| EngineError::not_found(kind, id))
+        parse::inspect_object(&out)?.ok_or_else(|| EngineError::not_found(kind, id))
     }
 
     /// One `inspect` for many names; falls back to per-item calls when one is missing (wslc
     /// fails the whole batch with exit 1 but still prints the found ones).
-    async fn inspect_many(&self, kind: ResourceKind, names: &[String]) -> Vec<Value> {
+    async fn inspect_many(&self, kind: ResourceKind, names: &[String]) -> EngineResult<Vec<Value>> {
         if names.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let noun = noun(kind);
         let mut args: Vec<&str> = vec![noun, "inspect", "--format", "json"];
         args.extend(names.iter().map(String::as_str));
         match self.runner().run(&args, DEFAULT_TIMEOUT, None).await {
-            Ok(o) => parse::json_list(&o.stdout).unwrap_or_default(),
-            Err(_) => {
+            Ok(o) => parse::inspect_batch(&o.stdout),
+            Err(EngineError::NotFound { kind: missing, .. }) if missing == kind => {
                 let mut out = Vec::new();
                 for n in names {
-                    if let Ok(v) = self.inspect_json(kind, n).await {
-                        out.push(v);
+                    match self.inspect_json(kind, n).await {
+                        Ok(v) => out.push(v),
+                        Err(EngineError::NotFound { kind: missing, .. }) if missing == kind => {}
+                        Err(e) => return Err(e),
                     }
                 }
-                out
+                Ok(out)
             }
+            Err(e) => Err(e),
         }
     }
 
@@ -364,6 +409,7 @@ fn counts(list: &[ContainerSummary]) -> ContainerCounts {
 
 /// wslc's `inspect` puts `Ports` at the top level; Docker puts it under
 /// `NetworkSettings.Ports`. Copy it over (and `Config.Labels`) so the Docker mapper sees it.
+#[cfg(test)]
 fn dockerize_container_inspect(mut v: Value) -> Value {
     let ports = v.get("Ports").cloned();
     if let (Some(ports), Some(ns)) = (ports, v.get_mut("NetworkSettings"))
@@ -389,7 +435,9 @@ impl Engine for WslcCliEngine {
     }
 
     async fn ping(&self) -> EngineResult<()> {
-        self.version_string().await.map(|_| ())
+        self.run(&["container", "list", "--quiet"], None)
+            .await
+            .map(|_| ())
     }
 
     async fn info(&self) -> EngineResult<EngineInfo> {
@@ -468,8 +516,7 @@ impl Engine for WslcCliEngine {
     async fn inspect_container(&self, id: &str) -> EngineResult<ContainerDetails> {
         check_container(id)?;
         let v = self.inspect_json(ResourceKind::Container, id).await?;
-        let v = dockerize_container_inspect(v);
-        let mut d = dk_core::docker_json::container_details(&v)?;
+        let mut d = crate::inspect::container_details(&v)?;
         if d.summary.compose.is_none() {
             d.summary.compose = compose(&d.summary.labels);
         }
@@ -541,9 +588,11 @@ impl Engine for WslcCliEngine {
             let argv = self.runner().argv(&exec::exec_args(id, &req));
             let exe = self.runner().exe().to_path_buf();
             let (cols, rows) = (req.cols, req.rows);
-            tokio::task::spawn_blocking(move || exec::spawn(&exe, argv, cols, rows))
-                .await
-                .map_err(|e| EngineError::protocol(format!("exec spawn task failed: {e}")))?
+            let runner = self.runner().clone();
+            exec::spawn_checked(exe, argv, cols, rows, async move {
+                runner.validate_spawn().await
+            })
+            .await
         }
         #[cfg(not(windows))]
         {
@@ -589,7 +638,7 @@ impl Engine for WslcCliEngine {
         if auth.is_some() {
             // `wslc image pull` has no credential flags; it uses `wslc login` state. Never
             // pass secrets on a command line (NFR-020).
-            tracing::debug!(target: "dk_engine_wslc::cli", "pull auth ignored on CLI transport");
+            return error_stream(EngineError::Api { status: 400, message: "WSLC CLI cannot honor supplied registry credentials; use native COM or configure CLI login explicitly".into() });
         }
         stream::pull(self.runner().clone(), reference.to_owned())
     }
@@ -655,7 +704,7 @@ impl Engine for WslcCliEngine {
             .rev()
             .find(|l| validate_id(l).is_ok())
             .map(str::to_owned)
-            .ok_or_else(|| EngineError::protocol("wslc run printed no container id"))
+            .ok_or_else(runner::unknown_outcome)
     }
 
     async fn list_volumes(&self) -> EngineResult<Vec<VolumeSummary>> {
@@ -672,7 +721,7 @@ impl Engine for WslcCliEngine {
             .filter(|v| validate_name(&v.name).is_ok())
             .map(|v| v.name.clone())
             .collect();
-        let details = self.inspect_many(ResourceKind::Volume, &names).await;
+        let details = self.inspect_many(ResourceKind::Volume, &names).await?;
         for v in &mut list {
             if let Some(d) = details.iter().find(|d| same_object(d, "", &v.name)) {
                 parse::enrich_volume(v, d);
@@ -713,36 +762,16 @@ impl Engine for WslcCliEngine {
     }
 
     async fn create_volume(&self, spec: VolumeSpec) -> EngineResult<VolumeSummary> {
-        let mut args: Vec<String> = vec!["volume".into(), "create".into()];
-        if let Some(d) = &spec.driver {
-            // wslc drivers are `guest` (default) and `vhd`; Docker's `local` means default.
-            if d != "local" {
-                validate_name(d)?;
-                args.extend(["--driver".into(), d.clone()]);
-            }
-        }
-        for (k, v) in &spec.driver_opts {
-            validate_env_key(k)?;
-            args.extend(["--opt".into(), format!("{k}={v}")]);
-        }
-        for (k, v) in &spec.labels {
-            validate_env_key(k)?;
-            args.extend(["--label".into(), format!("{k}={v}")]);
-        }
-        if let Some(n) = &spec.name {
-            validate_name(n)?;
-            args.push(n.clone());
-        }
-        let out = self.run(&args, None).await?;
-        let name = out
-            .lines()
-            .map(str::trim)
-            .rfind(|l| !l.is_empty())
-            .map(str::to_owned)
-            .or(spec.name.clone())
-            .ok_or_else(|| EngineError::protocol("wslc volume create printed no name"))?;
-        validate_name(&name)?;
-        let v = self.inspect_json(ResourceKind::Volume, &name).await?;
+        let name = self.create_volume_raw(spec).await?;
+        let v = self
+            .inspect_json(ResourceKind::Volume, &name)
+            .await
+            .map_err(|e| {
+                EngineError::unreachable_with_hint(
+                    format!("Volume {name} was created but inspect failed: {e}"),
+                    "Refresh the volume list; do not create the volume again.",
+                )
+            })?;
         let mut s = dk_core::docker_json::volume_summary(&v);
         s.compose = compose(&s.labels);
         Ok(s)
@@ -783,7 +812,7 @@ impl Engine for WslcCliEngine {
             .filter(|n| validate_name(&n.name).is_ok())
             .map(|n| n.name.clone())
             .collect();
-        let details = self.inspect_many(ResourceKind::Network, &names).await;
+        let details = self.inspect_many(ResourceKind::Network, &names).await?;
         for n in &mut list {
             if let Some(d) = details.iter().find(|d| same_object(d, &n.id, &n.name)) {
                 parse::enrich_network(n, d);
@@ -874,6 +903,189 @@ mod tests {
     use dk_core::{MountRequest, PortMapping, Proto};
 
     use super::*;
+
+    fn fixture_engine(runner: Runner) -> WslcCliEngine {
+        WslcCliEngine {
+            inner: Arc::new(Inner {
+                id: EngineId::new("review-test"),
+                runner,
+                session: Some("repair-session".into()),
+                wsl_version: None,
+                transport_note: None,
+                online_cpus: 1,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn eng_129_inspect_many_errors_no_fanout_only_partial_notfound() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for (names, expected) in [
+            (["repair-a", "repair-b"], 1),
+            (["repair-denied", "repair-b"], 1),
+            (["repair-missing", "repair-b"], 3),
+        ] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let c = count.clone();
+            let e = fixture_engine(Runner::fixture().with_guard(Some(Arc::new(move || {
+                c.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }))));
+            let result = e
+                .inspect_many(ResourceKind::Volume, &names.map(String::from))
+                .await;
+            if names[0] == "repair-a" {
+                assert!(matches!(result, Err(EngineError::Protocol(_))));
+            } else if names[0] == "repair-denied" {
+                assert_eq!(
+                    result.expect_err("policy").hint(),
+                    Some(runner::POLICY_HINT)
+                );
+            } else {
+                assert_eq!(result.expect("partial").len(), 1);
+            }
+            assert_eq!(count.load(Ordering::SeqCst), expected);
+        }
+        for error in [
+            EngineError::Cancelled,
+            EngineError::Api {
+                status: 403,
+                message: "denied".into(),
+            },
+            EngineError::unreachable_with_hint("policy", runner::POLICY_HINT),
+        ] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let c = count.clone();
+            let injected = error.clone();
+            let e = fixture_engine(Runner::fixture().with_guard(Some(Arc::new(move || {
+                c.fetch_add(1, Ordering::SeqCst);
+                let error = injected.clone();
+                Box::pin(async move { Err(error) })
+            }))));
+            assert_eq!(
+                e.inspect_many(
+                    ResourceKind::Volume,
+                    &["repair-a".into(), "repair-b".into()]
+                )
+                .await,
+                Err(error)
+            );
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn eng_127_cli_stats_revalidates_every_poll_and_stops_on_replacement() {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let count = Arc::new(AtomicUsize::new(0));
+        let c = count.clone();
+        let e = fixture_engine(Runner::fixture().with_guard(Some(Arc::new(move || {
+            let n = c.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if n == 0 {
+                    Ok(())
+                } else {
+                    Err(EngineError::unreachable(
+                        "target replaced between stats polls",
+                    ))
+                }
+            })
+        }))));
+        let mut stats = e.stats("repair-ports");
+        assert!(stats.next().await.expect("sample").is_ok());
+        assert_eq!(
+            stats.next().await.expect("replacement error"),
+            Err(EngineError::unreachable(
+                "target replaced between stats polls"
+            ))
+        );
+        assert!(stats.next().await.is_none());
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn eng_127_exec_revalidates_after_inspect_inside_blocking_spawn() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let count = Arc::new(AtomicUsize::new(0));
+        let c = count.clone();
+        let e = fixture_engine(Runner::fixture().with_guard(Some(Arc::new(move || {
+            let n = c.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if n == 0 {
+                    Ok(())
+                } else {
+                    Err(EngineError::unreachable(
+                        "target replaced after exec inspect",
+                    ))
+                }
+            })
+        }))));
+        let error = match e.exec("repair-running", ExecRequest::default()).await {
+            Ok(_) => panic!("must not spawn"),
+            Err(e) => e,
+        };
+        assert_eq!(
+            error,
+            EngineError::unreachable("target replaced after exec inspect")
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn eng_131_cli_pull_rpc_unknown_policy_domain_final() {
+        use futures::StreamExt;
+        let e = fixture_engine(Runner::fixture());
+        let rpc = e
+            .pull_image("repair-rpc", None)
+            .next()
+            .await
+            .expect("error")
+            .expect_err("lost response");
+        assert!(rpc.hint().expect("unknown").contains("Refresh"));
+        let domain = e
+            .pull_image("repair-domain", None)
+            .next()
+            .await
+            .expect("error")
+            .expect_err("domain");
+        assert!(matches!(
+            domain,
+            EngineError::NotFound {
+                kind: ResourceKind::Image,
+                ..
+            }
+        ));
+        let policy = e
+            .pull_image("repair-policy", None)
+            .next()
+            .await
+            .expect("error")
+            .expect_err("policy");
+        assert!(!policy.hint().is_some_and(|h| h.contains("Refresh")));
+    }
+
+    #[tokio::test]
+    async fn eng_131_cli_auth_limitation_before_any_spawn_hook() {
+        use futures::StreamExt;
+        let e = fixture_engine(Runner::fixture().with_guard(Some(Arc::new(|| {
+            panic!("auth rejection must not prepare or spawn a child")
+        }))));
+        let auth = RegistryAuth {
+            server: "registry.invalid".into(),
+            username: None,
+            password: None,
+            identity_token: None,
+        };
+        let error = e
+            .pull_image("hello-world", Some(auth))
+            .next()
+            .await
+            .expect("limitation")
+            .expect_err("auth");
+        assert!(matches!(error, EngineError::Api { status: 400, .. }));
+    }
 
     #[test]
     fn cli_capabilities_match_spec_20_5_6() {

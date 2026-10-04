@@ -1,11 +1,13 @@
 //! COM threading (spec 20 §5.4): a small MTA **RPC pool** for short blocking calls, and a
-//! dedicated MTA thread per long-lived stream ([`spawn_stream_thread`]).
+//! dedicated MTA thread per long-lived stream ([`spawn_stream_thread_checked`]).
 //!
 //! No tokio here: callers `await` a `futures` oneshot, so the pool works from any executor and
 //! never blocks an async worker or the UI thread. COM calls must only happen on these threads.
 
 #![cfg(windows)]
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 
@@ -14,7 +16,48 @@ use futures::channel::oneshot;
 
 use super::ffi::MtaGuard;
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+type Job = Box<dyn FnOnce(bool) + Send + 'static>;
+thread_local! { static ADMISSION: RefCell<Option<Arc<AtomicU8>>> = const { RefCell::new(None) }; }
+
+/// Atomic cancellation/dispatch boundary: cancellation winning 0→2 prevents entry; once
+/// dispatch wins 0→1 the operation may complete even if its waiter disappears.
+pub(crate) fn admit() -> EngineResult<()> {
+    ADMISSION.with(|a| {
+        if let Some(a) = a.borrow().as_ref() {
+            match a.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) | Err(1) => Ok(()),
+                _ => Err(EngineError::Cancelled),
+            }
+        } else {
+            Ok(())
+        }
+    })
+}
+pub(crate) fn check_cancelled() -> EngineResult<()> {
+    ADMISSION.with(|a| {
+        if a.borrow()
+            .as_ref()
+            .is_some_and(|a| a.load(Ordering::Acquire) == 2)
+        {
+            Err(EngineError::Cancelled)
+        } else {
+            Ok(())
+        }
+    })
+}
+pub(crate) fn admit_windows() -> windows::core::Result<()> {
+    admit().map_err(|_| {
+        windows::core::Error::from_hresult(windows::core::HRESULT(super::ffi::hr::E_ABORT))
+    })
+}
+struct CancelQueued(Arc<AtomicU8>);
+impl Drop for CancelQueued {
+    fn drop(&mut self) {
+        let _ = self
+            .0
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
+    }
+}
 
 /// A fixed set of OS threads, each in the process MTA, executing submitted closures in FIFO
 /// order.
@@ -42,7 +85,7 @@ impl RpcPool {
             let spawned = std::thread::Builder::new()
                 .name(format!("dk-wslc-rpc-{i}"))
                 .spawn(move || {
-                    let _mta = MtaGuard::enter();
+                    let mta = MtaGuard::enter();
                     loop {
                         // Hold the lock only while dequeuing.
                         let job = match rx.lock() {
@@ -50,7 +93,7 @@ impl RpcPool {
                             Err(_) => return,
                         };
                         match job {
-                            Ok(job) => job(),
+                            Ok(job) => job(mta.ok()),
                             Err(_) => return, // queue closed
                         }
                     }
@@ -73,9 +116,25 @@ impl RpcPool {
         F: FnOnce() -> EngineResult<T> + Send + 'static,
     {
         let (otx, orx) = oneshot::channel::<EngineResult<T>>();
-        let job: Job = Box::new(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        let admission = Arc::new(AtomicU8::new(0));
+        let guard = CancelQueued(admission.clone());
+        // Capture on submission (on caller's executor), restore on every actual worker.
+        // Covers activation/self-check jobs as well as normal engine RPCs.
+        let evidence = super::dispatch::Evidence::current();
+        let job: Job = Box::new(move |mta| {
+            if admission.load(Ordering::Acquire) == 2 || otx.is_canceled() {
+                return;
+            }
+            if !mta {
+                let _ = otx.send(Err(EngineError::unreachable(
+                    "COM MTA initialization failed",
+                )));
+                return;
+            }
+            ADMISSION.with(|a| *a.borrow_mut() = Some(admission));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| evidence.scope(f)))
                 .unwrap_or_else(|_| Err(EngineError::protocol("WSLC COM call panicked")));
+            ADMISSION.with(|a| a.borrow_mut().take());
             let _ = otx.send(r);
         });
         let sent = self
@@ -85,6 +144,7 @@ impl RpcPool {
             .and_then(|g| g.as_ref().map(|tx| tx.send(job).is_ok()))
             .unwrap_or(false);
         async move {
+            let _guard = guard;
             if !sent {
                 return Err(EngineError::unreachable("WSLC COM pool is shut down"));
             }
@@ -110,17 +170,33 @@ impl Drop for RpcPool {
     }
 }
 
-/// Spawns a dedicated MTA thread for a long-lived blocking stream (events `GetNext`, a logs
-/// reader, an exec TTY reader). `body` owns its COM pointers and handles; it must return once
-/// its cancel signal fires (cancel event / `CancelIoEx`).
-pub fn spawn_stream_thread<F>(name: &str, body: F) -> std::io::Result<JoinHandle<()>>
+#[cfg(test)]
+thread_local! { pub(crate) static FAIL_STREAM_MTA: RefCell<bool> = const { RefCell::new(false) }; }
+
+/// Spawns an MTA stream thread, explicitly reporting startup before executing its body.
+pub(crate) fn spawn_stream_thread_checked<F, S>(
+    name: &str,
+    body: F,
+    startup: S,
+) -> std::io::Result<JoinHandle<()>>
 where
     F: FnOnce() + Send + 'static,
+    S: FnOnce(bool) + Send + 'static,
 {
+    #[cfg(test)]
+    let fail = FAIL_STREAM_MTA.with(|f| *f.borrow());
+    #[cfg(not(test))]
+    let fail = false;
     std::thread::Builder::new()
         .name(format!("dk-wslc-{name}"))
         .spawn(move || {
-            let _mta = MtaGuard::enter();
+            let mta = MtaGuard::enter();
+            let ok = mta.ok() && !fail;
+            startup(ok);
+            if !ok {
+                tracing::error!("COM stream MTA initialization failed");
+                return;
+            }
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).is_err() {
                 tracing::error!("WSLC stream thread panicked");
             }
@@ -130,6 +206,48 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eng_134_cancelled_queue_no_rpc() {
+        let pool = RpcPool::new(1);
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let busy = pool.run(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let calls = Arc::new(AtomicU8::new(0));
+        let count = calls.clone();
+        let cancelled = pool.run(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+        drop(cancelled);
+        release_tx.send(()).unwrap();
+        futures::executor::block_on(busy).unwrap();
+        futures::executor::block_on(pool.run(|| Ok(()))).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn eng_134_admission_race() {
+        for _ in 0..100 {
+            let state = Arc::new(AtomicU8::new(0));
+            let cancel = CancelQueued(state.clone());
+            let worker = state.clone();
+            let thread = std::thread::spawn(move || {
+                ADMISSION.with(|a| *a.borrow_mut() = Some(worker));
+                admit().is_ok()
+            });
+            drop(cancel);
+            let admitted = thread.join().unwrap();
+            assert_eq!(admitted, state.load(Ordering::Acquire) == 1);
+        }
+    }
 
     #[test]
     fn runs_jobs_and_survives_panics() {

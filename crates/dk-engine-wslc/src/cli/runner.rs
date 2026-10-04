@@ -15,6 +15,16 @@ use dk_core::{EngineError, EngineResult, ResourceKind};
 use tokio::process::Command;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+pub(crate) type SpawnGuard =
+    Arc<dyn Fn() -> futures::future::BoxFuture<'static, EngineResult<()>> + Send + Sync>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildPhase {
+    NotDispatched,
+    MayHaveDispatched,
+    Completed,
+}
+
 /// Per-engine process limit (spec 20 §5.5).
 pub(crate) const MAX_CONCURRENT: usize = 4;
 /// Default timeout for request/response invocations.
@@ -59,6 +69,9 @@ pub(crate) struct Runner {
     exe: PathBuf,
     session: Option<String>,
     sem: Arc<Semaphore>,
+    guard: Option<SpawnGuard>,
+    #[cfg(test)]
+    fixtures: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Runner {
@@ -76,7 +89,39 @@ impl Runner {
             exe,
             session,
             sem: Arc::new(Semaphore::new(MAX_CONCURRENT)),
+            guard: None,
+            #[cfg(test)]
+            fixtures: None,
         }
+    }
+
+    pub(crate) fn with_guard(mut self, guard: Option<SpawnGuard>) -> Self {
+        self.guard = guard;
+        self
+    }
+    pub(crate) async fn validate_spawn(&self) -> EngineResult<()> {
+        if let Some(guard) = &self.guard {
+            guard().await?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture() -> Self {
+        let exe = std::env::current_exe()
+            .expect("test exe")
+            .parent()
+            .expect("deps")
+            .parent()
+            .expect("debug")
+            .join(if cfg!(windows) {
+                "fake-wslc.exe"
+            } else {
+                "fake-wslc"
+            });
+        let mut runner = Self::new(exe, Some("repair-session".into()));
+        runner.fixtures =
+            Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repair"));
+        runner
     }
 
     pub fn exe(&self) -> &Path {
@@ -106,6 +151,10 @@ impl Runner {
             .kill_on_drop(true);
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
+        #[cfg(test)]
+        if let Some(dir) = &self.fixtures {
+            cmd.env("FAKE_WSLC_FIXTURES", dir);
+        }
         cmd
     }
 
@@ -125,6 +174,8 @@ impl Runner {
         timeout: Duration,
         ctx: Option<ErrCtx<'_>>,
     ) -> EngineResult<CmdOutput> {
+        let mut phase = ChildPhase::NotDispatched;
+        debug_assert!(phase == ChildPhase::NotDispatched);
         let _permit = self.permit().await?;
         let mut cmd = self.command(args);
         let label = args
@@ -132,20 +183,104 @@ impl Runner {
             .map(|a| a.as_ref().to_owned())
             .unwrap_or_default();
         tracing::debug!(target: "dk_engine_wslc::cli", cmd = %label, "wslc invocation");
+        self.validate_spawn().await?;
         let child = cmd.spawn().map_err(|e| spawn_error(&self.exe, &e))?;
+        phase = ChildPhase::MayHaveDispatched;
+        let mutation = is_mutation(args);
         // Dropping the future on timeout drops the child, which kills it (kill_on_drop).
         let out = match tokio::time::timeout(timeout, child.wait_with_output()).await {
-            Ok(r) => r.map_err(|e| EngineError::unreachable(format!("wslc.exe failed: {e}")))?,
-            Err(_) => return Err(EngineError::Timeout(timeout)),
+            Ok(r) => r.map_err(|e| {
+                if mutation {
+                    unknown_outcome()
+                } else {
+                    EngineError::unreachable(format!("wslc.exe failed: {e}"))
+                }
+            })?,
+            Err(_) => {
+                return Err(if mutation {
+                    unknown_outcome()
+                } else {
+                    EngineError::Timeout(timeout)
+                });
+            }
         };
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         if out.status.success() {
             Ok(CmdOutput { stdout, stderr })
         } else {
-            Err(map_cli_error(out.status.code(), &stderr, ctx))
+            Err(child_error(
+                out.status.code(),
+                &stderr,
+                ctx,
+                mutation,
+                phase,
+            ))
         }
     }
+}
+
+/// Shared request/stream classification after child spawn. Policy/domain failures remain
+/// final; reviewed RPC lost-response symbols and abnormal termination are ambiguous writes.
+#[cfg(test)]
+pub(crate) fn dispatched_error(
+    code: Option<i32>,
+    stderr: &str,
+    ctx: Option<ErrCtx<'_>>,
+    mutation: bool,
+) -> EngineError {
+    child_error(code, stderr, ctx, mutation, ChildPhase::MayHaveDispatched)
+}
+pub(crate) fn child_error(
+    code: Option<i32>,
+    stderr: &str,
+    ctx: Option<ErrCtx<'_>>,
+    mutation: bool,
+    phase: ChildPhase,
+) -> EngineError {
+    if mutation
+        && phase == ChildPhase::MayHaveDispatched
+        && (code.is_none()
+            || matches!(
+                error_code(stderr),
+                Some(
+                    "RPC_E_DISCONNECTED"
+                        | "RPC_S_SERVER_UNAVAILABLE"
+                        | "RPC_E_SERVER_DIED"
+                        | "RPC_E_SERVER_DIED_DNE"
+                        | "RPC_S_CALL_FAILED"
+                )
+            ))
+    {
+        unknown_outcome()
+    } else {
+        map_cli_error(code, stderr, ctx)
+    }
+}
+
+fn is_mutation<S: AsRef<str>>(args: &[S]) -> bool {
+    matches!(
+        args.get(1).map(AsRef::as_ref),
+        Some(
+            "run"
+                | "exec"
+                | "pull"
+                | "start"
+                | "stop"
+                | "restart"
+                | "kill"
+                | "remove"
+                | "prune"
+                | "tag"
+                | "create"
+        )
+    )
+}
+pub(crate) fn unknown_outcome() -> EngineError {
+    EngineError::unreachable_with_hint(
+        "WSLC CLI child was dispatched; operation outcome is unknown",
+        "The operation may have completed. Refresh before manually retrying; do not resubmit automatically.",
+    )
 }
 
 /// Error for a child that couldn't be spawned at all.
@@ -288,6 +423,86 @@ pub(crate) fn map_cli_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn eng_127_saturated_permit_revalidates_before_mutation_spawn() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let changed = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (c, n) = (changed.clone(), calls.clone());
+        let r = Runner::fixture().with_guard(Some(Arc::new(move || {
+            let (c, n) = (c.clone(), n.clone());
+            Box::pin(async move {
+                n.fetch_add(1, Ordering::SeqCst);
+                if c.load(Ordering::SeqCst) {
+                    Err(EngineError::unreachable("pinned target replaced"))
+                } else {
+                    Ok(())
+                }
+            })
+        })));
+        let permits = r
+            .sem
+            .clone()
+            .acquire_many_owned(MAX_CONCURRENT as u32)
+            .await
+            .expect("saturate");
+        let task = tokio::spawn({
+            let r = r.clone();
+            async move {
+                r.run(
+                    &["container", "run", "--detach", "hello-world"],
+                    DEFAULT_TIMEOUT,
+                    None,
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        changed.store(true, Ordering::SeqCst);
+        drop(permits);
+        let e = task.await.expect("task").expect_err("replaced");
+        assert_eq!(e, EngineError::unreachable("pinned target replaced"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn eng_130_shared_child_lost_response_classification() {
+        for code in [
+            "RPC_E_DISCONNECTED",
+            "RPC_S_SERVER_UNAVAILABLE",
+            "RPC_E_SERVER_DIED",
+            "RPC_E_SERVER_DIED_DNE",
+            "RPC_S_CALL_FAILED",
+        ] {
+            let stderr = format!("lost response\nError code: {code}\n");
+            assert!(
+                dispatched_error(Some(1), &stderr, None, true)
+                    .hint()
+                    .expect("unknown")
+                    .contains("Refresh")
+            );
+        }
+        assert!(
+            dispatched_error(None, "", None, true)
+                .hint()
+                .expect("unknown")
+                .contains("Refresh")
+        );
+        for code in [
+            "WSLC_E_CONTAINER_DISABLED",
+            "WSLC_E_REGISTRY_BLOCKED_BY_POLICY",
+            "WSLC_E_IMAGE_NOT_FOUND",
+            "ERROR_ELEVATION_REQUIRED",
+        ] {
+            let stderr = format!("final rejection\nError code: {code}\n");
+            assert_eq!(
+                dispatched_error(Some(1), &stderr, None, true),
+                map_cli_error(Some(1), &stderr, None)
+            );
+        }
+    }
 
     macro_rules! fixture {
         ($name:literal) => {

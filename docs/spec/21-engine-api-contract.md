@@ -24,6 +24,8 @@ Rules:
 - Runtime differences are expressed **only** through `Capabilities` (§2) and `Option` fields in DTOs (§3). The UI never branches on `EngineKind` for behaviour (ENG-030).
 - When a runtime has several transports, they're private to its crate. The transport currently in use is reported in `EngineInfo.transport` for display and diagnostics only.
 
+**Implemented WSLC repair (2026-10-04, [completed plan](../plan/features/wslc-integration-repair.md), ENG-126…136):** private `WslcEngine` owns COM/CLI delegates and reports primary/mixed/degraded routes through existing metadata. Auto is COM-first per verified operation; forced preferences are strict. Native Run remains unverified: Auto selects pinned-session CLI before dispatch, strict COM returns 501. Read fallback is classified/bounded; mutations never blindly replay, with conservative read reconciliation where possible. Stream fallback is pre-first-source-item only, additionally predispatch-safe for pull/exec; terminals never migrate. Public signatures/error/event types are unchanged. See spec 20 §5 for exact-version trust, parity gates and non-atomic mixed-session check/spawn limitation. Cross-OS release validation is still open; Windows completion is not three-OS CI proof.
+
 ## 1. The `Engine` trait
 
 ```rust
@@ -100,7 +102,7 @@ bitflags! { pub struct Capabilities: u32 {
 
 | Capability | Docker (≥1.41) | WSL distro (Docker) | WSLC — COM (primary) | WSLC — CLI (fallback) |
 |---|---|---|---|---|
-| EVENTS | ✔ | ✔ | ✔ (`GetEvents`) | ✔ (`system events`) — verify S-2 |
+| EVENTS | ✔ | ✔ | ✔ (`GetEvents`) | ✔ (`system events`) — verified text output on 3.0.1 (S-2/F-10), no JSON option |
 | PAUSE | ✔ | ✔ | ✘ | ✘ |
 | EXEC_TTY / EXEC_RESIZE | ✔ / ✔ | ✔ / ✔ | ✔ / ✔ (`IWSLCProcess::ResizeTty`) | ✔ / ✔ (ConPTY) |
 | STATS_STREAM | ✔ | ✔ | ✘ (polled `Stats()`) | ✘ (polled) |
@@ -143,6 +145,7 @@ pub enum EngineKind { Docker, WslDistro, Wslc, AppleContainer /* reserved, ENG-0
 pub struct EngineInfo {
     pub name: String, pub kind: EngineKind,
     pub transport: Option<String>,          // e.g. "com", "cli", "xpc"; display/diagnostics only
+    pub transport_note: Option<String>,     // existing code field; limitation/mixed/degraded route explanation (ENG-110/136)
     pub server_version: String, pub api_version: Option<String>,
     pub os: String, pub arch: String, pub kernel: Option<String>,   // engine-wide facts are optional (ENG-031)
     pub cpus: Option<u32>, pub mem_total: Option<u64>,
@@ -153,6 +156,8 @@ pub struct EngineInfo {
 }
 pub enum EngineState { Disconnected, Connecting, Connected, Degraded, Failed { error: EngineError, retry_at: Option<Instant> } }
 ```
+
+For WSLC operation routing, `transport` describes the primary transport, not the last call; `transport_note` names CLI exceptions/degraded routes. Capabilities and existing `list_stats_limit` reflect a coherent snapshot. Hub full-info refresh publishes existing StatusChanged even when flags are unchanged (ENG-136); CapabilitiesChanged remains for actual flag changes. Local UI InfoChanged/apply_info propagation does not add a public hub event or Engine method.
 
 ### 3.2 Containers
 
@@ -299,6 +304,8 @@ pub trait TerminalSession: Send + 'static {
 | WSLC — COM | `IWSLCContainer::Exec` with a TTY and initial rows/cols → `IWSLCProcess`. I/O goes through the handles from `GetStdHandle`, resize through `ResizeTty`, and the exit code comes from `GetExitEvent` + `GetState`. |
 | WSLC — CLI fallback | `portable-pty` ConPTY running `wslc.exe container exec -i -t <id> <cmd>`. Resize via `MasterPty::resize`. The exit code comes from the child's exit status. |
 
+**Safety (ENG-130/131):** exec can mutate before a TerminalSession/output handle is returned. A failure after possible creation MUST NOT start another process automatically, even with no output. Returned output/write/resize/wait/close stay transport-pinned; cleanup follows tagged ownership (ENG-134).
+
 **Shell selection** (TRM-004): the default command is `["/bin/sh", "-c", "if command -v bash >/dev/null; then exec bash; else exec sh; fi"]`. The user can override it per terminal tab (bash, sh, zsh, ash, or custom).
 
 ## 6. Mapping: Docker Engine API (via bollard)
@@ -335,12 +342,17 @@ pub trait TerminalSession: Send + 'static {
 
 ## 7. Contract tests
 
+**WSLC mapping/routing (ENG-126…136):** Docker/WSL mappings are unchanged. Native/CLI mappings remain spec 20 §5.4/§5.5; [plan §5.1](../plan/features/wslc-integration-repair.md#51-complete-trait-mapping-and-routing-groups) covers the complete trait surface. Native Run is declared, not dispatched; Auto CLI/strict COM 501 remain intentional. WSLC pause/top/history/disk usage return Unsupported(single flag). No new operation/capability. Mixed volume-prune/explicit-local create-volume fallback is refused; supplied CLI pull auth is rejected before spawn.
+
 `dk-core` ships a reusable test suite, `dk_core::contract::run_suite(engine)`. Each backend runs it in CI:
 
 - `DockerEngine` runs it against a real dockerd (the Linux CI service container), and against a recorded HTTP fixture server for Windows and macOS.
 - `WslcEngine` (CLI transport) runs it against a **fake `wslc.exe`**: a small test binary that replays recorded JSON fixtures by argv.
 - `WslcEngine` (COM transport) runs it against a **fake in-process COM server** that implements the vendored `IWSLC*` vtables and returns fixture data. This tests our vtable/struct declarations, memory freeing, and HRESULT mapping without WSL. It does **not** test marshalling; that's covered by the self-hosted `wsl` runner against real WSLC.
 - A real-WSLC run (both transports) happens on a self-hosted or manual Windows job, and is required before shipping a new ABI module (20 §5.7).
+- **Router coverage:** current factory/router/COM/CLI tests verify strict preferences/session binding, predispatch Run, typed fault budgets, no duplicate mutation after lost responses/timeouts, completed create/failed inspect, stream boundaries/pull/exec ambiguity, cancellation/tokens/tagged resource closure, fail-closed discovery and full metadata without flag changes. Actual test names/results are in the plan §8 and feature verification tables.
+- **Inspect coverage:** `eng_133_ports_and_cdt_040_original_raw`, `eng_133_recorded_com_cli_inspect_raw_deep_equality`, `eng_133_cdt_030_040_published_ports_both_delegate_paths` cover original raw and typed ports. Synthetic published-port fixtures are not live recordings.
+- **Evidence boundaries:** final Windows workspace PASS includes WSLC 183 passed/18 live opt-in ignores; hub 77/UI 243. Maintained `repair_live::eng_127_128_normal_user_hello_world_acceptance` separately passed four Runs/both typed inspect-log paths/strict COM rejection/admin rejection/cleanup on 3.0.1.0. Fake tests cannot prove out-of-process marshalling, live fault/leak stress or native CreateContainer. New exact-version/native enablement needs separate real evidence. Linux compiler provisioning and unrun macOS validation remain explicit release gates; no three-OS green claim. Historical external-probe/smaller counters are superseded by the plan completion record.
 - The suite checks DTO invariants (non-empty ids, monotonic stats timestamps, grouping) and checks that capability gating is honoured.
 - Future backends (Apple `container`, 20 §7) MUST pass the same suite before they're enabled.
 
@@ -369,4 +381,3 @@ pub trait EngineFactory: Send + Sync + 'static {
 
 `EngineEndpoint` (20 §1) gains a variant per backend. Stored configs with an unknown variant, for
 example a config written by a newer app version, are kept and shown as *unsupported*, never deleted.
-

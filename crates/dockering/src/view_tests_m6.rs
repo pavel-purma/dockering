@@ -437,6 +437,149 @@ fn find_run_dialog(
         .expect("run dialog open")
 }
 
+/// The backend may return a container which exits before the first inspect completes.
+/// Exercise the existing U/Run path, typed Network bindings, and original Inspect JSON.
+#[gpui_kit::test]
+fn img_005_run_exited_detail_cdt_030_040(cx: &mut TestAppContext) {
+    use crate::nav::ContainerTab;
+    use crate::shell::ShellPage;
+    use dk_core::{ContainerState, PortMapping, Proto};
+
+    let h = start(cx, Setup::default());
+    let images = images_page(&h, cx);
+    let key = key_of(&images, "hello-world:latest", cx);
+    focus_images_table(&h, &images, cx);
+    select_image(&images, &key, cx);
+    h.press(cx, "u");
+    h.type_text(cx, "repair-hello");
+    h.engine.set_latency(std::time::Duration::from_millis(200));
+    h.engine.clear_calls();
+    h.press(cx, "secondary-enter");
+    h.wait_until(cx, "returned ID detail route", |_, cx| {
+        matches!(h.shell.read(cx).route(), Route::ContainerDetail { .. })
+    });
+    let id = h.read(cx, |s, _, _| match s.route() {
+        Route::ContainerDetail { id, .. } => id.clone(),
+        _ => unreachable!(),
+    });
+    // Simulate hello-world exiting before the in-flight inspect returns. No UI stop
+    // or Run retry is involved; the returned full ID remains the navigation target.
+    let mut summary = dk_core::fake::fixtures::container("repair-hello", ContainerState::Exited);
+    summary.id = id.clone();
+    summary.image = "hello-world:latest".into();
+    summary.exit_code = Some(0);
+    summary.command = "/hello".into();
+    summary.ports = vec![PortMapping {
+        ip: Some("::".parse().unwrap()),
+        private: 80,
+        public: Some(8080),
+        proto: Proto::Tcp,
+    }];
+    let mut details = dk_core::fake::fixtures::details_for(summary.clone());
+    details.port_bindings = summary.ports.clone();
+    details.network_settings.networks.clear();
+    let raw = serde_json::json!({
+        "Id": id, "State": { "Status": "exited", "ExitCode": 0 },
+        "Config": { "Cmd": ["/hello"] },
+        "Ports": { "80/tcp": [{ "HostIp": "::", "HostPort": "8080" }] }
+    });
+    details.raw = raw.clone();
+    h.engine.set_containers(vec![summary]);
+    h.engine.set_container_details(details);
+    h.wait_until(cx, "first inspect is exited zero", |_, cx| {
+        match h.shell.read(cx).page() {
+            ShellPage::ContainerDetail(p) => p.read(cx).detail_state().is_some_and(|s| {
+                s.read(cx).details.data().is_some_and(|d| {
+                    d.summary.state == ContainerState::Exited
+                        && d.summary.exit_code == Some(0)
+                        && d.summary.command == "/hello"
+                })
+            }),
+            _ => false,
+        }
+    });
+    let page = crate::view_tests_detail::detail_page(&h, cx).unwrap();
+    let tabs_focus = cx.read(|cx| page.read(cx).tab_bar_focus().clone());
+    h.focus(cx, &tabs_focus);
+    // Overview → Network, using the existing detail keyboard binding.
+    h.press(cx, "right right right right right");
+    assert_eq!(cx.read(|cx| page.read(cx).tab()), ContainerTab::Network);
+    let network = cx.read(|cx| page.read(cx).tabs().network.clone()).unwrap();
+    let port_focus = cx.read(|cx| network.read(cx).rows().focus.clone());
+    h.focus(cx, &port_focus);
+    h.press(cx, "home secondary-c");
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+        Some("http://localhost:8080")
+    );
+    h.press(cx, "ctrl-tab");
+    let inspect = cx.read(|cx| page.read(cx).tabs().inspect.clone()).unwrap();
+    h.wait_until(cx, "original JSON formatted", |_, cx| {
+        !inspect.read(cx).view().read(cx).text().is_empty()
+    });
+    let text = cx.read(|cx| inspect.read(cx).view().read(cx).text().to_string());
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        raw
+    );
+    assert!(
+        raw.get("NetworkSettings").is_none(),
+        "no typed normalization leaked into raw"
+    );
+    assert_eq!(h.engine.calls_to("run_image").len(), 1);
+    assert!(
+        h.engine
+            .calls_to("inspect_container")
+            .iter()
+            .all(|c| c.arg == id)
+    );
+    assert!(!h.has_dialog(cx));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn img_005_run_501_and_unknown_outcome_do_not_resubmit_restore_focus(cx: &mut TestAppContext) {
+    for error in [
+        EngineError::Api {
+            status: 501,
+            message: "Run via COM is not verified for this WSL version".into(),
+        },
+        EngineError::unreachable_with_hint(
+            "Run outcome unknown",
+            "The operation may have completed; refresh before retrying",
+        ),
+    ] {
+        let h = start(cx, Setup::default());
+        let page = images_page(&h, cx);
+        let key = key_of(&page, "hello-world:latest", cx);
+        focus_images_table(&h, &page, cx);
+        select_image(&page, &key, cx);
+        let focus = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+        let expected_hint = error.hint().map(str::to_owned);
+        h.engine.set_error("run_image", Some(error));
+        h.engine.clear_calls();
+        h.press(cx, "u");
+        let dialog = find_run_dialog(&page, cx);
+        h.press(cx, "secondary-enter");
+        h.wait_until(cx, "failed Run shown inline", |_, cx| {
+            dialog.read(cx).error().is_some()
+        });
+        if let Some(hint) = expected_hint {
+            assert!(cx.read(|cx| dialog.read(cx).error().unwrap().contains(&hint)));
+        }
+        assert!(h.has_dialog(cx), "existing Run errors keep the form open");
+        h.press(cx, "escape");
+        h.wait_until(cx, "cancel returns invoking focus", |window, _| {
+            focus.is_focused(window)
+        });
+        h.draw(cx);
+        assert!(!h.has_dialog(cx));
+        assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Images);
+        assert_eq!(h.engine.calls_to("run_image").len(), 1);
+        h.shutdown();
+    }
+}
+
 // ── IMG-010/011 detail ───────────────────────────────────────────────────────────────
 
 #[gpui_kit::test]

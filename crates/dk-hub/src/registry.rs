@@ -195,6 +195,15 @@ impl Registry {
         self.active.as_ref() == Some(id)
     }
 
+    /// Async health results may only update the connection that started the work.
+    pub(crate) fn current_connection(&self, id: &EngineId, conn: &Conn) -> bool {
+        self.is_active(id)
+            && !conn.token.is_cancelled()
+            && self.get(id).and_then(|e| e.conn.as_ref()).is_some_and(|c| {
+                c.generation == conn.generation && Arc::ptr_eq(&c.engine, &conn.engine)
+            })
+    }
+
     /// Whether `engines()` / hub events include this entry. Hidden engines are included (the
     /// UI filters `config.hidden`, Settings needs them); the active engine is always included.
     pub fn visible(&self, e: &Entry) -> bool {

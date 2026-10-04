@@ -22,7 +22,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 
 use super::parse::{self, CliStats};
-use super::runner::{DEFAULT_TIMEOUT, ErrCtx, PULL_TIMEOUT, Runner, map_cli_error, spawn_error};
+use super::runner::{DEFAULT_TIMEOUT, ErrCtx, PULL_TIMEOUT, Runner, spawn_error};
 
 /// Lines longer than this are emitted in pieces (a progress bar without `\n` must not stall).
 const MAX_LINE: usize = 64 * 1024;
@@ -76,22 +76,31 @@ pub(crate) struct ChildLines {
     child: Child,
     lines: BoxStream<'static, io::Result<Line>>,
     stderr_tail: VecDeque<String>,
+    mutation: bool,
+    phase: super::runner::ChildPhase,
 }
 
 impl ChildLines {
-    pub fn spawn(runner: &Runner, args: &[String]) -> EngineResult<Self> {
+    pub async fn spawn(runner: &Runner, args: &[String]) -> EngineResult<Self> {
+        runner.validate_spawn().await?;
         let mut child = runner
             .command(args)
             .spawn()
             .map_err(|e| spawn_error(runner.exe(), &e))?;
-        let out = child
-            .stdout
-            .take()
-            .ok_or_else(|| EngineError::protocol("wslc: no stdout pipe"))?;
-        let err = child
-            .stderr
-            .take()
-            .ok_or_else(|| EngineError::protocol("wslc: no stderr pipe"))?;
+        let out = child.stdout.take().ok_or_else(|| {
+            if args.get(1).is_some_and(|a| a == "pull") {
+                super::runner::unknown_outcome()
+            } else {
+                EngineError::protocol("wslc: no stdout pipe")
+            }
+        })?;
+        let err = child.stderr.take().ok_or_else(|| {
+            if args.get(1).is_some_and(|a| a == "pull") {
+                super::runner::unknown_outcome()
+            } else {
+                EngineError::protocol("wslc: no stderr pipe")
+            }
+        })?;
         let lines = stream::select(
             line_stream(out).map(|r| r.map(Line::Out)),
             line_stream(err).map(|r| r.map(Line::Err)),
@@ -101,6 +110,8 @@ impl ChildLines {
             child,
             lines,
             stderr_tail: VecDeque::new(),
+            mutation: args.get(1).is_some_and(|a| a == "pull"),
+            phase: super::runner::ChildPhase::MayHaveDispatched,
         })
     }
 
@@ -131,8 +142,18 @@ impl ChildLines {
     /// After all output was read: `Ok(())` on exit 0, else the mapped error.
     pub async fn finish(&mut self, ctx: Option<ErrCtx<'_>>) -> EngineResult<()> {
         match self.wait().await {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(map_cli_error(s.code(), &self.stderr_tail(), ctx)),
+            Ok(s) if s.success() => {
+                self.phase = super::runner::ChildPhase::Completed;
+                Ok(())
+            }
+            Ok(s) => Err(super::runner::child_error(
+                s.code(),
+                &self.stderr_tail(),
+                ctx,
+                self.mutation,
+                self.phase,
+            )),
+            Err(_) if self.mutation => Err(super::runner::unknown_outcome()),
             Err(e) => Err(EngineError::protocol(format!("wslc wait failed: {e}"))),
         }
     }
@@ -228,7 +249,7 @@ pub(crate) fn logs(runner: Runner, id: String, opts: LogOpts) -> EngineStream<Lo
                 return None;
             }
             if st.lines.is_none() {
-                match ChildLines::spawn(&st.runner, &st.args) {
+                match ChildLines::spawn(&st.runner, &st.args).await {
                     Ok(l) => st.lines = Some(l),
                     Err(e) => {
                         st.done = true;
@@ -274,7 +295,7 @@ pub(crate) fn events(runner: Runner, filter: EventFilter) -> EngineStream<Engine
     let args = events_args(&filter);
     let kinds = filter.kinds;
     let fut = async move {
-        let lines = match ChildLines::spawn(&runner, &args) {
+        let lines = match ChildLines::spawn(&runner, &args).await {
             Ok(l) => l,
             Err(e) => return error_stream(e),
         };
@@ -325,7 +346,7 @@ pub(crate) fn events(runner: Runner, filter: EventFilter) -> EngineStream<Engine
 pub(crate) fn pull(runner: Runner, reference: String) -> EngineStream<PullProgress> {
     let fut = async move {
         let args: Vec<String> = vec!["image".into(), "pull".into(), reference.clone()];
-        let lines = match ChildLines::spawn(&runner, &args) {
+        let lines = match ChildLines::spawn(&runner, &args).await {
             Ok(l) => l,
             Err(e) => return error_stream(e),
         };
@@ -353,7 +374,7 @@ pub(crate) fn pull(runner: Runner, reference: String) -> EngineStream<PullProgre
                     let Ok(next) = next else {
                         // The child is killed when the stream state is dropped (kill_on_drop).
                         st.done = true;
-                        return Some((Err(EngineError::Timeout(PULL_TIMEOUT)), st));
+                        return Some((Err(super::runner::unknown_outcome()), st));
                     };
                     match next {
                         Some(Ok(Line::Out(b))) => {
@@ -366,9 +387,9 @@ pub(crate) fn pull(runner: Runner, reference: String) -> EngineStream<PullProgre
                             }
                         }
                         Some(Ok(Line::Err(_))) => {}
-                        Some(Err(e)) => {
+                        Some(Err(_e)) => {
                             st.done = true;
-                            return Some((Err(io_err(e)), st));
+                            return Some((Err(super::runner::unknown_outcome()), st));
                         }
                         None => {
                             st.done = true;

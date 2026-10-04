@@ -66,12 +66,19 @@ pub struct FakeState {
     pub networks_json: String,
     pub sessions: Vec<(u32, String)>,
     pub default_session: String,
+    /// Fault injection: positive contradiction after an explicitly named open.
+    pub opened_session_override: Option<String>,
     pub version: (u32, u32, u32),
     pub events: Vec<String>,
     /// Every recorded call, in order.
     pub calls: Vec<String>,
     /// Forced HRESULT for the next call of this name (consumed once).
     pub fail_next: BTreeMap<String, i32>,
+    /// Fault after observable commit (ENG-130), consumed once.
+    pub commit_fault: BTreeMap<String, i32>,
+    pub pull_progress_count: usize,
+    /// Blocking RPC delay; caller timeout must not cause a second dispatch.
+    pub delay_next: BTreeMap<String, std::time::Duration>,
     pub stopped: Vec<(String, i32, i32)>,
     pub killed: Vec<(String, i32)>,
     pub deleted: Vec<(String, i32)>,
@@ -341,6 +348,9 @@ impl IWSLCProcess_Impl for FakeProcess_Impl {
         E_NOTIMPL
     }
     unsafe fn GetStdHandle(&self, Fd: i32, Handle: *mut WSLCHandle) -> HRESULT {
+        if let Some(h) = record(&self.state, "GetStdHandle") {
+            return h;
+        }
         if Handle.is_null() {
             return E_POINTER;
         }
@@ -357,7 +367,10 @@ impl IWSLCProcess_Impl for FakeProcess_Impl {
                 Handle: HANDLE(h as *mut c_void),
             }
         };
-        S_OK
+        lock(&self.state)
+            .commit_fault
+            .remove("GetStdHandle")
+            .map_or(S_OK, HRESULT)
     }
     unsafe fn GetFlags(&self, _Flags: *mut i32) -> HRESULT {
         E_NOTIMPL
@@ -448,6 +461,9 @@ fn find(state: &Shared, id: &str) -> Option<FakeContainerData> {
 
 impl IWSLCSessionManager_Impl for FakeManager_Impl {
     unsafe fn GetVersion(&self, Version: *mut WSLCVersion) -> HRESULT {
+        if let Some(h) = record(&self.state, "GetVersion") {
+            return h;
+        }
         if Version.is_null() {
             return E_POINTER;
         }
@@ -532,7 +548,10 @@ impl IWSLCSessionManager_Impl for FakeManager_Impl {
         }
         let s: IWSLCSession = FakeSession {
             state: self.state.clone(),
-            name: wanted,
+            name: lock(&self.state)
+                .opened_session_override
+                .clone()
+                .unwrap_or(wanted),
         }
         .into();
         // SAFETY: out-param per IDL.
@@ -544,10 +563,31 @@ impl IWSLCSessionManager_Impl for FakeManager_Impl {
 // ───────────────────────────── IWSLCSession ─────────────────────────────
 
 impl IWSLCSession_Impl for FakeSession_Impl {
-    unsafe fn GetId(&self, _Id: *mut u32) -> HRESULT {
-        E_NOTIMPL
+    unsafe fn GetId(&self, Id: *mut u32) -> HRESULT {
+        if let Some(h) = record(&self.state, "GetSessionId") {
+            return h;
+        }
+        if Id.is_null() {
+            return E_POINTER;
+        }
+        let id = lock(&self.state)
+            .sessions
+            .iter()
+            .find(|(_, name)| name == &self.name)
+            .map(|(id, _)| *id);
+        let Some(id) = id else {
+            return HRESULT(hr::WSLC_E_SESSION_NOT_FOUND);
+        };
+        // SAFETY: writable out slot per IDL.
+        unsafe {
+            *Id = id;
+        }
+        S_OK
     }
     unsafe fn GetDisplayName(&self, DisplayName: *mut PWSTR) -> HRESULT {
+        if let Some(h) = record(&self.state, "GetDisplayName") {
+            return h;
+        }
         if DisplayName.is_null() {
             return E_POINTER;
         }
@@ -596,10 +636,41 @@ impl IWSLCSession_Impl for FakeSession_Impl {
         _Image: PCSTR,
         _RegistryAuthenticationInformation: PCSTR,
         _AllTags: BOOL,
-        _ProgressCallback: *mut c_void,
+        ProgressCallback: *mut c_void,
         _WarningCallback: *mut c_void,
     ) -> HRESULT {
-        E_NOTIMPL
+        if let Some(h) = record(&self.state, "PullImage") {
+            return h;
+        }
+        let count = lock(&self.state).pull_progress_count;
+        if !ProgressCallback.is_null() {
+            // SAFETY: borrowed callback pointer per IDL remains alive for this RPC.
+            let cb = unsafe {
+                <IProgressCallback as windows::core::Interface>::from_raw_borrowed(
+                    &ProgressCallback,
+                )
+            }
+            .expect("non-null callback pointer per IDL");
+            for i in 0..count {
+                // SAFETY: static NUL terminated strings, borrowed callback valid through call.
+                let r = unsafe {
+                    cb.OnProgress(
+                        PCSTR(c"Downloading".as_ptr().cast()),
+                        PCSTR(c"layer".as_ptr().cast()),
+                        i as u64,
+                        count as u64,
+                    )
+                };
+                if r.is_err() {
+                    return r;
+                }
+            }
+        }
+        lock(&self.state).calls.push("PullImageFinished".into());
+        if let Some(h) = lock(&self.state).commit_fault.remove("PullImage") {
+            return HRESULT(h);
+        }
+        S_OK
     }
     unsafe fn BuildImage(
         &self,
@@ -983,7 +1054,9 @@ impl IWSLCSession_Impl for FakeSession_Impl {
         E_NOTIMPL
     }
     unsafe fn BeginContainerOperation(&self, Operation: *mut Option<IUnknown>) -> HRESULT {
-        record(&self.state, "BeginContainerOperation");
+        if let Some(h) = record(&self.state, "BeginContainerOperation") {
+            return h;
+        }
         // SAFETY: out-param per IDL.
         unsafe { *Operation = Some(op_token()) };
         S_OK
@@ -1013,11 +1086,20 @@ impl IWSLCContainer_Impl for FakeContainer_Impl {
         E_NOTIMPL
     }
     unsafe fn Stop(&self, Signal: i32, TimeoutSeconds: i32) -> HRESULT {
-        record(&self.state, "Stop");
+        if let Some(h) = record(&self.state, "Stop") {
+            return h;
+        }
+        let delay = lock(&self.state).delay_next.remove("Stop");
+        if let Some(delay) = delay {
+            std::thread::sleep(delay);
+        }
         let running = is_running(&self.state, &self.id);
         lock(&self.state)
             .stopped
             .push((self.id.clone(), Signal, TimeoutSeconds));
+        if let Some(h) = lock(&self.state).commit_fault.remove("Stop") {
+            return HRESULT(h);
+        }
         if running {
             S_OK
         } else {
@@ -1099,6 +1181,9 @@ impl IWSLCContainer_Impl for FakeContainer_Impl {
         _Until: i64,
         _Tail: u64,
     ) -> HRESULT {
+        if let Some(h) = record(&self.state, "Logs") {
+            return h;
+        }
         let Some(c) = find(&self.state, &self.id) else {
             return HRESULT(hr::WSLC_E_CONTAINER_NOT_FOUND);
         };

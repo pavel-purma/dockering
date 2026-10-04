@@ -158,7 +158,7 @@ fn hresults_map_to_engine_errors() {
     let err = r.expect_err("policy");
     assert_eq!(err.hint(), Some(dk_engine_wslc::com::ffi::POLICY_HINT));
 
-    // Disconnect → reopen session once and retry → succeeds.
+    // ENG-129: delegate attempts once; bounded read reopen/retry belongs to router.
     state
         .lock()
         .expect("lock")
@@ -169,12 +169,12 @@ fn hresults_map_to_engine_errors() {
         .filter(|c| *c == "OpenSessionByName")
         .count();
     let r = block_on(e.list_containers(ContainerQuery::default()));
-    assert!(r.is_ok(), "{r:?}");
+    assert!(matches!(r, Err(EngineError::Unreachable { .. })), "{r:?}");
     let after = calls(&state)
         .iter()
         .filter(|c| *c == "OpenSessionByName")
         .count();
-    assert_eq!(after, before + 1, "session reopened exactly once");
+    assert_eq!(after, before, "delegate must not reopen/replay");
 
     let r = block_on(e.inspect_volume_json("nope"));
     assert_eq!(r, Err(EngineError::not_found(ResourceKind::Volume, "nope")));
@@ -239,6 +239,40 @@ fn actions_idempotence_and_flags() {
     );
     drop(g);
     assert_eq!(OPEN_OPERATIONS.load(Ordering::SeqCst), 0, "tokens released");
+}
+
+#[test]
+fn eng_130_commit_disconnect_no_replay() {
+    let _serial = serial();
+    let (e, state) = engine();
+    state
+        .lock()
+        .unwrap()
+        .commit_fault
+        .insert("Stop".into(), hr::RPC_E_DISCONNECTED);
+    let err =
+        block_on(e.container_action("2e4fac884218", ContainerAction::Stop { timeout_s: None }))
+            .unwrap_err();
+    assert!(err.hint().is_some_and(|h| h.contains("Refresh")), "{err:?}");
+    assert_eq!(state.lock().unwrap().stopped.len(), 1);
+    assert_eq!(calls(&state).iter().filter(|s| *s == "Stop").count(), 1);
+}
+
+#[test]
+fn eng_134_begin_token_failure_blocks() {
+    let _serial = serial();
+    let (e, state) = engine();
+    state
+        .lock()
+        .unwrap()
+        .fail_next
+        .insert("BeginContainerOperation".into(), hr::RPC_E_DISCONNECTED);
+    assert!(
+        block_on(e.container_action("2e4fac884218", ContainerAction::Stop { timeout_s: None }))
+            .is_err()
+    );
+    assert!(!calls(&state).iter().any(|s| s == "Stop"));
+    assert!(state.lock().unwrap().stopped.is_empty());
 }
 
 #[test]

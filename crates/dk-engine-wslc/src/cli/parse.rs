@@ -58,12 +58,33 @@ pub(crate) fn json_list(s: &str) -> EngineResult<Vec<Value>> {
 }
 
 /// The first object of an `inspect` JSON array (or a bare object).
+#[cfg(test)]
 pub(crate) fn first_object(s: &str) -> EngineResult<Value> {
+    inspect_object(s)?.ok_or_else(|| EngineError::protocol("wslc inspect returned no object"))
+}
+
+/// Absence is evidence only from a valid empty array. Blank, malformed and non-object
+/// payloads must never satisfy mutation reconciliation's resource-absence postcondition.
+pub(crate) fn inspect_object(s: &str) -> EngineResult<Option<Value>> {
     let v: Value = serde_json::from_str(s.trim_start_matches('\u{feff}').trim())?;
     match v {
-        Value::Array(mut a) if !a.is_empty() => Ok(a.swap_remove(0)),
-        Value::Object(_) => Ok(v),
+        Value::Array(a) if a.is_empty() => Ok(None),
+        Value::Array(mut a) if a.iter().all(Value::is_object) => Ok(Some(a.swap_remove(0))),
+        Value::Object(_) => Ok(Some(v)),
         _ => Err(EngineError::protocol("wslc inspect returned no object")),
+    }
+}
+
+/// Inspect batches are JSON, not tolerant list NDJSON. Never hide a malformed row or
+/// payload as an empty enrichment result, nor fan out children to recover protocol errors.
+pub(crate) fn inspect_batch(s: &str) -> EngineResult<Vec<Value>> {
+    let v: Value = serde_json::from_str(s.trim_start_matches('\u{feff}').trim())?;
+    match v {
+        Value::Array(a) if a.iter().all(Value::is_object) => Ok(a),
+        Value::Object(_) => Ok(vec![v]),
+        _ => Err(EngineError::protocol(
+            "wslc inspect batch returned non-object data",
+        )),
     }
 }
 

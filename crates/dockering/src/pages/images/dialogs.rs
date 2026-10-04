@@ -337,7 +337,12 @@ impl RunDialog {
                         );
                     }
                     Err(e) => {
-                        this.error = Some(format!("{}: {e}", s::run_failed(&image)).into());
+                        let mut message = format!("{}: {e}", s::run_failed(&image));
+                        if let Some(hint) = e.hint() {
+                            message.push('\n');
+                            message.push_str(hint);
+                        }
+                        this.error = Some(message.into());
                         cx.notify();
                     }
                 }
