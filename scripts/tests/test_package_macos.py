@@ -2,6 +2,7 @@
 
 Run with python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'.
 No Apple tooling or real disk mounts are needed.
+Set PACKAGE_MACOS_TEST_BASH=/bin/bash to exercise macOS's native Bash 3.2.
 """
 
 import os
@@ -15,7 +16,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package-macos.sh"
-BASH = (
+BASH = os.environ.get("PACKAGE_MACOS_TEST_BASH") or (
     str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe")
     if os.name == "nt"
     else shutil.which("bash")
@@ -77,19 +78,26 @@ exit 0
                 CASE_KIND=mode,
                 MOCK_BIN=shell_path(bin_dir),
                 PACKAGE_SCRIPT=shell_path(SCRIPT),
+                PACKAGE_BASH=shell_path(Path(BASH)),
             )
             result = subprocess.run(
-                [BASH, "--noprofile", "--norc", "-c", 'export PATH="$MOCK_BIN:$PATH"; bash "$PACKAGE_SCRIPT" x86_64-apple-darwin'],
+                [BASH, "--noprofile", "--norc", "-c", 'export PATH="$MOCK_BIN:$PATH"; "$PACKAGE_BASH" "$PACKAGE_SCRIPT" x86_64-apple-darwin'],
                 cwd=root,
                 env=env,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            calls = int((root / "package-calls").read_text())
+            calls_file = root / "package-calls"
+            self.assertTrue(calls_file.is_file(), f"packaging did not invoke cargo: exit {result.returncode}; {result.stderr}")
+            calls = int(calls_file.read_text())
             hdiutil = root / "hdiutil-calls"
             detaches = [line for line in hdiutil.read_text().splitlines() if line.startswith("detach ")] if hdiutil.exists() else []
             return result, calls, detaches
+
+    def test_rel_017_script_parses_with_selected_bash(self):
+        result = subprocess.run([BASH, "-n", str(SCRIPT)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rel_017_success_needs_no_recovery(self):
         result, calls, detaches = self.exercise("success")
