@@ -26,12 +26,22 @@
 | `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
 | `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
 | `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux) | `cargo install cargo-packager --locked --version 0.11.8` |
-| `release-plz` *(planned, REL-010)* | Release PRs and tags (CI); locally only for `release-plz update --dry-run` previews | `cargo install release-plz --locked` |
-| Inno Setup **6.3+** (`ISCC.exe`) *(planned, REL-020)* | `cargo xtask package` on Windows | Preinstalled on GitHub Windows runners (⚠ verify, spike S-9) · `winget install JRSoftware.InnoSetup` |
+| `release-plz` (optional, REL-010) | Release PRs and tags (CI); locally only for `release-plz update --dry-run` previews | `cargo install release-plz --locked` |
+| Inno Setup **6.3+** (`ISCC.exe`) (REL-020) | `cargo xtask package` on Windows | CI checks and installs it if needed · `winget install JRSoftware.InnoSetup` |
 
-cargo-packager downloads WiX 3 / NSIS (Windows) and linuxdeploy (AppImage) on first use. WiX 3 can't target ARM64, so `aarch64-pc-windows-msvc` ships an NSIS `.exe` instead of an `.msi`. *(Planned: Windows moves to one Inno Setup installer for both architectures and drops WiX/NSIS, per [distribution.md](features/distribution.md) REL-020 and ADR-0006.)*
+Windows packaging uses Inno Setup for both architectures; cargo-packager is used for macOS
+and Linux. Linux AppImage tooling is downloaded on first use. The release workflow installs
+Inno Setup if the Windows runner does not already provide it. macOS CI/release packaging uses
+`scripts/package-macos.sh`: it retries only the observed `hdiutil` busy-image eject error, at
+most three package attempts, and detaches only a reported disk whose image path is verified
+inside the current target distribution directory. Other failures retain their original exit status.
 
-**Release signing secrets** live only in the GitHub environment `release`. Steps are skipped when the secrets are absent, which gives an unsigned build. *(Planned, REL-031: the Windows provider is chosen by the repo variable `WINDOWS_SIGNING` = `signpath` | `azure` | `none`. SignPath adds `SIGNPATH_API_TOKEN`, the updater adds `UPDATE_SIGNING_KEY` (UPD-003), and winget adds `WINGET_TOKEN` (REL-041). An unsigned **stable** tag fails the release.)*
+**Release signing** is optional for the explicitly authorized unsigned first release (REL-016).
+Unsigned mode skips signing and notarization even when secrets exist and builds without the
+updater. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
+expose an `unsigned` boolean defaulting to true. Public build-provenance attestations remain
+independent of signing. The signed channel supports `WINDOWS_SIGNING` = `signpath` | `azure`;
+its secrets live in the `release` environment. See [the release runbook](../release.md).
 Windows: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
 
@@ -51,7 +61,7 @@ macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE
 | `test` | ubuntu-24.04, windows-2025, macos-15 | `cargo nextest run --workspace` (unit, contract with fixtures, gpui `TestAppContext` view tests) |
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
 | `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package (on `main`). On Windows, every push and PR also builds the Inno installer (x64, arm64) and runs silent install → `--version` → uninstall (REL-014) |
-| `release` | on tag `v*` | Build all, sign, upload artifacts to a GitHub Release. *(Planned: verify → package/sign → update manifest → attest → draft; [distribution.md](features/distribution.md) REL-010…013.)* |
+| `release` | on `v*` tags or manual dispatch; 6 targets | Verify version/changelog → package six targets → require all 12 distributions → manifest, notes, SHA256SUMS → public provenance → review artifact; tag runs create a draft. Explicit unsigned mode (REL-016); complete-asset validation (REL-017). |
 | `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
 | `release-plz` *(planned)* | push to `main` / `release/*` | `release-pr`: open or update the release PR (version + changelog). `release`: after a release PR merges, create the `v*` tag, which starts `release` (REL-010/011) |
 | `pr-title` *(planned)* | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that release-plz reads) |
@@ -64,11 +74,11 @@ Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) 
 
 | OS | Artifacts | Signing |
 |---|---|---|
-| Windows | `.msi` (WiX) + portable `.zip`. *Planned:* `Dockering-Setup-<arch>.exe` (Inno) + `Dockering-<arch>.zip` (REL-012/020) | Authenticode (Azure Trusted Signing; *planned:* pluggable, SignPath Foundation for the public launch, REL-030/031). **Required for public releases**: unsigned binaries that spawn hidden `wsl.exe` processes and create named pipes trigger SmartScreen and Defender heuristics. Nightly/dev builds may be unsigned. |
-| macOS | `.dmg` with `Dockering.app` (per-arch, universal2 later) | Developer ID + **notarisation required for public releases** (Gatekeeper on macOS 15+ blocks un-notarised apps for normal users) |
+| Windows | `Dockering-Setup-<x64|arm64>.exe` (Inno) + `Dockering-<x64|arm64>.zip` | Optional Authenticode via SignPath or Azure. Explicit unsigned first release permitted (REL-016); signed channel requires verified signatures. |
+| macOS | `.dmg` with `Dockering.app`, per architecture | Developer ID/notarization in signed mode; unsigned first release permitted with documented Gatekeeper prompts (REL-016). |
 | Linux | `.AppImage`, `.deb`, `.tar.gz` (Flatpak post-v1) | — |
 
-App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 16…1024). *Planned:* a new "Stacked D" icon generated from SVG masters by `cargo xtask icons` (REL-050/051).
+App id: `dev.dockering.Dockering`. Icons in `assets/app-icon/` (ico, icns, png 16…1024). The "Stacked D" icon is generated from SVG masters by `cargo xtask icons` (REL-050/051).
 
 The macOS `.dmg` is built by cargo-packager's pinned `create-dmg` script, which now and then fails to eject its temporary disk image (`hdiutil: couldn't eject "diskN" - Resource busy`). `cargo xtask package` handles it: when cargo-packager fails and `/Volumes/Dockering` is still mounted, it force-detaches the volume and runs cargo-packager again, up to 3 runs in all. A failure that leaves no volume mounted (signing, notarisation, a bad config) is not repeated.
 
@@ -82,7 +92,7 @@ The macOS `.dmg` is built by cargo-packager's pinned `create-dmg` script, which 
 
 Releases go out through GitHub Releases and OS package managers (winget; Homebrew cask and Flathub post-v1).
 
-[distribution.md](features/distribution.md) UPD-001…012, ADR-0006: an opt-out updater, compiled into public release builds only (`--features updater` when `PUBLIC_RELEASES=true`). It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
+[distribution.md](features/distribution.md) UPD-001…012, ADR-0006: an opt-out updater, compiled into the signed/updater channel only (`--features updater` when `PUBLIC_RELEASES=true` and unsigned mode is false). It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
 
 ## Versioning
 

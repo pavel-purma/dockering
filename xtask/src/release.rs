@@ -3,7 +3,9 @@
 //! - `sign-manifest`: minisign signature `<file>.minisig` (UPD-003)
 //! - `gen-update-keys`: one-time minisign key pair for the updater (UPD-003)
 //! - `checksums`: `SHA256SUMS` over every asset (REL-012)
+//! - `verify-assets`: require every distribution file before collecting metadata (REL-017)
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -13,7 +15,104 @@ use anyhow::{Context, bail};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::package::{ArtifactKind, stable_name};
 use crate::util::Args;
+
+/// Six supported release targets and their mandatory package formats (REL-012/017).
+const DISTRIBUTIONS: &[(&str, &[ArtifactKind])] = &[
+    (
+        "x86_64-pc-windows-msvc",
+        &[ArtifactKind::Installer, ArtifactKind::Archive],
+    ),
+    (
+        "aarch64-pc-windows-msvc",
+        &[ArtifactKind::Installer, ArtifactKind::Archive],
+    ),
+    ("x86_64-apple-darwin", &[ArtifactKind::Dmg]),
+    ("aarch64-apple-darwin", &[ArtifactKind::Dmg]),
+    (
+        "x86_64-unknown-linux-gnu",
+        &[
+            ArtifactKind::AppImage,
+            ArtifactKind::Deb,
+            ArtifactKind::Archive,
+        ],
+    ),
+    (
+        "aarch64-unknown-linux-gnu",
+        &[
+            ArtifactKind::AppImage,
+            ArtifactKind::Deb,
+            ArtifactKind::Archive,
+        ],
+    ),
+];
+
+/// `cargo xtask verify-assets --assets <dir> [--target <triple>]`.
+/// This is deliberately separate from `update-manifest`, which supports partial local builds.
+pub fn run_verify_assets(args: &[String]) -> anyhow::Result<()> {
+    let parsed = Args::new(args);
+    parsed.reject_unknown(&["--assets", "--target"], &[])?;
+    let assets = Path::new(parsed.value("--assets")?.context("--assets is required")?);
+    let count = verify_assets(assets, parsed.value("--target")?)?;
+    println!(
+        "xtask: verified {count} nonempty distribution assets in {}",
+        assets.display()
+    );
+    Ok(())
+}
+
+fn required_assets(target: Option<&str>) -> anyhow::Result<BTreeSet<String>> {
+    if let Some(target) = target
+        && !DISTRIBUTIONS.iter().any(|(triple, _)| *triple == target)
+    {
+        bail!("unsupported release target `{target}`");
+    }
+    let mut names = BTreeSet::new();
+    for (triple, kinds) in DISTRIBUTIONS {
+        if target.is_some_and(|target| target != *triple) {
+            continue;
+        }
+        for kind in *kinds {
+            let name = stable_name(triple, *kind)?;
+            if !names.insert(name.clone()) {
+                bail!("duplicate required distribution name `{name}`");
+            }
+        }
+    }
+    Ok(names)
+}
+
+fn verify_assets(assets: &Path, target: Option<&str>) -> anyhow::Result<usize> {
+    let required = required_assets(target)?;
+    for name in &required {
+        let path = assets.join(name);
+        let metadata = fs::symlink_metadata(&path).with_context(|| {
+            format!("required distribution asset {} is missing", path.display())
+        })?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            bail!(
+                "required distribution asset {} must be a nonempty regular file",
+                path.display()
+            );
+        }
+    }
+    for entry in fs::read_dir(assets)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if entry.file_type()?.is_file()
+            && name.starts_with("Dockering-")
+            && !required.contains(name)
+        {
+            bail!(
+                "unexpected distribution asset `{name}` in {}",
+                assets.display()
+            );
+        }
+    }
+    Ok(required.len())
+}
 
 /// Update-manifest platform key → (stable asset name, kind). Must match
 /// `package::stable_name` (REL-012) and `dk-update`'s manifest model.
@@ -237,6 +336,77 @@ fn now_rfc3339() -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct AssetFixture(PathBuf);
+
+    impl AssetFixture {
+        fn new(target: Option<&str>) -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "xtask-assets-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&dir).unwrap();
+            for name in required_assets(target).unwrap() {
+                fs::write(dir.join(name), b"package").unwrap();
+            }
+            Self(dir)
+        }
+    }
+
+    impl Drop for AssetFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn rel_017_all_twelve_distribution_assets_required() {
+        let fixture = AssetFixture::new(None);
+        assert_eq!(verify_assets(&fixture.0, None).unwrap(), 12);
+        // Installer presence alone must not hide a missing portable download.
+        fs::remove_file(fixture.0.join("Dockering-arm64.zip")).unwrap();
+        let error = verify_assets(&fixture.0, None).unwrap_err().to_string();
+        assert!(error.contains("Dockering-arm64.zip"), "{error}");
+    }
+
+    #[test]
+    fn rel_017_each_target_requires_every_format() {
+        for (target, kinds) in DISTRIBUTIONS {
+            let fixture = AssetFixture::new(Some(target));
+            assert_eq!(
+                verify_assets(&fixture.0, Some(target)).unwrap(),
+                kinds.len()
+            );
+        }
+        let fixture = AssetFixture::new(Some("aarch64-unknown-linux-gnu"));
+        fs::remove_file(fixture.0.join("Dockering-aarch64.deb")).unwrap();
+        assert!(verify_assets(&fixture.0, Some("aarch64-unknown-linux-gnu")).is_err());
+        assert!(verify_assets(&fixture.0, Some("aarch64-unknown-linux-musl")).is_err());
+    }
+
+    #[test]
+    fn rel_017_empty_and_non_file_assets_rejected() {
+        let fixture = AssetFixture::new(None);
+        let path = fixture.0.join("Dockering-aarch64.dmg");
+        fs::write(&path, b"").unwrap();
+        assert!(verify_assets(&fixture.0, None).is_err());
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(verify_assets(&fixture.0, None).is_err());
+    }
+
+    #[test]
+    fn rel_017_unexpected_distribution_rejected_metadata_allowed() {
+        let fixture = AssetFixture::new(None);
+        fs::write(fixture.0.join("dockering-update.json"), b"{}").unwrap();
+        fs::write(fixture.0.join("SHA256SUMS"), b"checksums").unwrap();
+        assert!(verify_assets(&fixture.0, None).is_ok());
+        fs::write(fixture.0.join("Dockering-old-version.exe"), b"stale").unwrap();
+        assert!(verify_assets(&fixture.0, None).is_err());
+    }
 
     #[test]
     fn upd_002_manifest_from_assets() {
