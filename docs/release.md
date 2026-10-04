@@ -1,260 +1,180 @@
 # Releasing Dockering
 
-The normative requirements are in [spec `features/distribution.md`](spec/features/distribution.md)
-(REL-010…060, UPD-001…012), and the reasoning is in
-[ADR-0006](plan/adr/0006-windows-installer-and-updates.md). This page is the maintainer's runbook.
+The repository is public. The first release is **0.1.0**, with unsigned downloads for all six
+supported targets. Code signing, macOS notarization, the updater, and winget are deferred.
+The workflow always creates a **draft**; publication is a separate maintainer action.
+See [the specification](spec/features/distribution.md) and
+[first-release plan](plan/features/unsigned-first-release.md).
 
-## Now: private phase (internal builds)
+## First-release setup
 
-The repo is private and nothing is published to users yet, but versioning and the release flow
-already work. Every release is an **internal build**:
+The current GitHub account has ADMIN access and Actions are enabled. The manual-tag flow
+needs no signing secrets, repository variables, release-bot App, or existing release.
+Keep `PUBLIC_RELEASES` and `WINGET_ENABLED` unset/false and `WINDOWS_SIGNING` unset/`none`.
 
-- unsigned (`WINDOWS_SIGNING` unset), and without the in-app updater (`PUBLIC_RELEASES` unset);
-- a **draft** GitHub Release in this private repo. Only collaborators can see it, and you can
-  leave it a draft forever (*latest* only moves when a release is *published*);
-- winget, signing, attestations, and the update manifest signature are all skipped.
-
-What you need for it (one time):
-
-1. The release bot App (below) and its two secrets, so release-plz opens release PRs and tags.
-   Without it, use the manual tag (below). Everything else still works.
-2. Nothing else. No environments, no signing, no keys.
-
-Per release:
-
-1. Merge the release PR `chore(release): vX.Y.Z` (or push a tag by hand).
-2. Wait for `release.yml` (about 30–40 min for 6 targets) → a draft release with all installers,
-   `dockering-update.json` (unsigned), and `SHA256SUMS`.
-3. Download and try the Windows installer. Expect a SmartScreen warning: *More info → Run anyway*.
-4. Leave it as a draft, or delete it. Don't publish while the repo is private: there's no
-   one to publish to, and published releases can't be immutable or attested on GitHub Free.
-
-> **GitHub Free and private repos.** Environments (`release`, `release-plz`), environment secrets,
-> required reviewers, rulesets, and artifact attestations aren't available for private repos on
-> GitHub Free. So during this phase: the workflows use **repository** secrets, the `environment:`
-> lines in `release.yml` have no protection rules, and attestations are skipped
-> (`PUBLIC_RELEASES` unset). Branch protection and the tag ruleset come with the public launch (or
-> a paid plan).
-
-Note: the first release is **0.1.0**. With no `v*` tag yet, release-plz treats the current version
-as the initial release, so the first release PR is `chore(release): v0.1.0`.
-
-## The flow (REL-010)
-
-```
-feature PRs (squash merge; conventional-commit PR titles) ──▶ main
-      │ every push to main
-      ▼
-release-plz.yml / release-pr ──▶ keeps ONE PR open: "chore(release): vX.Y.Z"
-      │                          (workspace version, Cargo.lock, CHANGELOG.md section)
-      │ you: review, polish the changelog wording, run the release checklist, merge
-      ▼
-release-plz.yml / release ──▶ tag vX.Y.Z (release-bot App token → starts release.yml)
-      ▼
-release.yml: verify → package ×6 (sign) → manifest + minisign → SHA256SUMS → attest → DRAFT release
-      │ you: download Dockering-Setup-x64.exe from the draft, install it, sanity-check it
-      ▼
-Publish ──▶ "latest" moves ──▶ the in-app updater sees it (≤ 24 h) ──▶ winget.yml opens a winget-pkgs PR
-```
-
-Per release you do two things: **merge the release PR**, then **publish the draft**. You never
-type a version number or a tag.
-
-Before merging the release PR:
-
-- run the [release checklist](plan/release-checklist.md) on a build of the PR (CI's `installer`
-  artifact for Windows);
-- if dependencies changed since the last release, regenerate the third-party notices
-  (`cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html`). CI's `lint` job fails when
-  they're stale, so the release PR can't be merged otherwise;
-- if the release-plz PR moved hand-written changelog bullets below the new section, move them
-  back into it.
-
-### Versions (REL-011)
-
-release-plz works out the next version from the commit messages (squash merges, so the PR titles):
-
-| Commit | 0.x | ≥ 1.0 |
+| Platform | Runner | Required downloads |
 |---|---|---|
-| `feat:` | minor | minor |
-| `fix:`, `perf:`, `refactor:`, others | patch | patch |
-| breaking (`feat!:` or `BREAKING CHANGE:`) | minor | major |
+| Windows x64 | `windows-2025` | `Dockering-Setup-x64.exe`, `Dockering-x64.zip` |
+| Windows ARM64 | `windows-11-arm` | `Dockering-Setup-arm64.exe`, `Dockering-arm64.zip` |
+| macOS Apple silicon | `macos-15` | `Dockering-aarch64.dmg` |
+| macOS Intel | `macos-15-intel` | `Dockering-x86_64.dmg` |
+| Linux x64 | `ubuntu-24.04` | `Dockering-x86_64.AppImage`, `Dockering-x86_64.deb`, `Dockering-x86_64.tar.gz` |
+| Linux ARM64 | `ubuntu-24.04-arm` | `Dockering-aarch64.AppImage`, `Dockering-aarch64.deb`, `Dockering-aarch64.tar.gz` |
 
-`docs`, `test`, `chore`, `ci`, `style`, and `build` commits are left out of the changelog. The
-changelog keeps the Keep a Changelog headings (*Added*, *Changed*, *Fixed*). Edit the wording in
-the release PR before you merge it; release-plz keeps manual edits.
+All 12 distribution files must exist and be nonempty. Assembly rejects duplicate names.
+The release also includes `dockering-update.json`, `SHA256SUMS`, and `RELEASE_NOTES.md`.
+The unsigned manifest is informational; the app is built without the updater. Public GitHub
+builds generate provenance attestations independently of code signing. macOS packaging retries
+the observed busy DMG eject failure at most three times, with cleanup restricted to its own image. Packages bundle the
+MIT license and third-party notices.
 
-### Pre-releases
+## Execute after approval
 
-To ship `-alpha.N`, `-beta.N`, or `-rc.N`, set the version on the release PR branch before merging.
-Edit `[workspace.package] version` in `Cargo.toml` and the top `## [x.y.z]` heading in
-`CHANGELOG.md` to `x.y.z-rc.1`, then run `cargo update --workspace` to refresh `Cargo.lock`.
+Preparation is local. **Wait for the user's approval before pushing preparation changes,
+creating a release tag, dispatching release builds, or publishing.** After approval:
 
-Don't use `release-plz set-version` here. In this workspace (checked with 0.3.169) it either fails
-(it looks for per-crate changelogs) or, with `dockering@…`, replaces `version.workspace = true` in
-`crates/dockering/Cargo.toml` with a literal version, which splits the app from the workspace
-version.
+1. Commit the prepared changes, open a PR, and merge after CI passes. Set the `0.1.0`
+   changelog date to the actual release date before merging. Register the PR with the thread.
+2. Confirm CI on the exact release commit is green for all six targets. Follow
+   [the release checklist](plan/release-checklist.md).
+3. Create and push the annotated tag on the approved `main` commit:
 
-Pre-releases become GitHub *pre-releases*. They are never "latest", so neither the updater nor
-winget sees them. They may be unsigned.
+   ```sh
+   git switch main
+   git pull --ff-only origin main
+   git tag -a v0.1.0 -m "Dockering 0.1.0 (unsigned)"
+   git push origin v0.1.0
+   ```
 
-### Hotfixes
+4. Find and monitor the tag's workflow, then inspect its draft:
 
-Normally, fix the bug on `main` and let the next release PR ship a patch.
+   ```sh
+   gh run list --workflow release.yml --branch v0.1.0
+   gh run watch <run-id> --exit-status
+   gh release view v0.1.0 --json isDraft,isPrerelease,assets,url
+   ```
 
-If `main` holds work that isn't ready to release:
+   Confirm all 12 distributions and three metadata files are present. A failed matrix blocks
+   assembly. Fix the cause and rerun failed jobs; do not publish a partial release.
+5. Download the draft and verify checksums. On Linux:
 
-1. Branch `release/X.Y` from the last tag.
-2. Cherry-pick the fix onto it.
-3. release-plz runs on `release/*` too, so a release PR opens against that branch.
+   ```sh
+   gh release download v0.1.0 --dir target/release-review/v0.1.0
+   cd target/release-review/v0.1.0
+   sha256sum --check SHA256SUMS
+   ```
 
-### Manual fallback
+   On macOS use `shasum -a 256 -c SHA256SUMS`. On Windows, from the repository root:
 
-You can always tag by hand; the tag ruleset lets the maintainer bypass it:
+   ```powershell
+   gh release download v0.1.0 --dir target/release-review/v0.1.0
+   $reviewDir = Join-Path (Get-Location) 'target/release-review/v0.1.0'
+   foreach ($line in Get-Content (Join-Path $reviewDir 'SHA256SUMS')) {
+       if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Invalid checksum line: $line" }
+       $expectedHash = $Matches[1]
+       $assetName = $Matches[2]
+       $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $reviewDir $assetName)).Hash
+       if ($actualHash.ToLowerInvariant() -ne $expectedHash) { throw "Checksum mismatch: $assetName" }
+   }
+   ```
 
-```sh
-git tag -a v0.2.0 -m "Dockering 0.2.0" && git push origin v0.2.0
-```
+   Verify provenance for a downloaded installer (run from the repository root):
 
-`release.yml` checks a hand-made tag the same way as a bot tag:
+   ```sh
+   gh attestation verify target/release-review/v0.1.0/Dockering-Setup-x64.exe -R pavel-purma/dockering
+   ```
 
-- the tag equals the workspace version;
-- `CHANGELOG.md` has a `## [0.2.0]` section;
-- the tagged commit is on `main` or a `release/*` branch.
+6. Review the notes and available smoke tests, then publish the existing draft:
 
-### Yanking a bad release
+   ```sh
+   gh release edit v0.1.0 --draft=false --latest
+   gh release view v0.1.0 --json isDraft,isPrerelease,url,assets
+   ```
 
-The preferred fix is to publish a patch right away.
+   Verify the published assets and permanent download links. Never rerun uploads against a
+   published release; publish a new version for corrections. The release URL will be
+   `https://github.com/pavel-purma/dockering/releases/tag/v0.1.0`.
 
-If it's urgent, edit the bad release and mark it as a pre-release. That moves *latest* back to the
-previous version, which stops the updater from offering it. Then open a winget-pkgs PR that removes
-the version.
+## Dry runs and retries
 
-## One-time setup
-
-### Release bot (GitHub App), needed by release-plz
-
-The default `GITHUB_TOKEN` can't start other workflows. Without this App, CI wouldn't run on the
-release PR and the tag wouldn't start `release.yml`.
-
-1. Go to *Settings › Developer settings › GitHub Apps › New GitHub App* and create
-   `dockering-release-bot`. It needs no webhook. Repository permissions: **Contents** read/write
-   and **Pull requests** read/write.
-2. Install it on `pavel-purma/dockering` only.
-3. Generate a private key for the App (*App settings › Private keys*). Add two **repository**
-   secrets (*Settings › Secrets and variables › Actions*): `RELEASE_BOT_APP_ID` (the App ID or
-   Client ID) and `RELEASE_BOT_PRIVATE_KEY` (the whole `.pem`).
-4. Repository settings:
-   - allow **squash merging** only, and set the default commit message to *Pull request title*;
-   - at the public launch (GitHub Free has no rulesets or protection for private repos):
-     branch protection on `main` requiring a PR, linear history, and these checks (the names
-     GitHub shows): `lint`, `test (ubuntu-24.04)`, `test (windows-2025)`, `test (macos-15)`,
-     `build (…)` ×6 (the two Windows ones also build and smoke-test the installer),
-     `conventional commit title`; and a **tag ruleset** for `v*` restricting creation to the
-     release bot App, with a bypass for you.
-
-Until the secrets exist, `release-plz.yml` only prints a notice. Releases then need the manual tag.
-
-### Windows code signing (REL-030…032)
-
-`release.yml` reads the repository variable `WINDOWS_SIGNING`:
-
-| Value | Provider | Needs |
-|---|---|---|
-| `none` (default) | unsigned. While `PUBLIC_RELEASES` is unset, any tag builds unsigned (internal builds). Once it's `true`, only pre-release tags may be unsigned | — |
-| `signpath` | SignPath Foundation (free for OSS; the publisher shown is "SignPath Foundation") | secret `SIGNPATH_API_TOKEN`; vars `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`; artifact configurations `exe` and `installer`; signing policy `release-signing` |
-| `azure` | Azure Artifact Signing (individuals only in the US/CA; EU organisations are eligible) | secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE` |
-
-Signing has two stages. First `dockering.exe` is signed, and only then is it packed into the
-installer and the zip. After packaging, the setup `.exe` is signed. A PowerShell step then checks
-that every file's signature is `Valid` and that all files have the same signer.
-
-The step-by-step enrolment for each provider (SignPath application, Certum fallback, Azure
-identity validation) is in [plan §A2](plan/features/windows-distribution.md#a2-windows-code-signing).
-
-⚠ Inno writes the uninstaller at install time. With remote signing (SignPath or Azure) it isn't
-signed yet. Inno's `SignedUninstaller` needs a `SignTool` at compile time
-(`DOCKERING_INNO_SIGNTOOL`), which only works with a local or CLI signer. This is tracked in the
-plan's risks.
-
-### Update signing key (UPD-003)
-
-The installed app only accepts an update manifest that a key compiled into it has signed.
+After the prepared workflow exists on the default branch, manual dispatch on a branch builds
+all six targets and assembles a review artifact without creating a tag or GitHub Release:
 
 ```sh
-cargo xtask gen-update-keys ~/dockering-keys     # writes current.key/.pub and next.key/.pub
+gh workflow run release.yml --ref main -f unsigned=true
 ```
 
-1. Paste both printed public keys into `crates/dk-update/src/keys.rs`, `current` first, and merge.
-2. Store the contents of `current.key` as the secret `UPDATE_SIGNING_KEY`, in the environment
-   `release` once the repo is public (repository secret before that).
-3. Keep `next.key` offline, in a password manager. Delete the key files from disk.
-
-Rotation works by making `next` current and generating a new `next`; see
-[`crates/dk-update/keys/README.md`](../crates/dk-update/keys/README.md). Without
-`UPDATE_SIGNING_KEY` the manifest ships unsigned and installed apps ignore it.
-
-### winget (REL-040…042)
-
-See [`packaging/winget/README.md`](../packaging/winget/README.md). In short:
-
-1. Submit the first version by hand with `komac new` after the first signed public stable release.
-2. Fork `microsoft/winget-pkgs`.
-3. Store a classic PAT with scope `public_repo` as the secret `WINGET_TOKEN`.
-4. Set `WINGET_ENABLED=true`.
-
-## Going public (REL-060)
-
-Until the repo is public, releases are unsigned internal builds (see *Now: private phase*), and
-the updater is compiled out of them (no `updater` feature). Checklist, in order:
-
-- [ ] Secret scan of the full history (`gitleaks detect --log-opts=--all`), with no hits; no private paths or tokens in fixtures.
-- [ ] Make the repo public. Enable **immutable releases** (*Settings › General › Releases*).
-- [ ] Branch protection and the tag ruleset (above). Create the environment `release` with you as
-      required reviewer, and move the signing secrets and `UPDATE_SIGNING_KEY` from repository
-      secrets into it (environments now work).
-- [ ] Dependabot alerts and secret scanning turned on.
-- [ ] Repo *About*: the description, topics, and social preview `assets/brand/social-preview.png`
-      (see [plan §A4](plan/features/windows-distribution.md#a4-home-page-copy)):
-      ```sh
-      gh repo edit pavel-purma/dockering \
-        --description "Fast, native desktop client for Docker, Docker in WSL, and WSL containers. Rust + GPUI. Windows · macOS · Linux." \
-        --add-topic docker,containers,wsl,wslc,desktop-app,rust,gpui,docker-desktop-alternative,devtools
-      ```
-      The social preview can only be uploaded in the web UI (*Settings › General*).
-- [ ] Apply to SignPath Foundation, set it up, then set `WINDOWS_SIGNING=signpath`.
-- [ ] Generate the update keys (above), commit the public keys, and set `PUBLIC_RELEASES=true`.
-      This turns on, for release builds: the updater, attestations, the "stable must be signed"
-      guard, and the "update key must be set" check.
-- [ ] Set `WINDOWS_SIGNER_SUBJECT` to the signer DN shown by the first signed build.
-- [ ] Delete the old internal draft releases (or keep them as drafts). The first *published*
-      release becomes *latest*.
-- [ ] Uncomment the shields.io badges in `README.md`.
-- [ ] First signed stable release → manual winget submission → `WINGET_ENABLED=true`.
-
-## Secrets and variables
-
-| Name | Kind | Where | Used by |
-|---|---|---|---|
-| `RELEASE_BOT_APP_ID`, `RELEASE_BOT_PRIVATE_KEY` | secret | repo | release-plz.yml |
-| `SIGNPATH_API_TOKEN` | secret | env `release` (repo while private) | release.yml (`signpath`) |
-| `AZURE_*` (6) | secret | env `release` | release.yml (`azure`) |
-| `UPDATE_SIGNING_KEY` (+ `UPDATE_SIGNING_KEY_PASSWORD`) | secret | env `release` (repo while private) | release.yml manifest signature |
-| `APPLE_*` (6) | secret | env `release` | release.yml (macOS) |
-| `WINGET_TOKEN` | secret | repo | winget.yml |
-| `WINDOWS_SIGNING` | variable | repo | release.yml |
-| `WINDOWS_SIGNER_SUBJECT` | variable | repo | release.yml (REL-032 expected signer, e.g. `CN=SignPath Foundation, …`) |
-| `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | variable | repo | release.yml |
-| `PUBLIC_RELEASES` | variable | repo | release.yml: `--features updater`, attestations, signed-stable and update-key guards |
-| `WINGET_ENABLED` | variable | repo | winget.yml |
-
-## Local dry runs
+The review bundle has the same distributions, metadata, and notes as a tag release. Its manifest
+URLs describe the eventual version tag and resolve only after publication. Dispatching on an
+existing version tag creates or resumes its draft:
 
 ```sh
-cargo build --release -p dockering
-cargo xtask package --formats inno                  # target/dist/<triple>/Dockering-Setup-x64.exe + zip
-pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup target/dist/x86_64-pc-windows-msvc/Dockering-Setup-x64.exe -Version 0.1.0
-cargo xtask update-manifest --assets target/dist/x86_64-pc-windows-msvc --version 0.1.0
-cargo xtask checksums target/dist/x86_64-pc-windows-msvc
-release-plz update --dry-run                        # preview the next version + changelog (cargo install release-plz)
+gh workflow run release.yml --ref v0.1.0 -f unsigned=true
 ```
+
+The `unsigned` input defaults to true and skips signing/notarization even if secrets exist.
+Tag pushes select unsigned mode while `PUBLIC_RELEASES` is not true. Tags must match the workspace
+version, have a changelog section, and be contained in `main` or a `release/*` branch.
+
+## Unsigned installation
+
+- **Windows:** SmartScreen may show a prompt. For a verified download, use *More info → Run
+  anyway* where local policy permits it. Installers support per-user, `/ALLUSERS`, and silent
+  installation; CI tests installation and uninstallation for both architectures.
+- **macOS:** DMGs are not Developer ID signed or notarized. Gatekeeper may block the application.
+  After checking the download, use *System Settings → Privacy & Security → Open Anyway* where
+  macOS and local policy permit it.
+- **Linux:** AppImages need executable permission (`chmod +x Dockering-*.AppImage`) and may need
+  FUSE support. `.deb` and `.tar.gz` are alternatives. Builds use Ubuntu 24.04 and need compatible
+  runtime libraries, Wayland/X11, and a Vulkan driver.
+
+Minimum systems: Windows 10 22H2, macOS 15, and compatible Linux with Vulkan. Updates for this
+unsigned release are manual downloads from GitHub Releases.
+
+## Future release-plz automation
+
+The release bot is optional for this first release. To automate later release PRs and tags:
+
+1. Create a GitHub App installed only here, with **Contents** and **Pull requests** read/write
+   permissions and no webhook.
+2. Add repository secrets `RELEASE_BOT_APP_ID` (App ID or Client ID) and
+   `RELEASE_BOT_PRIVATE_KEY` (full PEM).
+3. release-plz keeps one `chore(release): vX.Y.Z` PR open. Merge after reviewing its version,
+   changelog, and checklist. The App token creates the tag and triggers the release workflow.
+
+Without the secrets, release-plz skips its jobs; manual tags work. `GITHUB_TOKEN` cannot trigger
+other workflows by pushing tags. Application crates share a version; nothing goes to crates.io.
+Conventional `feat:` commits bump minor while in `0.x`; fixes normally bump patch. For prereleases,
+edit the workspace version and changelog to e.g. `0.2.0-rc.1` and refresh workspace lockfile versions.
+Prereleases do not become latest stable. Use `main` or `release/X.Y` for hotfixes.
+
+## Future signed releases
+
+Configure signing secrets in the `release` environment and appropriate maintainer protection.
+Signing secrets reach only the signing steps. `WINDOWS_SIGNING` selects:
+
+| Value | Requirements |
+|---|---|
+| `none` | Unsigned; valid for this first release. |
+| `signpath` | `SIGNPATH_API_TOKEN`; variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`; `exe`/`installer` artifact configurations; `release-signing` policy. |
+| `azure` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`. |
+
+Set `WINDOWS_SIGNER_SUBJECT` to pin the expected publisher. Windows binaries are signed before
+packaging, then installers are signed and verified. Inno's generated uninstaller needs a local
+compile-time `DOCKERING_INNO_SIGNTOOL`; remote signing alone does not cover it.
+
+macOS requires `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+`APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_KEY_P8` for signing and notarization.
+
+Generate updater keys with `cargo xtask gen-update-keys <private-directory>`, store the current
+private key as `UPDATE_SIGNING_KEY`, and commit reviewed current/next **public** keys to
+`crates/dk-update/src/keys.rs`. Optional password: `UPDATE_SIGNING_KEY_PASSWORD`.
+See [key rotation](../crates/dk-update/keys/README.md). Never commit private keys.
+
+Only then set `PUBLIC_RELEASES=true`. Its historical name now means the signed/updater channel,
+not repository visibility. Manual `unsigned=true` overrides it. Signed mode checks configuration
+before builds and preserves signing guards. Public build provenance is independent of this setting.
+
+Submit the first signed winget version manually, configure `WINGET_TOKEN`, then set
+`WINGET_ENABLED=true`. The workflow also requires published stable release metadata with a
+signed update manifest, so an explicit unsigned override is skipped; see [winget setup](../packaging/winget/README.md).
