@@ -12,11 +12,45 @@ pub struct EngineListStore {
     /// True once the first snapshot arrived (before that the shell shows skeletons).
     loaded: bool,
     revision: u64,
-    /// Name → id of every engine seen this session. `EngineStatus.also_reachable_via` lists
-    /// merged engines by name only; Settings resolves them for *Un-merge* (ENG-009).
-    seen_names: std::collections::HashMap<String, EngineId>,
     _events: Option<Task<()>>,
     refetch: Option<Task<()>>,
+}
+
+/// Whether `e` can be pinned as the startup engine (ENG-116): enabled, listed, and not
+/// unsupported. Mirrors the hub's `startup_engine`, so the UI never offers a pin the hub
+/// would skip.
+pub fn can_be_default(e: &EngineStatus) -> bool {
+    e.config.enabled
+        && !e.config.hidden
+        && !matches!(
+            e.state,
+            EngineState::Unsupported { .. } | EngineState::Disabled
+        )
+}
+
+/// How an engine row presents the pinned default (ENG-116).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultMark {
+    /// Not the default.
+    None,
+    /// The default and usable at startup.
+    Default,
+    /// The default, but the hub would skip it (disabled, hidden, unsupported).
+    Unavailable,
+}
+
+/// The mark for `e` given the pinned default id. Settings and the switcher share it.
+pub fn default_mark(e: &EngineStatus, default: Option<&EngineId>) -> DefaultMark {
+    match default {
+        Some(d) if d == e.id() => {
+            if can_be_default(e) {
+                DefaultMark::Default
+            } else {
+                DefaultMark::Unavailable
+            }
+        }
+        _ => DefaultMark::None,
+    }
 }
 
 /// Notifications for views that care about specific changes.
@@ -40,7 +74,6 @@ impl EngineListStore {
             engines: Vec::new(),
             loaded: false,
             revision: 0,
-            seen_names: std::collections::HashMap::new(),
             _events: None,
             refetch: None,
         };
@@ -82,7 +115,6 @@ impl EngineListStore {
                     return;
                 }
                 if let Ok(list) = result {
-                    this.remember(&list);
                     this.engines = list;
                     this.loaded = true;
                     this.set_active(active, cx);
@@ -93,21 +125,7 @@ impl EngineListStore {
         }));
     }
 
-    fn remember(&mut self, list: &[EngineStatus]) {
-        for e in list {
-            self.seen_names
-                .insert(e.config.name.clone(), e.id().clone());
-        }
-    }
-
     fn apply(&mut self, ev: HubEvent, cx: &mut Context<Self>) {
-        match &ev {
-            HubEvent::Snapshot(list) => self.remember(list),
-            HubEvent::Added(st) | HubEvent::StatusChanged(st) => {
-                self.remember(std::slice::from_ref(st))
-            }
-            _ => {}
-        }
         match ev {
             HubEvent::Snapshot(list) => {
                 let active = list.iter().find(|s| s.active).map(|s| s.id().clone());
@@ -180,20 +198,6 @@ impl EngineListStore {
         self.engines.iter().find(|e| e.id() == id)
     }
 
-    /// Engines merged into `e` (ENG-009) as `(id, name)`, resolved from the names in
-    /// `also_reachable_via`. Names never seen this session are skipped.
-    pub fn merged_into(&self, e: &EngineStatus) -> Vec<(EngineId, String)> {
-        e.also_reachable_via
-            .iter()
-            .filter_map(|name| {
-                self.seen_names
-                    .get(name)
-                    .filter(|id| *id != e.id())
-                    .map(|id| (id.clone(), name.clone()))
-            })
-            .collect()
-    }
-
     /// No engine exists at all (ENG-111 first-run screen).
     pub fn is_empty(&self) -> bool {
         self.loaded && self.engines.is_empty()
@@ -213,5 +217,58 @@ impl EngineListStore {
     pub fn mark_switching(&mut self, id: EngineId, cx: &mut Context<Self>) {
         self.set_active(Some(id), cx);
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dk_core::{EngineConfig, EngineEndpoint, EngineOrigin};
+
+    fn status(id: &str, state: EngineState, enabled: bool, hidden: bool) -> EngineStatus {
+        EngineStatus {
+            config: EngineConfig {
+                id: EngineId::new(id),
+                name: id.into(),
+                endpoint: EngineEndpoint::UnixSocket {
+                    path: format!("/fake/{id}.sock").into(),
+                },
+                origin: EngineOrigin::Discovered,
+                enabled,
+                hidden,
+            },
+            state,
+            info: None,
+            active: false,
+            also_reachable_via: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn eng_116_default_mark_follows_what_the_hub_would_open() {
+        let a = EngineId::new("a");
+        let ok = status("a", EngineState::Connected, true, false);
+        assert_eq!(default_mark(&ok, Some(&a)), DefaultMark::Default);
+        assert_eq!(default_mark(&ok, None), DefaultMark::None);
+        assert_eq!(
+            default_mark(&ok, Some(&EngineId::new("b"))),
+            DefaultMark::None
+        );
+        // A down engine is still the default: it opens and shows Failed with Retry.
+        let down = status("a", EngineState::Disconnected, true, false);
+        assert_eq!(default_mark(&down, Some(&a)), DefaultMark::Default);
+        for bad in [
+            status("a", EngineState::Disabled, false, false),
+            status("a", EngineState::Connected, true, true),
+            status(
+                "a",
+                EngineState::Unsupported { reason: "x".into() },
+                true,
+                false,
+            ),
+        ] {
+            assert_eq!(default_mark(&bad, Some(&a)), DefaultMark::Unavailable);
+            assert!(!can_be_default(&bad));
+        }
     }
 }

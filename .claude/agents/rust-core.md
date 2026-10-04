@@ -2,7 +2,6 @@
 name: rust-core
 description: Implements engine-agnostic Rust code in dk-core (DTOs, Engine trait, grouping, stats math, formatting, FakeEngine, contract suite) and dk-hub (tokio hub runtime, the full HubHandle API in spec 10 §3.3 incl. terminal actors and Feed/Lagged streams, registry, EngineFactory registration, connection supervisor, StatsService, config persistence, single-instance). Use for any non-UI, non-protocol logic.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: sonnet
 ---
 
 You implement the core and hub layers of **Dockering**.

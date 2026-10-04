@@ -33,6 +33,7 @@ struct TestFactory {
     connects: Mutex<Vec<EngineId>>,
     probes: Mutex<Vec<EngineId>>,
     starts: Mutex<Vec<EngineId>>,
+    discovers: Mutex<u32>,
 }
 
 fn sock_cfg(id: &str) -> EngineConfig {
@@ -74,6 +75,9 @@ impl TestFactory {
     fn connects(&self) -> Vec<String> {
         lock(&self.connects).iter().map(|i| i.0.clone()).collect()
     }
+    fn discovers(&self) -> u32 {
+        *lock(&self.discovers)
+    }
     fn probes(&self) -> Vec<String> {
         lock(&self.probes).iter().map(|i| i.0.clone()).collect()
     }
@@ -88,6 +92,7 @@ impl EngineFactory for TestFactory {
         true
     }
     async fn discover(&self) -> Vec<DiscoveredEngine> {
+        *lock(&self.discovers) += 1;
         lock(&self.discovered).clone()
     }
     async fn connect(&self, cfg: &EngineConfig) -> EngineResult<Arc<dyn Engine>> {
@@ -624,46 +629,443 @@ async fn eng_020_only_active_engine_connected() {
     hub.shutdown();
 }
 
-#[tokio::test(start_paused = true)]
-async fn eng_009_dedupe_by_daemon_id() {
+/// Two engines on one daemon (Docker Desktop's two pipes) plus a third engine.
+fn same_daemon_factory() -> Arc<TestFactory> {
     let f = TestFactory::new();
-    let pipe: Arc<dyn Engine> = Arc::new(SameDaemon {
-        fake: FakeEngine::new("pipe"),
+    let ctx: Arc<dyn Engine> = Arc::new(SameDaemon {
+        fake: FakeEngine::new("ctx"),
         daemon: "DAEMON-1".into(),
     });
-    let wsl: Arc<dyn Engine> = Arc::new(SameDaemon {
-        fake: FakeEngine::new("wsl"),
+    let dd: Arc<dyn Engine> = Arc::new(SameDaemon {
+        fake: FakeEngine::new("dd"),
         daemon: "DAEMON-1".into(),
     });
-    f.add(pipe, preference::LOCAL_SOCKET);
-    let wsl_cfg = f.add(wsl, preference::WSL_DISTRO);
-    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    f.add(ctx, preference::DOCKER_CONTEXT);
+    f.add(dd, preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("wslc"), preference::WSLC);
+    f
+}
+
+async fn activate_and_wait(hub: &HubHandle, id: &str) {
+    hub.set_active(&EngineId::new(id)).await.unwrap();
     until(Duration::from_secs(5), || {
-        state_of(&hub, "pipe") == Some(EngineState::Connected)
+        state_of(hub, id) == Some(EngineState::Connected)
     })
     .await;
-    assert_eq!(listed(&hub), vec!["pipe", "wsl"]);
+}
 
-    // Connecting the WSL engine reveals the same daemon: it's merged into `pipe`.
-    hub.set_active(&EngineId::new("wsl")).await.unwrap();
+async fn status_of(hub: &HubHandle, id: &str) -> EngineStatus {
+    hub.engines()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|e| e.config.id.as_str() == id)
+        .unwrap_or_else(|| panic!("engine {id} is not listed"))
+}
+
+/// ENG-114 regression: engines sharing a daemon used to be hidden as "merged" once another
+/// engine became active, and a rescan never brought them back.
+#[tokio::test(start_paused = true)]
+async fn eng_114_same_daemon_engines_stay_listed_after_switch_and_rescan() {
+    let f = same_daemon_factory();
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "ctx") == Some(EngineState::Connected)
+    })
+    .await;
+    activate_and_wait(&hub, "dd").await;
+    activate_and_wait(&hub, "wslc").await;
+    assert_eq!(listed(&hub), vec!["ctx", "dd", "wslc"]);
+    hub.rescan().await.unwrap();
+    assert_eq!(listed(&hub), vec!["ctx", "dd", "wslc"]);
+    activate_and_wait(&hub, "ctx").await;
+    assert_eq!(listed(&hub), vec!["ctx", "dd", "wslc"]);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_114_same_daemon_note_is_symmetric() {
+    let f = same_daemon_factory();
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "ctx") == Some(EngineState::Connected)
+    })
+    .await;
+    // Only `ctx` has reported its daemon so far: nothing to annotate yet.
+    assert!(status_of(&hub, "ctx").await.also_reachable_via.is_empty());
+    activate_and_wait(&hub, "dd").await;
+    assert_eq!(
+        status_of(&hub, "ctx").await.also_reachable_via,
+        vec!["Engine dd".to_string()]
+    );
+    assert_eq!(
+        status_of(&hub, "dd").await.also_reachable_via,
+        vec!["Engine ctx".to_string()]
+    );
+    assert!(status_of(&hub, "wslc").await.also_reachable_via.is_empty());
+    hub.shutdown();
+}
+
+/// ENG-113: discovery runs at start and on explicit rescan only.
+#[tokio::test(start_paused = true)]
+async fn eng_113_no_discovery_after_start_until_rescan() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(f.discovers(), 1);
+    activate_and_wait(&hub, "b").await;
+    activate_and_wait(&hub, "a").await;
+    // Several background probe ticks and pings pass.
+    tokio::time::sleep(Duration::from_secs(200)).await;
+    assert_eq!(f.discovers(), 1);
+    hub.rescan().await.unwrap();
+    assert_eq!(f.discovers(), 2);
+    hub.shutdown();
+}
+
+/// ENG-115: name, Enabled, and Hidden of a discovered engine survive a rescan.
+#[tokio::test(start_paused = true)]
+async fn eng_115_disabled_hidden_name_survive_rescan() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let mut cfg = status_of(&hub, "b").await.config;
+    cfg.name = "My B".into();
+    cfg.enabled = false;
+    cfg.hidden = true;
+    hub.update_engine(cfg).await.unwrap();
+    hub.rescan().await.unwrap();
+    let b = status_of(&hub, "b").await;
+    assert_eq!(b.config.name, "My B");
+    assert!(!b.config.enabled && b.config.hidden);
+    assert_eq!(b.state, EngineState::Disabled);
+    hub.shutdown();
+}
+
+/// ENG-115: overrides of an engine the scan doesn't find are kept (and it stays listed).
+#[tokio::test(start_paused = true)]
+async fn eng_115_overrides_of_unfound_engines_are_kept() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let mut gone = sock_cfg("gone");
+    gone.name = "Gone".into();
+    gone.enabled = false;
+    gone.hidden = true;
+    let mut config = Config::default();
+    config.engines.entries.push(gone);
+    let (hub, _dir) = start_paused(f.clone(), config, UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    for _ in 0..2 {
+        hub.rescan().await.unwrap();
+        let g = status_of(&hub, "gone").await;
+        assert_eq!(g.config.name, "Gone");
+        assert!(!g.config.enabled && g.config.hidden);
+        assert_eq!(g.state, EngineState::Disabled);
+    }
+    hub.shutdown();
+}
+
+/// ENG-115: overrides and the default engine are on disk after shutdown and apply to the
+/// next hub started from the same files.
+#[tokio::test(start_paused = true)]
+async fn eng_115_overrides_survive_restart() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    f.add(FakeEngine::new("c"), preference::WSLC);
+    let (hub, dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let mut cfg = status_of(&hub, "b").await.config;
+    cfg.name = "My B".into();
+    cfg.enabled = false;
+    hub.update_engine(cfg).await.unwrap();
+    // `a` won on preference and is the last-used engine; the pin on `c` must beat both.
+    hub.config()
+        .update(|c| c.engines.default = Some(EngineId::new("c")));
+    hub.shutdown(); // flushes pending saves synchronously
+
+    let (config, ui_state) = crate::config::load(&Paths::in_dir(dir.path()));
+    assert_eq!(config.engines.default, Some(EngineId::new("c")));
+    assert_eq!(ui_state.last_engine, Some(EngineId::new("a")));
+    let f2 = TestFactory::new();
+    f2.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f2.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    f2.add(FakeEngine::new("c"), preference::WSLC);
+    let (hub2, _dir2) = start_paused(f2.clone(), config, ui_state);
+    until(Duration::from_secs(5), || {
+        state_of(&hub2, "c") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(f2.connects(), vec!["c"]);
+    let b = status_of(&hub2, "b").await;
+    assert_eq!(b.config.name, "My B");
+    assert_eq!(b.state, EngineState::Disabled);
+    hub2.shutdown();
+}
+
+/// ENG-116: a pinned engine whose config was stored is registered before discovery, so a
+/// startup scan that misses it (slow, timed out) can't make another engine win.
+#[tokio::test(start_paused = true)]
+async fn eng_116_default_wins_even_when_the_startup_scan_misses_it() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("preferred"), preference::DOCKER_HOST);
+    // `pinned` exists, but discovery doesn't report it.
+    lock(&f.engines).insert(EngineId::new("pinned"), FakeEngine::new("pinned"));
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("pinned"));
+    config.engines.entries.push(sock_cfg("pinned"));
+    let (hub, _dir) = start_paused(f.clone(), config, UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "pinned") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("pinned")));
+    assert_eq!(f.connects(), vec!["pinned"]);
+    hub.shutdown();
+}
+
+/// ENG-115: disabling the active engine survives a rescan, and re-enabling connects again.
+#[tokio::test(start_paused = true)]
+async fn eng_115_disable_active_then_rescan_then_reenable() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let mut cfg = status_of(&hub, "a").await.config;
+    cfg.enabled = false;
+    hub.update_engine(cfg.clone()).await.unwrap();
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Disabled));
+    hub.rescan().await.unwrap();
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Disabled));
+    assert!(!status_of(&hub, "a").await.config.enabled);
+    cfg.enabled = true;
+    hub.update_engine(cfg).await.unwrap();
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    hub.shutdown();
+}
+
+/// ENG-115: a failed config write stays pending and is retried by the next flush.
+#[tokio::test(start_paused = true)]
+async fn eng_115_failed_config_save_is_retried() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let (hub, dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    // A file where the config directory should be makes the write fail. No `.await` follows
+    // until the checks are done, so the saver task can't interleave.
+    let blocker = dir.path().join("config");
+    std::fs::write(&blocker, b"not a directory").unwrap();
+    hub.config()
+        .update(|c| c.engines.default = Some(EngineId::new("a")));
+    hub.inner.flush_now();
+    let config_file = Paths::in_dir(dir.path()).config_file();
+    assert!(!config_file.exists());
+    std::fs::remove_file(&blocker).unwrap();
+    hub.inner.flush_now();
+    let (config, _) = crate::config::load(&Paths::in_dir(dir.path()));
+    assert_eq!(config.engines.default, Some(EngineId::new("a")));
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_103_default_engine_connects_first() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("host"), preference::DOCKER_HOST);
+    f.add(FakeEngine::new("wsl"), preference::WSL_DISTRO);
+    f.add(FakeEngine::new("last"), preference::WSLC);
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("wsl"));
+    let ui = UiState {
+        last_engine: Some(EngineId::new("last")),
+        ..Default::default()
+    };
+    let (hub, _dir) = start_paused(f.clone(), config, ui);
     until(Duration::from_secs(5), || {
         state_of(&hub, "wsl") == Some(EngineState::Connected)
     })
     .await;
-    hub.set_active(&EngineId::new("pipe")).await.unwrap();
+    assert_eq!(f.connects(), vec!["wsl"]);
+    hub.shutdown();
+}
+
+/// ENG-103: *Rescan* with no active engine applies the startup order, so a pinned default
+/// that only appears on a later scan wins over preference order.
+#[tokio::test(start_paused = true)]
+async fn eng_103_rescan_without_active_engine_prefers_the_default() {
+    let f = TestFactory::new();
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("pinned"));
+    let (hub, _dir) = start_paused(f.clone(), config, UiState::default());
+    // Nothing exists at startup (for example Docker wasn't running).
+    until(Duration::from_secs(5), || f.discovers() == 1).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(hub.active_engine(), None);
+
+    f.add(FakeEngine::new("preferred"), preference::DOCKER_HOST);
+    f.add(FakeEngine::new("pinned"), preference::WSLC);
+    hub.rescan().await.unwrap();
+    until(Duration::from_secs(5), || hub.active_engine().is_some()).await;
+    until(Duration::from_secs(5), || !f.connects().is_empty()).await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("pinned")));
+    assert_eq!(f.connects(), vec!["pinned"]);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_103_unavailable_default_falls_back() {
+    // Default disabled -> last-used. Default unknown -> last-used. No last-used -> auto-select.
+    for (default, disable, last, expect) in [
+        ("wsl", true, Some("last"), "last"),
+        ("nope", false, Some("last"), "last"),
+        ("wsl", true, None, "host"),
+    ] {
+        let f = TestFactory::new();
+        f.add(FakeEngine::new("host"), preference::DOCKER_HOST);
+        f.add(FakeEngine::new("wsl"), preference::WSL_DISTRO);
+        f.add(FakeEngine::new("last"), preference::WSLC);
+        let mut config = Config::default();
+        config.engines.default = Some(EngineId::new(default));
+        if disable {
+            let mut o = sock_cfg("wsl");
+            o.enabled = false;
+            config.engines.entries.push(o);
+        }
+        let ui = UiState {
+            last_engine: last.map(EngineId::new),
+            ..Default::default()
+        };
+        let (hub, _dir) = start_paused(f.clone(), config, ui);
+        until(Duration::from_secs(5), || {
+            state_of(&hub, expect) == Some(EngineState::Connected)
+        })
+        .await;
+        assert_eq!(hub.active_engine(), Some(EngineId::new(expect)));
+        assert!(!f.connects().contains(&"wsl".to_string()));
+        hub.shutdown();
+    }
+}
+
+/// ENG-116: a runtime switch never changes the pin; removing the pinned manual engine clears it.
+#[tokio::test(start_paused = true)]
+async fn eng_116_runtime_switch_keeps_default_and_remove_clears_it() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("a"));
+    let (hub, _dir) = start_paused(f.clone(), config, UiState::default());
     until(Duration::from_secs(5), || {
-        state_of(&hub, "pipe") == Some(EngineState::Connected)
+        state_of(&hub, "a") == Some(EngineState::Connected)
     })
     .await;
-    let list = hub.engines().await.unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].config.id.as_str(), "pipe");
-    assert_eq!(list[0].also_reachable_via, vec![wsl_cfg.name.clone()]);
+    activate_and_wait(&hub, "b").await;
+    assert_eq!(hub.config().get().engines.default, Some(EngineId::new("a")));
 
-    // Un-merge in Settings brings it back.
+    let id = hub.add_engine(sock_cfg("man")).await.unwrap();
     hub.config()
-        .update(|c| c.engines.unmerged.push(EngineId::new("wsl")));
-    assert_eq!(listed(&hub), vec!["pipe", "wsl"]);
+        .update(|c| c.engines.default = Some(id.clone()));
+    hub.remove_engine(&id).await.unwrap();
+    assert_eq!(hub.config().get().engines.default, None);
+    hub.shutdown();
+}
+
+/// ENG-114: the note follows renames and drops peers the user disabled.
+#[tokio::test(start_paused = true)]
+async fn eng_114_same_daemon_note_follows_rename_and_disable() {
+    let f = same_daemon_factory();
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "ctx") == Some(EngineState::Connected)
+    })
+    .await;
+    activate_and_wait(&hub, "dd").await;
+    let mut dd = status_of(&hub, "dd").await.config;
+    dd.name = "Renamed".into();
+    hub.update_engine(dd.clone()).await.unwrap();
+    assert_eq!(
+        status_of(&hub, "ctx").await.also_reachable_via,
+        vec!["Renamed".to_string()]
+    );
+    // Hidden peers are left out of the note too.
+    dd.hidden = true;
+    hub.update_engine(dd.clone()).await.unwrap();
+    assert!(status_of(&hub, "ctx").await.also_reachable_via.is_empty());
+    dd.hidden = false;
+    hub.update_engine(dd.clone()).await.unwrap();
+    assert_eq!(
+        status_of(&hub, "ctx").await.also_reachable_via,
+        vec!["Renamed".to_string()]
+    );
+    dd.enabled = false;
+    hub.update_engine(dd).await.unwrap();
+    assert!(status_of(&hub, "ctx").await.also_reachable_via.is_empty());
+    hub.shutdown();
+}
+
+/// ENG-103/116: a hidden default is skipped in favour of the last-used engine.
+#[tokio::test(start_paused = true)]
+async fn eng_116_hidden_default_falls_through() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("host"), preference::DOCKER_HOST);
+    f.add(FakeEngine::new("wsl"), preference::WSL_DISTRO);
+    f.add(FakeEngine::new("last"), preference::WSLC);
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("wsl"));
+    let mut hidden = sock_cfg("wsl");
+    hidden.hidden = true;
+    config.engines.entries.push(hidden);
+    let ui = UiState {
+        last_engine: Some(EngineId::new("last")),
+        ..Default::default()
+    };
+    let (hub, _dir) = start_paused(f.clone(), config, ui);
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "last") == Some(EngineState::Connected)
+    })
+    .await;
+    assert!(!f.connects().contains(&"wsl".to_string()));
+    hub.shutdown();
+}
+
+/// ENG-116: *Remove* on a discovered engine only hides it, so a pin on it stays (the row then
+/// reads *Default (unavailable)*).
+#[tokio::test(start_paused = true)]
+async fn eng_116_removing_a_discovered_default_keeps_the_pin() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.add(FakeEngine::new("b"), preference::WSL_DISTRO);
+    let mut config = Config::default();
+    config.engines.default = Some(EngineId::new("b"));
+    let (hub, _dir) = start_paused(f.clone(), config, UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "b") == Some(EngineState::Connected)
+    })
+    .await;
+    activate_and_wait(&hub, "a").await;
+    hub.remove_engine(&EngineId::new("b")).await.unwrap();
+    assert!(status_of(&hub, "b").await.config.hidden);
+    assert_eq!(hub.config().get().engines.default, Some(EngineId::new("b")));
     hub.shutdown();
 }
 

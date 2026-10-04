@@ -4,8 +4,9 @@
 //! (`update_engine`), endpoint, origin, kind label, state dot, version and transport (WSLC:
 //! transport + fallback note, ENG-110), *Enabled* (ENG-025), *Test connection*, *Start &
 //! connect* (stopped WSL distros, ENG-106), *Hide*/*Unhide* (discovered), *Remove* (manual,
-//! confirmed), and "also reachable via" with *Un-merge* (ENG-009). The discovery toggles
-//! (ENG-109), *Rescan*, and *Add engine…* sit on top. Every control is a Tab stop in visual
+//! confirmed), *Set as default* / *Clear default* (ENG-116), and the "Same daemon as" note
+//! (ENG-009/114). The discovery toggles (ENG-109), *Rescan* (the only way to re-run discovery,
+//! ENG-113), and *Add engine…* sit on top. Every control is a Tab stop in visual
 //! order; buttons dispatch [`EngineOp`] so clicks and keys share one handler.
 
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ use super::controls::BoolKey;
 use crate::actions::Rescan;
 use crate::actions::settings::{AddEngine, EngineOp, EngineOpKind};
 use crate::shell::switcher::kind_icon;
-use crate::state::{AppState, EngineListStore};
+use crate::state::{AppState, DefaultMark, EngineListStore, can_be_default, default_mark};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive};
 use crate::ui::notify;
@@ -293,6 +294,8 @@ fn remove(
                 this.update_in(cx, |this, window, cx| {
                     match r {
                         Ok(()) => {
+                            // The hub may have cleared the default with the engine.
+                            AppState::refresh_config(cx);
                             let target = next
                                 .and_then(|n| this.engines.name_inputs.get(&n))
                                 .map(|i| i.focus_handle(cx))
@@ -320,15 +323,6 @@ pub(super) fn on_engine_op(
     cx: &mut Context<SettingsPage>,
 ) {
     let id = EngineId::new(a.id.to_string());
-    if a.op == EngineOpKind::Unmerge {
-        AppState::update_config(cx, |c| {
-            if !c.engines.unmerged.contains(&id) {
-                c.engines.unmerged.push(id.clone());
-            }
-        });
-        cx.notify();
-        return;
-    }
     let Some(status) = status_of(this, &id, cx) else {
         return;
     };
@@ -353,7 +347,20 @@ pub(super) fn on_engine_op(
             let call = hub.start_wsl_distro(&id);
             run_op(this, &id, s::START_AND_CONNECT, call, window, cx);
         }
-        EngineOpKind::Unmerge => {}
+        EngineOpKind::SetDefault if !can_be_default(&status) => {
+            notify::info(
+                window,
+                cx,
+                s::default_engine_unavailable(&status.config.name),
+            );
+        }
+        EngineOpKind::SetDefault => {
+            AppState::pin_default(cx, &status);
+            notify::success(window, cx, s::default_engine_set(&status.config.name));
+        }
+        EngineOpKind::ClearDefault => {
+            AppState::update_config(cx, |c| c.engines.default = None);
+        }
     }
     cx.notify();
 }
@@ -399,13 +406,9 @@ fn eid(prefix: &str, id: &EngineId) -> SharedString {
     format!("{prefix}-{id}").into()
 }
 
-fn engine_row(
-    this: &SettingsPage,
-    e: &EngineStatus,
-    merged: &[(EngineId, String)],
-    cx: &App,
-) -> AnyElement {
+fn engine_row(this: &SettingsPage, e: &EngineStatus, mark: DefaultMark, cx: &App) -> AnyElement {
     let id = e.id();
+    let is_default = mark != DefaultMark::None;
     let t = cx.theme();
     let enabled = this.engines.enabled(e);
     let manual = e.config.origin == EngineOrigin::Manual;
@@ -437,6 +440,13 @@ fn engine_row(
         }))
         .when(e.active, |this| {
             this.child(Tag::primary().small().child(s::TAG_ACTIVE))
+        })
+        .when(mark != DefaultMark::None, |this| {
+            this.child(if mark == DefaultMark::Default {
+                Tag::primary().outline().small().child(s::TAG_DEFAULT)
+            } else {
+                Tag::warning().small().child(s::TAG_DEFAULT_UNAVAILABLE)
+            })
         })
         .when(e.config.hidden, |this| {
             this.child(Tag::warning().small().child(s::TAG_HIDDEN))
@@ -539,13 +549,6 @@ fn engine_row(
             .text_xs()
             .text_color(t.muted_foreground)
             .child(s::also_reachable_via(&e.also_reachable_via.join(", ")))
-            .children(merged.iter().map(|(mid, name)| {
-                Button::new(eid("eng-unmerge", mid))
-                    .xsmall()
-                    .outline()
-                    .label(format!("{} {name}", s::UNMERGE))
-                    .on_click(dispatch_op(&nav, mid, EngineOpKind::Unmerge))
-            }))
     });
 
     let actions = h_flex()
@@ -574,6 +577,22 @@ fn engine_row(
                     .label(s::START_AND_CONNECT)
                     .on_click(dispatch_op(&nav, id, EngineOpKind::StartAndConnect)),
             )
+        })
+        .child(if is_default {
+            Button::new(eid("eng-default", id))
+                .small()
+                .ghost()
+                .icon(IconName::Star)
+                .label(s::CLEAR_DEFAULT)
+                .on_click(dispatch_op(&nav, id, EngineOpKind::ClearDefault))
+        } else {
+            Button::new(eid("eng-default", id))
+                .small()
+                .ghost()
+                .icon(IconName::Star)
+                .label(s::SET_DEFAULT)
+                .disabled(!can_be_default(e))
+                .on_click(dispatch_op(&nav, id, EngineOpKind::SetDefault))
         })
         .when(!manual, |this| {
             this.child(
@@ -664,10 +683,8 @@ pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) ->
         cx,
     )
     .into_any_element();
-    let list = this.engine_list.read(cx);
-    let engines: Vec<EngineStatus> = list.engines().to_vec();
-    let merged: Vec<Vec<(EngineId, String)>> =
-        engines.iter().map(|e| list.merged_into(e)).collect();
+    let engines: Vec<EngineStatus> = this.engine_list.read(cx).engines().to_vec();
+    let default = AppState::config(cx).engines.default.clone();
     let mut out = vec![discovery];
     if engines.is_empty() {
         out.push(
@@ -678,8 +695,8 @@ pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) ->
                 .into_any_element(),
         );
     }
-    for (e, m) in engines.iter().zip(merged.iter()) {
-        out.push(engine_row(this, e, m, cx));
+    for e in &engines {
+        out.push(engine_row(this, e, default_mark(e, default.as_ref()), cx));
     }
     out
 }

@@ -2,7 +2,6 @@
 name: gpui-ui
 description: Builds the Dockering user interface with GPUI + GPUI Kit (gpui-kit 0.7) — app shell, sidebar, title bar, engine switcher, navigation, pages (containers/images/volumes/networks/settings), detail tabs, DataTable delegates, charts, dialogs, notifications, stores, and the dk-terminal view element. Use for any change in crates/dockering or crates/dk-terminal.
 tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch
-model: sonnet
 ---
 
 You build the **UI** of Dockering with GPUI and GPUI Kit.

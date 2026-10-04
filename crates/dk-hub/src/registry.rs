@@ -36,12 +36,16 @@ pub(crate) struct Entry {
     /// ENG-103 rank; manual entries use `preference::MANUAL`.
     pub preference: u8,
     pub show_only_when_all: bool,
+    /// Whether a discovery result has classified this entry yet. Entries registered from
+    /// stored config at startup haven't: their first merge sets `show_only_when_all` outright,
+    /// later merges only ever clear it (ENG-114, a listed engine is never hidden by a rescan).
+    pub classified: bool,
     /// Index into the hub's factory list.
     pub factory: Option<usize>,
     /// Last-known daemon identity (ENG-009), in memory only.
     pub daemon_id: Option<String>,
-    /// Merged into another engine reaching the same daemon (ENG-009).
-    pub merged_into: Option<EngineId>,
+    /// Names of the other engines that reach the same daemon (ENG-009). Annotation only:
+    /// an engine is never hidden for sharing a daemon (ENG-114).
     pub also_reachable_via: Vec<String>,
     pub conn: Option<Conn>,
 }
@@ -75,7 +79,6 @@ pub(crate) struct Supervisor {
 pub(crate) struct View {
     pub show_all_wsl_distros: bool,
     pub show_all_wslc_sessions: bool,
-    pub unmerged: HashSet<EngineId>,
 }
 
 impl View {
@@ -83,7 +86,6 @@ impl View {
         Self {
             show_all_wsl_distros: s.show_all_wsl_distros,
             show_all_wslc_sessions: s.show_all_wslc_sessions,
-            unmerged: s.unmerged.iter().cloned().collect(),
         }
     }
 }
@@ -199,9 +201,6 @@ impl Registry {
         if self.is_active(&e.config.id) {
             return true;
         }
-        if e.merged_into.is_some() && !self.view.unmerged.contains(&e.config.id) {
-            return false;
-        }
         if e.show_only_when_all {
             return match e.kind() {
                 Some(EngineKind::WslDistro) => self.view.show_all_wsl_distros,
@@ -267,9 +266,9 @@ impl Registry {
             info: None,
             preference,
             show_only_when_all: false,
+            classified: false,
             factory,
             daemon_id: None,
-            merged_into: None,
             also_reachable_via: Vec::new(),
             conn: None,
         });
@@ -329,9 +328,22 @@ impl Registry {
                 Some(i) => {
                     let e = &mut self.entries[i];
                     let endpoint_changed = e.config.endpoint != cfg.endpoint;
+                    if endpoint_changed {
+                        e.daemon_id = None;
+                    }
                     if !manual {
                         e.preference = d.preference;
-                        e.show_only_when_all = d.show_only_when_all;
+                        // Sticky (ENG-114): once classified, a rescan may make a
+                        // hidden-by-Show-all engine listed, but never hides one the user
+                        // already sees (a distro whose Docker socket is down right now is
+                        // not "no Docker"). The first classification after startup is taken
+                        // as is, so a stored override of a no-Docker distro stays unlisted.
+                        e.show_only_when_all = if e.classified {
+                            e.show_only_when_all && d.show_only_when_all
+                        } else {
+                            d.show_only_when_all
+                        };
+                        e.classified = true;
                         e.factory = Some(fi);
                     }
                     e.config = cfg;
@@ -353,15 +365,17 @@ impl Registry {
                             d.preference
                         },
                         show_only_when_all: d.show_only_when_all && !manual,
+                        classified: true,
                         factory: Some(fi),
                         daemon_id: None,
-                        merged_into: None,
                         also_reachable_via: Vec::new(),
                         conn: None,
                     });
                 }
             }
         }
+
+        self.refresh_daemon_notes();
 
         // 3. Vanished discovered engines stay listed as unavailable (Disconnected).
         let active = self.active.clone();
@@ -381,38 +395,44 @@ impl Registry {
         added
     }
 
-    /// ENG-009 daemon-identity de-duplication, run when `id` connected with `daemon_id`.
-    /// Keeps the engine with the lower preference value (ties: the one already known) and
-    /// marks the other merged. Returns the id that was merged away, if any.
-    pub fn dedupe_daemon(&mut self, id: &EngineId, daemon_id: &str) -> Option<EngineId> {
-        let me = self.idx(id)?;
+    /// ENG-009/114: records the daemon identity `id` reported on connect, then refreshes the
+    /// "same daemon as" notes. Never hides or removes an engine.
+    pub fn dedupe_daemon(&mut self, id: &EngineId, daemon_id: &str) {
+        let Some(me) = self.idx(id) else { return };
         self.entries[me].daemon_id = Some(daemon_id.to_owned());
-        if self.entries[me].merged_into.is_some() {
-            return None;
+        self.refresh_daemon_notes();
+    }
+
+    /// Recomputes every engine's `also_reachable_via` from the current daemon ids, names,
+    /// enabled and hidden flags, and visibility, in both directions (ENG-009/114). Peers that
+    /// are disabled, hidden, or not listed (*Show all …* off) are left out, so the note never
+    /// names an engine the user can't see. Emits `StatusChanged` for each visible entry that changed.
+    pub fn refresh_daemon_notes(&mut self) {
+        let notes: Vec<Vec<String>> = (0..self.entries.len())
+            .map(|i| {
+                let Some(d) = self.entries[i].daemon_id.as_deref() else {
+                    return Vec::new();
+                };
+                (0..self.entries.len())
+                    .filter(|&o| {
+                        let p = &self.entries[o];
+                        o != i
+                            && p.daemon_id.as_deref() == Some(d)
+                            && p.config.enabled
+                            && !p.config.hidden
+                            && self.visible(p)
+                    })
+                    .map(|o| self.entries[o].config.name.clone())
+                    .collect()
+            })
+            .collect();
+        for (i, note) in notes.into_iter().enumerate() {
+            if self.entries[i].also_reachable_via != note {
+                self.entries[i].also_reachable_via = note;
+                let eid = self.entries[i].config.id.clone();
+                self.emit_status(&eid);
+            }
         }
-        let other = self.entries.iter().position(|e| {
-            &e.config.id != id
-                && e.merged_into.is_none()
-                && e.daemon_id.as_deref() == Some(daemon_id)
-        })?;
-        let (keep, drop) = if self.entries[me].preference < self.entries[other].preference {
-            (me, other)
-        } else {
-            (other, me)
-        };
-        let keep_id = self.entries[keep].config.id.clone();
-        let drop_id = self.entries[drop].config.id.clone();
-        let drop_name = self.entries[drop].config.name.clone();
-        let was_visible = self.visible(&self.entries[drop]);
-        self.entries[drop].merged_into = Some(keep_id.clone());
-        if !self.entries[keep].also_reachable_via.contains(&drop_name) {
-            self.entries[keep].also_reachable_via.push(drop_name);
-        }
-        if was_visible && !self.visible(&self.entries[drop]) {
-            self.emit(HubEvent::Removed(drop_id.clone()));
-        }
-        self.emit_status(&keep_id);
-        Some(drop_id)
     }
 }
 
@@ -542,7 +562,57 @@ mod tests {
     }
 
     #[test]
-    fn eng_009_daemon_dedupe_keeps_lower_preference() {
+    fn eng_114_rescan_never_hides_a_listed_engine() {
+        let wsl = |no_docker: bool| {
+            let mut d = DiscoveredEngine::new(
+                cfg(
+                    "wsl-alpine",
+                    EngineEndpoint::WslDistro {
+                        distro: "Alpine".into(),
+                        mode: WslMode::DialStdio,
+                    },
+                ),
+                30,
+            );
+            d.show_only_when_all = no_docker;
+            d
+        };
+        let mut r = reg();
+        r.merge_discovered(vec![(0, wsl(false))], &[]);
+        assert_eq!(r.snapshot().len(), 1);
+        // Docker is down in the distro at rescan time: it's classified "no Docker", but the
+        // user already sees it, so it stays listed.
+        r.merge_discovered(vec![(0, wsl(true))], &[]);
+        assert_eq!(r.snapshot().len(), 1);
+        // The other way round: a hidden "no Docker" distro becomes listed once Docker is up.
+        let mut r = reg();
+        r.merge_discovered(vec![(0, wsl(true))], &[]);
+        assert!(r.snapshot().is_empty());
+        r.merge_discovered(vec![(0, wsl(false))], &[]);
+        assert_eq!(r.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn eng_114_stored_override_of_a_no_docker_distro_stays_unlisted_after_restart() {
+        let distro = EngineEndpoint::WslDistro {
+            distro: "Alpine".into(),
+            mode: WslMode::DialStdio,
+        };
+        let mut stored = cfg("wsl-alpine", distro.clone());
+        stored.name = "My Alpine".into();
+        let mut r = reg();
+        r.insert_config(stored.clone(), Some(0));
+        let mut d = DiscoveredEngine::new(cfg("wsl-alpine", distro), 30);
+        d.show_only_when_all = true;
+        r.merge_discovered(vec![(0, d)], &[stored]);
+        let e = r.get(&EngineId::new("wsl-alpine")).unwrap();
+        assert_eq!(e.config.name, "My Alpine");
+        assert!(e.show_only_when_all);
+        assert!(r.snapshot().is_empty(), "Show all is off");
+    }
+
+    #[test]
+    fn eng_009_same_daemon_is_annotated_not_hidden() {
         let mut r = reg();
         r.merge_discovered(
             vec![
@@ -551,15 +621,12 @@ mod tests {
             ],
             &[],
         );
-        assert_eq!(r.dedupe_daemon(&EngineId::new("wsl"), "D"), None);
-        assert_eq!(
-            r.dedupe_daemon(&EngineId::new("pipe"), "D"),
-            Some(EngineId::new("wsl"))
-        );
+        r.dedupe_daemon(&EngineId::new("wsl"), "D");
+        assert!(r.entries.iter().all(|e| e.also_reachable_via.is_empty()));
+        r.dedupe_daemon(&EngineId::new("pipe"), "D");
         let ids: Vec<_> = r.snapshot().into_iter().map(|s| s.config.id).collect();
-        assert_eq!(ids, vec![EngineId::new("pipe")]);
+        assert_eq!(ids, vec![EngineId::new("pipe"), EngineId::new("wsl")]);
         assert_eq!(r.entries[0].also_reachable_via, vec!["WSL".to_string()]);
-        r.view.unmerged.insert(EngineId::new("wsl"));
-        assert_eq!(r.snapshot().len(), 2);
+        assert_eq!(r.entries[1].also_reachable_via, vec!["PIPE".to_string()]);
     }
 }

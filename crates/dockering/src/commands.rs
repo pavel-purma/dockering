@@ -147,6 +147,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     c!(s::CMD_RESCAN, Rescan, Engines, Always, &["discover"]),
     c!(s::CMD_MANAGE_ENGINES, ManageEngines, Engines, Always),
+    c!(
+        s::CMD_SET_ACTIVE_DEFAULT,
+        SetActiveEngineDefault,
+        Engines,
+        Engine,
+        &["pin", "startup"]
+    ),
     c!(s::RETRY, RetryEngine, Engines, Engine, &["reconnect"]),
     c!(
         s::START_AND_CONNECT,

@@ -100,8 +100,9 @@ pub struct EngineSettings {
     /// Manually added engines and user overrides (rename/disable/hide) of discovered ones.
     /// Manual entries win over discovered ones with the same id.
     pub entries: Vec<EngineConfig>,
-    /// Engine ids the user un-merged from daemon-id de-duplication (ENG-009).
-    pub unmerged: Vec<EngineId>,
+    /// The pinned default engine (ENG-116): connects first at startup (ENG-103). Changing the
+    /// active engine at runtime never touches it.
+    pub default: Option<EngineId>,
 }
 
 /// SET-020
@@ -362,6 +363,7 @@ mod tests {
 
         // Round-trip.
         let mut c = Config::default();
+        c.engines.default = Some(EngineId::new("remote"));
         c.general.theme = ThemeMode::Dark;
         c.stats.history_minutes = 5;
         c.engines.entries.push(EngineConfig {
@@ -393,6 +395,24 @@ mod tests {
         let (c3, _) = load(&paths);
         assert_eq!(c3.general.theme, ThemeMode::Light);
         assert_eq!(c3.stats, StatsSettings::default());
+
+        // A file written before ENG-114 still carries `unmerged`; it's ignored and dropped.
+        std::fs::write(
+            paths.config_file(),
+            "[engines]
+unmerged = [\"x\"]
+default = \"a\"
+",
+        )
+        .unwrap();
+        let (c3b, _) = load(&paths);
+        assert_eq!(c3b.engines.default, Some(EngineId::new("a")));
+        save_config(&paths, &c3b).unwrap();
+        assert!(
+            !std::fs::read_to_string(paths.config_file())
+                .unwrap()
+                .contains("unmerged")
+        );
 
         // Corrupt → `.bak` + defaults.
         std::fs::write(paths.config_file(), "this is = = not toml [").unwrap();

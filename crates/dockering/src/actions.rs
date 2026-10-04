@@ -47,6 +47,8 @@ gpui_kit::actions!(
         RetryEngine,
         /// Boot a stopped WSL distro and connect (ENG-106).
         StartEngine,
+        /// Pin the active engine as the startup default (ENG-116).
+        SetActiveEngineDefault,
         /// Lone `Alt` on Windows/Linux: focus the title-bar overflow menu (SHL-021).
         FocusMenuBar,
         /// KBD-076 / UPD-004: manual update check (palette, Settings › Updates, macOS menu).
@@ -388,8 +390,10 @@ pub mod settings {
         ToggleHidden,
         Remove,
         StartAndConnect,
-        /// `id` is the merged engine to bring back (ENG-009).
-        Unmerge,
+        /// Pin `id` as the startup default engine (ENG-116).
+        SetDefault,
+        /// Clear the pin (ENG-116).
+        ClearDefault,
     }
 }
 

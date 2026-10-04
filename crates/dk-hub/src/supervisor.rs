@@ -68,24 +68,45 @@ async fn connect_with_timeout(
     }
 }
 
-/// Startup (spec 10 §7 step 5): discovery, then the last engine or auto-select, then the
-/// background probe loop.
+/// Startup (spec 10 §7 step 5): discovery, then the default engine, the last engine, or
+/// auto-select, then the background probe loop.
 pub(crate) async fn bootstrap(inner: Arc<HubInner>) {
     if inner.discover_on_start {
         discover(&inner).await;
     }
-    let last = inner.ui_state().last_engine.filter(|id| {
-        lock(&inner.reg)
-            .get(id)
-            .is_some_and(|e| e.config.enabled && e.contactable())
-    });
-    match last {
+    select_engine(&inner).await;
+    probe_loop(inner).await;
+}
+
+/// ENG-103: activates the startup engine (default, else last-used), else auto-selects. Used at
+/// startup and by *Rescan* when no engine is active (so a pinned default that only shows up
+/// on a later scan still wins over preference order). No-op once an engine is active.
+pub(crate) async fn select_engine(inner: &Arc<HubInner>) {
+    if inner.active_id().is_some() {
+        return;
+    }
+    match startup_engine(inner) {
         Some(id) => {
             let _ = inner.activate(&id, None, true);
         }
-        None => autoselect(&inner).await,
+        None => autoselect(inner).await,
     }
-    probe_loop(inner).await;
+}
+
+/// ENG-103: the engine to open on at startup: the pinned default (ENG-116), else the last-used
+/// one. Each must exist, be enabled, not hidden, and contactable; otherwise `None` and the
+/// caller auto-selects. A candidate that is merely down is still returned (it shows *Failed*
+/// with Retry rather than silently opening another engine).
+pub(crate) fn startup_engine(inner: &HubInner) -> Option<EngineId> {
+    let usable = |id: &EngineId| {
+        lock(&inner.reg)
+            .get(id)
+            .is_some_and(|e| e.config.enabled && !e.config.hidden && e.contactable())
+    };
+    inner
+        .default_engine()
+        .filter(&usable)
+        .or_else(|| inner.ui_state().last_engine.filter(&usable))
 }
 
 /// Runs every factory's discovery in parallel (3 s each) and merges the result (ENG-009).

@@ -34,7 +34,7 @@ pub struct EngineConfig {
 
 ## 2. Discovery (ENG-001…ENG-010)
 
-The hub runs discovery at startup and when the user clicks **Rescan** in the engine switcher.
+The hub runs discovery once at startup and again only on an explicit **Rescan** (Settings → Engines, the command palette, or the first-run screen; ENG-113).
 Discovery runs on the hub runtime, in parallel, with a 3 s timeout per probe. Discovered
 engines are merged with manual engines by `id`. Manual entries win. A discovered engine that
 disappears stays listed as *unavailable* until the user removes it or it reappears.
@@ -52,11 +52,11 @@ disappears stays listed as *unavailable* until the user removes it or it reappea
 
 Transport selection for WSLC (ENG-013) is specified in §5.3.
 
-**De-duplication (ENG-009).** Discovery first de-duplicates by canonical endpoint string (for example, a context that points at
-the default socket). After the first successful connect, engines are de-duplicated by **daemon identity**
-(`/info.ID`). A WSL distro whose `docker` is Docker Desktop's WSL integration reaches the same daemon as
-`\.\pipe\docker_engine` (spike F-4), so it's merged into the existing engine. The tooltip lists "also reachable via: Ubuntu-22.04".
-The user can un-merge it in Settings.
+**De-duplication (ENG-009, revised 2026-10-04).** Discovery de-duplicates by canonical endpoint string (for example, a context that points at
+the default socket). After a successful connect the hub learns the **daemon identity** (`/info.ID`). Engines that share one are **annotated, never hidden** (ENG-114):
+each lists the others as "Same daemon as: …" (for example, a WSL distro with Docker Desktop's WSL integration, spike F-4, or Docker Desktop's two pipes
+`\\.\pipe\docker_engine` and `\\.\pipe\dockerDesktopLinuxEngine`, which report the same ID). The earlier behaviour (hide the lower-ranked engine as *merged*, plus an *Un-merge* setting)
+made an engine vanish as soon as another engine became active, and a rescan didn't bring it back.
 
 **Unsupported endpoints (ENG-010).** Docker contexts with `ssh://` hosts, and engines with API < 1.41, are listed
 greyed out as *unsupported* with the reason. They're never silently dropped.

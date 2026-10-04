@@ -640,6 +640,27 @@ impl AppShell {
         self.hub_call(s::START_AND_CONNECT, call, window, cx);
     }
 
+    fn on_set_active_default(
+        &mut self,
+        _: &SetActiveEngineDefault,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(status) = self.engines.read(cx).active().cloned() else {
+            return;
+        };
+        if !crate::state::can_be_default(&status) {
+            notify::info(
+                window,
+                cx,
+                s::default_engine_unavailable(&status.config.name),
+            );
+            return;
+        }
+        AppState::pin_default(cx, &status);
+        notify::success(window, cx, s::default_engine_set(&status.config.name));
+    }
+
     fn on_rescan(&mut self, _: &Rescan, window: &mut Window, cx: &mut Context<Self>) {
         let call = AppState::hub(cx).rescan();
         self.hub_call(s::RESCAN, call, window, cx);
@@ -1931,6 +1952,7 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_retry))
             .on_action(cx.listener(Self::on_start_engine))
             .on_action(cx.listener(Self::on_rescan))
+            .on_action(cx.listener(Self::on_set_active_default))
             .on_action(cx.listener(Self::on_engine_switcher))
             .on_action(cx.listener(Self::on_command_palette))
             .on_action(cx.listener(Self::on_shortcuts))
