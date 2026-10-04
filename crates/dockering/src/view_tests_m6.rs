@@ -402,6 +402,8 @@ fn img_005_run_dialog_runs_and_navigates(cx: &mut TestAppContext) {
     h.press(cx, "tab");
     h.type_text(cx, "fast");
     cx.update(|cx| dialog.update(cx, |d, cx| d.set_auto_remove(true, cx)));
+    // Navigation need not wait for the container-list refresh (IMG-005, NFR-002).
+    h.engine.set_latency(std::time::Duration::from_millis(100));
     h.engine.clear_calls();
     h.press(cx, "secondary-enter");
     h.wait_until(cx, "run_image called", |_, _| {
@@ -411,13 +413,15 @@ fn img_005_run_dialog_runs_and_navigates(cx: &mut TestAppContext) {
     h.wait_until(cx, "navigated to container detail", |_, cx| {
         matches!(h.shell.read(cx).route(), Route::ContainerDetail { .. })
     });
-    let created = cx.read(|cx| {
-        h.shell.read(cx).store().and_then(|s| {
+    let mut created = None;
+    h.wait_until(cx, "the new container is listed", |_, cx| {
+        created = h.shell.read(cx).store().and_then(|s| {
             s.read(cx)
                 .containers
                 .data()
                 .and_then(|d| d.iter().find(|c| c.name == "cache").cloned())
-        })
+        });
+        created.is_some()
     });
     let c = created.expect("the new container is listed");
     assert_eq!(c.ports.len(), 1);

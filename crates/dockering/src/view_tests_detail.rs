@@ -89,10 +89,15 @@ fn cdt_002_tab_in_route_and_back_forward_keep_tab(cx: &mut TestAppContext) {
     let same = detail_page(&h, cx).is_some_and(|p| p == page);
     assert!(same, "tab switches keep the page entity");
     // Back leaves the detail page (tab switches don't add history) and Forward restores
-    // the tab that was showing.
-    h.press(cx, "alt-left");
+    // the tab that was showing. Use the platform's bindings (KBD-009/027).
+    let (back, forward) = if cfg!(target_os = "macos") {
+        ("cmd-[", "cmd-]")
+    } else {
+        ("alt-left", "alt-right")
+    };
+    h.press(cx, back);
     assert_eq!(route(&h, cx), Route::Containers);
-    h.press(cx, "alt-right");
+    h.press(cx, forward);
     assert_eq!(
         route(&h, cx),
         Route::ContainerDetail {
