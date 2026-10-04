@@ -4,7 +4,7 @@
 # The first version is submitted manually (packaging/winget/README.md); this workflow only updates
 # the existing `PavelPurma.Dockering` package.
 # Setup: fork microsoft/winget-pkgs under the maintainer's account, store a classic PAT with the
-# `public_repo` scope as the secret WINGET_TOKEN, and set the repo variable WINGET_ENABLED=true.
+# `public_repo` scope as the secret WINGET_TOKEN, and set PUBLIC_RELEASES=true (signed channel) and WINGET_ENABLED=true.
 name: winget
 
 on:
@@ -23,10 +23,28 @@ permissions:
 jobs:
   publish:
     name: winget-pkgs PR
-    if: vars.WINGET_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
+    if: vars.PUBLIC_RELEASES == 'true' && vars.WINGET_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
     runs-on: windows-latest
     steps:
+      - name: Require a published signed stable release
+        id: eligibility
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          $text = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $release = $text | ConvertFrom-Json
+          $signed = @($release.assets | Where-Object { $_.name -eq 'dockering-update.json.minisig' }).Count -eq 1
+          if ($release.isDraft -or $release.isPrerelease -or -not $signed) {
+            Write-Host '::notice::winget requires a published stable release with a signed update manifest'
+            'eligible=false' >> $env:GITHUB_OUTPUT
+          } else {
+            'eligible=true' >> $env:GITHUB_OUTPUT
+          }
       - uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
+        if: steps.eligibility.outputs.eligible == 'true'
         with:
           identifier: PavelPurma.Dockering
           installers-regex: 'Dockering-Setup-(x64|arm64)\.exe$'

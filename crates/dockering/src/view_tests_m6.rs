@@ -1014,6 +1014,14 @@ fn net_002_delete_custom_network_needs_network_mgmt(cx: &mut TestAppContext) {
 fn net_004_prune_unused_networks(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     let _page = networks_page(&h, cx);
+    // Collections and engine info load independently; rows can precede capabilities.
+    h.wait_until(cx, "network management capability", |_, cx| {
+        h.shell.read(cx).store().is_some_and(|s| {
+            s.read(cx)
+                .capabilities()
+                .contains(Capabilities::NETWORK_MGMT)
+        })
+    });
     h.update(cx, |_, window, cx| {
         window.dispatch_action(Box::new(crate::actions::list::Prune), cx)
     });

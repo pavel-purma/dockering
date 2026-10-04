@@ -27,6 +27,8 @@ commands:
                                       cargo build --release + package
   update-manifest --assets <dir> --version <semver> [--repo <owner/name>] [--out <file>]
                                       write dockering-update.json from release assets (UPD-002)
+  verify-assets --assets <dir> [--target <triple>]
+                                      require every nonempty distribution package (REL-017)
   sign-manifest <file>                minisign-sign <file> with $UPDATE_SIGNING_KEY (UPD-003)
   gen-update-keys <dir>               generate the current + next updater key pairs (UPD-003)
   checksums <dir>                     write <dir>/SHA256SUMS (REL-012)";
@@ -46,6 +48,7 @@ fn main() -> anyhow::Result<()> {
         "dist" => package::run_dist(rest),
         "wslc-abi-check" => wslc_abi::run(rest),
         "update-manifest" => release::run_update_manifest(rest),
+        "verify-assets" => release::run_verify_assets(rest),
         "sign-manifest" => release::run_sign_manifest(rest),
         "gen-update-keys" => release::run_gen_update_keys(rest),
         "checksums" => release::run_checksums(rest),

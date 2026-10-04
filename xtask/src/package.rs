@@ -3,7 +3,7 @@
 //! `package` turns an already-built release binary into the per-OS artifacts:
 //! - Windows: Inno Setup installer `Dockering-Setup-<x64|arm64>.exe` (REL-020; format `inno`,
 //!   built by `ISCC.exe` from `packaging/windows/dockering.iss`), plus a portable `.zip`
-//! - macOS: `.dmg` with `Dockering.app`
+//! - macOS: `.dmg` with `Dockering.app` (`run_packager` re-runs a DMG whose image won't eject)
 //! - Linux: `.deb`, `.AppImage`, plus a portable `.tar.gz`
 //!
 //! Every shipped artifact gets a stable, version-less name (REL-012), so
@@ -36,6 +36,10 @@ const ISCC_ENV: &str = "ISCC";
 /// Inno `SignTool` command (passed as `/Ssigntool=<value>`), e.g. `signtool sign /fd sha256 … $f`.
 /// When set, ISCC signs the setup and the uninstaller it embeds.
 const INNO_SIGNTOOL_ENV: &str = "DOCKERING_INNO_SIGNTOOL";
+/// `productName` in `packaging/packager.toml`; create-dmg names its temporary volume after it.
+const PRODUCT: &str = "Dockering";
+/// Runs of cargo-packager allowed for a DMG that fails to eject its disk image (`run_packager`).
+const DMG_ATTEMPTS: u32 = 3;
 
 const VALUE_OPTS: &[&str] = &["--target", "--formats"];
 const FLAG_OPTS: &[&str] = &["--no-archive"];
@@ -226,7 +230,7 @@ fn package(opts: &Options) -> anyhow::Result<()> {
             .arg(&out_dir)
             .args(["--target", &opts.triple])
             .args(["--formats", &packager_formats.join(",")]);
-        run_cmd(&mut cmd)?;
+        run_packager(&mut cmd, os)?;
         rename_packager_outputs(&out_dir, &opts.triple, &meta.version)?;
     }
 
@@ -248,6 +252,59 @@ fn ensure_packager() -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Runs cargo-packager. On macOS a DMG build now and then fails because create-dmg can't eject
+/// its temporary disk image (`hdiutil: couldn't eject "disk4" - Resource busy`; seen on the Intel
+/// runner). The script retries the eject for ~6 s only, and cargo-packager 0.11.8 pins that
+/// script version. So when a failed run left the volume mounted, force-detach it and build again.
+/// Any other failure is returned as is: a signing or notarisation error leaves no volume
+/// mounted, so it is never repeated.
+fn run_packager(cmd: &mut Command, os: TargetOs) -> anyhow::Result<()> {
+    retry(
+        DMG_ATTEMPTS,
+        || run_cmd(cmd),
+        || os == TargetOs::MacOs && detach_dmg_volume(),
+    )
+}
+
+/// Runs `run`. While it fails and `recover` says another run is worth it, runs it again, up to
+/// `attempts` runs in all. `recover` isn't asked after the last run. Returns the last result.
+fn retry(
+    attempts: u32,
+    mut run: impl FnMut() -> anyhow::Result<()>,
+    mut recover: impl FnMut() -> bool,
+) -> anyhow::Result<()> {
+    let mut attempt = 1;
+    loop {
+        let err = match run() {
+            Ok(()) => return Ok(()),
+            Err(err) => err,
+        };
+        if attempt >= attempts || !recover() {
+            return Err(err);
+        }
+        attempt += 1;
+        eprintln!("xtask: {err:#}\nxtask: running it again (attempt {attempt} of {attempts})");
+    }
+}
+
+/// Force-detaches the volume create-dmg leaves mounted when it can't eject its temporary image.
+/// `true` if there was one and it is gone, so the next run starts clean.
+fn detach_dmg_volume() -> bool {
+    let mount = Path::new("/Volumes").join(PRODUCT);
+    if !mount.is_dir() {
+        return false;
+    }
+    eprintln!(
+        "xtask: detaching {}, left mounted by create-dmg",
+        mount.display()
+    );
+    Command::new("hdiutil")
+        .args(["detach", "-force"])
+        .arg(&mount)
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Adds the build-specific keys to the hand-written config. Top-level keys go first so they
@@ -638,5 +695,62 @@ mod tests {
             Some("Developer ID Application: X"),
         )
         .unwrap();
+    }
+
+    /// create-dmg mounts its image at `/Volumes/<productName>`; `detach_dmg_volume` looks there.
+    #[test]
+    fn dmg_volume_name_is_the_product_name() {
+        let base = fs::read_to_string(workspace_root().join(CONFIG)).unwrap();
+        let line = format!("productName = \"{PRODUCT}\"");
+        assert!(
+            base.lines().any(|l| l.trim() == line),
+            "{CONFIG} must contain `{line}`; update PRODUCT with it"
+        );
+    }
+
+    /// Runs `retry` over a run that succeeds on its `ok_on`-th call (never if 0). Returns the
+    /// result, the number of runs, and the number of times `recover` was asked.
+    fn drive(attempts: u32, ok_on: u32, recoverable: bool) -> (anyhow::Result<()>, u32, u32) {
+        let (mut runs, mut recoveries) = (0, 0);
+        let result = retry(
+            attempts,
+            || {
+                runs += 1;
+                if runs == ok_on {
+                    Ok(())
+                } else {
+                    bail!("run {runs} failed")
+                }
+            },
+            || {
+                recoveries += 1;
+                recoverable
+            },
+        );
+        (result, runs, recoveries)
+    }
+
+    #[test]
+    fn failed_dmg_run_is_repeated_only_after_recovery_and_only_so_often() {
+        // Success first time: nothing to recover from.
+        let (result, runs, recoveries) = drive(3, 1, true);
+        assert!(result.is_ok());
+        assert_eq!((runs, recoveries), (1, 0));
+
+        // One failure, recovered: the second run succeeds.
+        let (result, runs, recoveries) = drive(3, 2, true);
+        assert!(result.is_ok());
+        assert_eq!((runs, recoveries), (2, 1));
+
+        // Always fails: gives up after `attempts` runs, asks for recovery between runs only,
+        // and reports the last failure.
+        let (result, runs, recoveries) = drive(3, 0, true);
+        assert_eq!(result.unwrap_err().to_string(), "run 3 failed");
+        assert_eq!((runs, recoveries), (3, 2));
+
+        // Nothing to recover (no volume left mounted): the first failure is final.
+        let (result, runs, recoveries) = drive(3, 0, false);
+        assert_eq!(result.unwrap_err().to_string(), "run 1 failed");
+        assert_eq!((runs, recoveries), (1, 1));
     }
 }
