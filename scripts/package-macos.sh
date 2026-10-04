@@ -10,7 +10,8 @@ fi
 target=$1
 log=$(mktemp "${TMPDIR:-/tmp}/dockering-package.XXXXXX")
 mounts=$(mktemp "${TMPDIR:-/tmp}/dockering-mounts.XXXXXX")
-trap 'rm -f "$log" "$mounts"' EXIT
+devices=$(mktemp "${TMPDIR:-/tmp}/dockering-devices.XXXXXX")
+trap 'rm -f "$log" "$mounts" "$devices"' EXIT
 
 for attempt in 1 2 3; do
   set +e
@@ -23,7 +24,8 @@ for attempt in 1 2 3; do
   fi
   # If inspection, path verification, or cleanup cannot prove safety, preserve the cargo failure.
   if ! hdiutil info -plist > "$mounts"; then exit "$result"; fi
-  if ! devices=$(python3 - "target/dist/$target" "$mounts" "$log" <<'PY'
+  # macOS /bin/bash is 3.2: keep the quoted Python heredoc outside command substitution.
+  if ! python3 - "target/dist/$target" "$mounts" "$log" > "$devices" <<'PY'
 import os
 import plistlib
 import re
@@ -48,13 +50,13 @@ for image in images:
             verified.add('/dev/' + match[1])
 if not verified:
     raise SystemExit('No reported busy DMG disk has an image inside the target distribution directory; refusing cleanup')
-print('\n'.join(sorted(verified)))
+sys.stdout.buffer.write(('\n'.join(sorted(verified)) + '\n').encode('ascii'))
 PY
-  ); then
+  then
     exit "$result"
   fi
   while IFS= read -r device; do
     echo "Detaching verified busy release image $device before package retry ($attempt/3)"
     if ! hdiutil detach "$device" -force; then exit "$result"; fi
-  done <<< "$devices"
+  done < "$devices"
 done
