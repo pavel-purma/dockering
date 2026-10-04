@@ -36,6 +36,8 @@ jobs:
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
+      - name: macOS packaging recovery tests (REL-017)
+        run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Linux prerequisites (GPUI Kit)
         run: bash scripts/bootstrap.sh
       - uses: dtolnay/rust-toolchain@master
@@ -183,8 +185,12 @@ jobs:
             choco install innosetup --version 6.7.1 -y --no-progress
           }
       - name: cargo xtask package
-        if: github.event_name != 'pull_request' || runner.os == 'Windows'
+        if: runner.os != 'macOS' && (github.event_name != 'pull_request' || runner.os == 'Windows')
         run: cargo xtask package --target ${{ matrix.target }}
+      - name: Package macOS (bounded retry for busy DMG unmount)
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        shell: bash
+        run: bash scripts/package-macos.sh "${{ matrix.target }}"
       - name: Silent install / uninstall, per user and all users (REL-014)
         if: runner.os == 'Windows'
         shell: pwsh
