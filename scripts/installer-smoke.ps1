@@ -1,7 +1,7 @@
-# Installer smoke test (REL-014, REL-021, REL-025, REL-027).
+# Installer smoke test (REL-014, REL-021, REL-025, REL-027, REL-028).
 # Usage: pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup <Dockering-Setup-x64.exe> -Version <semver> [-AllUsers]
-# Silent install → files, version, uninstall entry, Start Menu shortcut → reinstall (repair) → silent
-# uninstall → nothing left. -AllUsers needs an elevated shell (CI runners are).
+# Silent install → files, GUI subsystem, version, uninstall entry, Start Menu shortcut → reinstall
+# (repair) → silent uninstall → nothing left. -AllUsers needs an elevated shell (CI runners are).
 param(
     [Parameter(Mandatory)] [string] $Setup,
     [Parameter(Mandatory)] [string] $Version,
@@ -29,6 +29,16 @@ function Fail([string] $message) {
     exit 1
 }
 
+function Get-PeSubsystem([string] $Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $reader = [IO.BinaryReader]::new($stream)
+        $stream.Position = 0x3C
+        $stream.Position = $reader.ReadInt32() + 4 + 20 + 68
+        return $reader.ReadUInt16()
+    } finally { $stream.Dispose() }
+}
+
 function Install([string] $what) {
     $p = Start-Process (Resolve-Path $Setup) -ArgumentList ($silent + $scope) -Wait -PassThru
     if ($p.ExitCode -ne 0) { Fail "$what exited with $($p.ExitCode)" }
@@ -38,8 +48,13 @@ Install 'install'
 foreach ($f in 'dockering.exe', 'LICENSE', 'THIRD_PARTY_LICENSES.html', 'unins000.exe') {
     if (-not (Test-Path (Join-Path $dir $f))) { Fail "missing $f in $dir" }
 }
-$reported = & (Join-Path $dir 'dockering.exe') --version
-if ($reported -ne "dockering $Version") { Fail "--version printed '$reported', expected 'dockering $Version'" }
+$subsystem = Get-PeSubsystem (Join-Path $dir 'dockering.exe')
+if ($subsystem -ne 2) { Fail "dockering.exe has PE subsystem $subsystem, expected 2 (Windows GUI, no console window)" }
+$versionOut = Join-Path ([IO.Path]::GetTempPath()) "dockering-version-$PID.txt"
+$p = Start-Process (Join-Path $dir 'dockering.exe') -ArgumentList '--version' -Wait -PassThru -NoNewWindow -RedirectStandardOutput $versionOut
+$reported = if (Test-Path $versionOut) { (Get-Content $versionOut -Raw).Trim() } else { '' }
+Remove-Item $versionOut -ErrorAction SilentlyContinue
+if ($p.ExitCode -ne 0 -or $reported -ne "dockering $Version") { Fail "--version exited $($p.ExitCode) and printed '$reported', expected 'dockering $Version'" }
 $info = (Get-Item (Join-Path $dir 'dockering.exe')).VersionInfo
 if ($info.ProductVersion -ne $Version -or $info.ProductName -ne 'Dockering') {
     Fail "VERSIONINFO is '$($info.ProductName) $($info.ProductVersion)'"
