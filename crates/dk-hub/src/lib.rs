@@ -3,6 +3,7 @@
 
 pub mod bridge;
 pub mod config;
+pub mod console;
 mod events;
 mod handle;
 mod hub;

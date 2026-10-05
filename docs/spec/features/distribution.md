@@ -31,7 +31,7 @@ does not enable those features. See [the first-release plan](../../plan/features
 | REL-016 | **Explicit unsigned releases.** The maintainer MAY publish an unsigned stable or prerelease after approval. `workflow_dispatch` MUST offer an unsigned option defaulting to true; tag builds default to unsigned while `PUBLIC_RELEASES` is not true. Unsigned mode MUST bypass all signing and notarization even if secrets exist, disable the updater, and label release notes with installation limitations. All tag builds MUST create drafts; publication is a separate maintainer action. |
 | REL-017 | **Complete assets.** Before assembling a release or review bundle, the workflow MUST require all 12 distribution files named in REL-012, reject missing or empty files, and reject duplicate names while collecting matrix artifacts. Per-target packaging MUST validate its expected files before uploading. The bundle MUST include `dockering-update.json`, `SHA256SUMS`, and release notes; `.minisig` is omitted in unsigned mode. |
 
-## 2. Windows installer (REL-020…027)
+## 2. Windows installer (REL-020…028)
 
 | ID | Requirement |
 |---|---|
@@ -43,6 +43,7 @@ does not enable those features. See [the first-release plan](../../plan/features
 | REL-025 | **Silent mode** (winget, updater, CI): `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` exits 0 without UI. Silent uninstall leaves no files in the install dir and no *Installed apps* entry. |
 | REL-026 | **Portable zip** (`Dockering-<arch>.zip`): `dockering.exe` plus licence files. It runs without installation and is detected as *portable* (UPD-006). |
 | REL-027 | **Executable resources.** `dockering.exe` embeds the app icon as icon resource **ID 1** (GPUI's Windows backend loads resource 1 as the window and taskbar icon) and a `VERSIONINFO`: `ProductName`/`FileDescription` "Dockering", `CompanyName`, `LegalCopyright`, `OriginalFilename`, and `FileVersion`/`ProductVersion` from the workspace version. |
+| REL-028 | **No console window.** Release builds of `dockering.exe` on Windows MUST be GUI-subsystem executables (`windows_subsystem = "windows"` when `debug_assertions` is off), so starting the app from Explorer, the Start Menu, a shortcut, or the installer's *Launch Dockering* opens only the app window. Debug builds stay console executables, where `cargo run` shows the log (10 §8). Output meant for a terminal (`--version`, startup errors) attaches to the launching terminal's console on demand (`dk_hub::console`); with no terminal it is dropped, and a missing or closed stdout/stderr never panics. A GUI process has no console to inherit, so every console program the app runs in the background (`wsl.exe`, `wslc.exe`, Docker credential helpers) MUST set `CREATE_NO_WINDOW`, or it would open its own window. Two launches are exempt: the external terminal (TRM-009, its window is the point) and the installer the updater starts detached (UPD-007, a GUI program). A shell doesn't wait for a GUI-subsystem program, so `$v = dockering --version` captures nothing in PowerShell; `dockering --version | Out-String`, `cmd /c`, and `Start-Process -Wait -RedirectStandardOutput` work. `installer-smoke.ps1` asserts that the installed `dockering.exe` has the GUI subsystem. |
 
 ## 3. Code signing (REL-030…032)
 
@@ -112,6 +113,7 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 | REL-012 | `xtask` `rel_012_stable_asset_names_per_target`, `rel_012_versions_validated` |
 | REL-014, 020…026 | `scripts/installer-smoke.ps1` in CI `build` and release `package` jobs: per-user and `/ALLUSERS` install/uninstall for native Windows x64 and ARM64; [exact-commit CI](https://github.com/pavel-purma/dockering/actions/runs/37228704953). Real-machine GUI/update walkthrough remains unverified. |
 | REL-027 | `installer-smoke.ps1` VERSIONINFO check |
+| REL-028 | `rel_028_attach_is_best_effort_and_repeatable`; `installer-smoke.ps1` asserts PE subsystem = GUI and runs `--version` through `Start-Process -Wait -RedirectStandardOutput` (the check fails on the v0.1.0 binary, checked locally). Local launch checks (Windows 11 x64), release build: no console or terminal window in 12 s of `--demo` and 30 s of real startup (only the hidden `wsl.exe` probe runs, with `CREATE_NO_WINDOW`), against v0.1.0, which opens a Windows Terminal window on every launch; `--version` shows in PowerShell and `cmd.exe` and survives a closed pipe (0 of 15 panics, 15 of 15 for v0.1.0). |
 | REL-030…032 | `release.yml` signing conditions, "Verify Windows signatures", and signed-channel stable guard; downloaded x64/ARM64 setup and portable executables report `NotSigned` as required for REL-016. Live signing-provider verification is deferred. |
 | REL-050 | `xtask` `rel_050_ico_header_lists_all_sizes`; CI `cargo xtask icons --check` |
 | UPD-001 | `upd_001_asset_url_pinned_to_repo_and_version`, `upd_010_only_github_hosts` |

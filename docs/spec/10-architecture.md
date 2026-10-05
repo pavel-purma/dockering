@@ -298,5 +298,6 @@ file and rename. The schema is versioned (`version = 1`) with forward-compatible
 - `tracing` spans per engine call: `engine.call{engine=…, op=list_containers}` with duration.
 - On Windows, an unavailable optional DirectX debug layer produces one warning with the cause and continues with normal rendering. Failures to create the graphics factory or device still propagate as errors.
 - The level is set by `RUST_LOG` or by a Settings → Diagnostics toggle (info/debug).
+- Debug builds also log to stderr. Release builds on Windows are GUI-subsystem executables with no console (REL-028), so the log file is their only output, and a crash leaves `crash-<timestamp>.txt` next to `state.json`.
 - Settings → Diagnostics → "Open logs folder" and "Copy diagnostics". The second copies version, OS, engines, and capability matrix to the clipboard.
 - Secrets are never logged: registry auth, TLS keys, and env values from inspect.

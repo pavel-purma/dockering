@@ -21,7 +21,7 @@ checks unchecked.
 - [x] All 15 files pass `gh attestation verify` with the exact source digest, tag ref, release workflow signer, and self-hosted runners denied.
 - [x] Notes identify unsigned downloads, installation prompts, disabled updater, and unavailable winget.
 - [x] Native Windows x64/ARM64 CI installer tests pass for per-user and `/ALLUSERS`; real-machine GUI installation/update checks are not performed.
-- [ ] Available Windows machine: launch, version, shortcut, Docker connection, and uninstall.
+- [ ] Available Windows machine: launch (only the app window, no console window, REL-028), version, shortcut, Docker connection, and uninstall.
 - [ ] Available macOS machine: mount DMG, copy/launch app, and Docker-compatible connection.
 - [ ] Available Linux machine: launch AppImage/tar archive, install `.deb`, and Docker connection.
 - [ ] Application sanity on available machines: containers, detail/logs, terminal, one lifecycle

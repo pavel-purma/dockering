@@ -1,6 +1,9 @@
 //! Dockering app binary: process bootstrap (spec 10 §7). Everything here runs before the first
 //! window opens, so the blocking calls below are allowed (NFR-001 startup exception).
 
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+use std::io::Write;
 use std::process::ExitCode; // nfr-001-allow: exit-code type only, no process I/O
 use std::sync::Arc;
 
@@ -28,14 +31,25 @@ fn parse_args() -> Args {
     args
 }
 
+fn say(out: &mut impl Write, line: &str) {
+    dk_hub::console::attach_parent_console();
+    let _ = writeln!(out, "{line}");
+}
+
 fn main() -> ExitCode {
     let args = parse_args();
     if args.version {
-        println!("dockering {}", env!("CARGO_PKG_VERSION"));
+        say(
+            &mut std::io::stdout(),
+            &format!("dockering {}", env!("CARGO_PKG_VERSION")),
+        );
         return ExitCode::SUCCESS;
     }
     if args.demo && !cfg!(feature = "demo") {
-        eprintln!("dockering: this build has no demo support (feature `demo` disabled)");
+        say(
+            &mut std::io::stderr(),
+            "dockering: this build has no demo support (feature `demo` disabled)",
+        );
         return ExitCode::FAILURE;
     }
 
@@ -47,7 +61,10 @@ fn main() -> ExitCode {
         match Paths::for_user() {
             Some(paths) => paths,
             None => {
-                eprintln!("dockering: cannot determine the user's home directory");
+                say(
+                    &mut std::io::stderr(),
+                    "dockering: cannot determine the user's home directory",
+                );
                 return ExitCode::FAILURE;
             }
         }
@@ -94,7 +111,10 @@ fn main() -> ExitCode {
         Ok(hub) => hub,
         Err(err) => {
             tracing::error!(%err, "failed to start the engine hub");
-            eprintln!("dockering: failed to start the engine hub: {err}");
+            say(
+                &mut std::io::stderr(),
+                &format!("dockering: failed to start the engine hub: {err}"),
+            );
             return ExitCode::FAILURE;
         }
     };
