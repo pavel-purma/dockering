@@ -17,6 +17,123 @@ fn calls(h: &crate::testing::Harness, op: &str) -> Vec<String> {
     h.engine.calls_to(op).into_iter().map(|c| c.arg).collect()
 }
 
+#[gpui_kit::test]
+fn eng_136_metadata_without_flags_preserves_focus_page_and_updates_stats(cx: &mut TestAppContext) {
+    use crate::state::EngineListEvent;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut setup = Setup::default();
+    setup.config.containers.show_cpu_mem_columns = true;
+    let h = start(cx, setup);
+    let page = h.wait_containers(cx);
+    h.wait_until(cx, "info and list stats", |_, cx| {
+        page.read(cx).stats_subscription_count() > 0
+            && h.shell.read(cx).store().unwrap().read(cx).info().is_some()
+    });
+    h.focus_table(cx);
+    h.select_row(cx, &id_of("redis"));
+    let (store, list, mut status, focus) = h.read(cx, |s, window, cx| {
+        (
+            s.store().unwrap().clone(),
+            s.engines().clone(),
+            s.engines().read(cx).active().unwrap().clone(),
+            window.focused(cx).unwrap(),
+        )
+    });
+    let caps = status.capabilities();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let captured = events.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&list, move |_, event: &EngineListEvent, _| {
+            captured.borrow_mut().push(event.clone());
+        })
+    });
+    let initial_subscriptions = cx.read(|cx| page.read(cx).stats_subscription_count());
+    status.info.as_mut().unwrap().transport_note =
+        Some("COM primary; Run uses CLI — native Run unverified".into());
+    let note_only = status.info.clone().unwrap();
+    cx.update(|cx| {
+        list.update(cx, |s, cx| {
+            s.apply_test_event(dk_hub::HubEvent::StatusChanged(status.clone()), cx)
+        })
+    });
+    h.wait_until(cx, "note-only snapshot applied", |_, cx| {
+        store.read(cx).info() == Some(&note_only)
+    });
+    assert_eq!(
+        cx.read(|cx| page.read(cx).stats_subscription_count()),
+        initial_subscriptions
+    );
+    assert!(h.is_focused(cx, &focus));
+    assert!(h.read(cx, |s, _, _| s.store() == Some(&store)
+        && s.containers_page() == Some(&page)));
+    events.borrow_mut().clear();
+    // An older info request returns the fake's original metadata. It must not undo
+    // the authoritative status snapshot arriving while that request is in flight.
+    h.engine.set_latency(std::time::Duration::from_millis(150));
+    h.engine.clear_calls();
+    cx.update(|cx| store.update(cx, |s, cx| s.fetch_info(cx)));
+    h.wait_until(cx, "older info call started", |_, _| {
+        !h.engine.calls_to("info").is_empty()
+    });
+    let note = "COM primary; stats uses CLI — transport unavailable";
+    let info = status.info.as_mut().unwrap();
+    info.transport = Some("com".into());
+    info.transport_note = Some(note.into());
+    info.list_stats_limit = 0;
+    let expected = info.clone();
+    cx.update(|cx| {
+        list.update(cx, |s, cx| {
+            s.apply_test_event(dk_hub::HubEvent::StatusChanged(status.clone()), cx)
+        })
+    });
+    h.wait_until(cx, "metadata applied and stats cancelled", |_, cx| {
+        store.read(cx).info() == Some(&expected)
+            && page.read(cx).stats_subscription_count() == 0
+            && !page.read(cx).table().read(cx).delegate(cx).show_stats
+    });
+    // Pump past the delayed call without relying on a UI-thread sleep.
+    h.engine.set_latency(std::time::Duration::ZERO);
+    let started = std::time::Instant::now();
+    h.wait_until(cx, "older info call completed", |_, _| {
+        started.elapsed() >= std::time::Duration::from_millis(200)
+    });
+    assert_eq!(cx.read(|cx| store.read(cx).info().cloned()), Some(expected));
+    assert_eq!(cx.read(|cx| store.read(cx).capabilities()), caps);
+    assert_eq!(h.cursor_key(cx), Some(id_of("redis")));
+    assert!(h.is_focused(cx, &focus));
+    assert!(h.read(cx, |s, _, _| s.store() == Some(&store)
+        && s.containers_page() == Some(&page)));
+    assert_eq!(
+        &*events.borrow(),
+        &[EngineListEvent::InfoChanged(status.id().clone())]
+    );
+    assert_eq!(
+        h.engine.calls_to("info").len(),
+        1,
+        "snapshot application does not refetch info"
+    );
+    assert!(
+        h.engine.calls_to("list_containers").is_empty(),
+        "metadata is not a reconnect"
+    );
+    // The same local path carries a nonzero limit: subscription budget changes with
+    // identical capability flags, not an EngineKind branch.
+    status.info.as_mut().unwrap().list_stats_limit = 1;
+    cx.update(|cx| {
+        list.update(cx, |s, cx| {
+            s.apply_test_event(dk_hub::HubEvent::StatusChanged(status), cx)
+        })
+    });
+    h.wait_until(cx, "one list stats subscription", |_, cx| {
+        page.read(cx).stats_subscription_count() == 1
+            && page.read(cx).table().read(cx).delegate(cx).show_stats
+    });
+    assert!(h.is_focused(cx, &focus));
+    h.shutdown();
+}
+
 // ── four states ──────────────────────────────────────────────────────────────────────
 
 #[gpui_kit::test]

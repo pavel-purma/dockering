@@ -23,13 +23,13 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 
 | Feature | File | Status |
 |---|---|---|
-| Engine connections & switching | [features/engines.md](features/engines.md) | implemented |
+| Engine connections & switching | [features/engines.md](features/engines.md) | implemented (2026-10-04 WSLC repair; cross-OS release gate open) |
 | Containers list & grouping | [features/containers.md](features/containers.md) | implemented |
-| Container detail | [features/container-detail.md](features/container-detail.md) | implemented |
+| Container detail | [features/container-detail.md](features/container-detail.md) | implemented (2026-10-04 WSLC inspect parity; cross-OS release gate open) |
 | Container logs | [features/container-logs.md](features/container-logs.md) | implemented |
 | Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | implemented |
 | Container stats & charts | [features/container-stats.md](features/container-stats.md) | implemented |
-| Images | [features/images.md](features/images.md) | implemented |
+| Images | [features/images.md](features/images.md) | implemented (2026-10-04 WSLC Run repair; cross-OS release gate open) |
 | Volumes | [features/volumes.md](features/volumes.md) | implemented |
 | Networks | [features/networks.md](features/networks.md) | implemented |
 | Settings | [features/settings.md](features/settings.md) | implemented |

@@ -235,6 +235,20 @@ impl EngineStore {
         }));
     }
 
+    /// Apply the hub's authoritative metadata without reconnecting/refetching collections.
+    /// Invalidate an older info call so it cannot undo a routing update (ENG-136, NFR-005).
+    pub fn apply_info(&mut self, info: EngineInfo, cx: &mut Context<Self>) {
+        self.revisions[4] += 1;
+        self.fetches[4] = None;
+        let caps_before = self.capabilities();
+        self.info.finish(Ok(info));
+        cx.emit(EngineStoreEvent::InfoChanged);
+        if self.capabilities() != caps_before {
+            self.subscribe(cx);
+        }
+        cx.notify();
+    }
+
     /// (Re)subscribes to engine events, or polls when events aren't available.
     pub fn subscribe(&mut self, cx: &mut Context<Self>) {
         let has_info = self.info.data().is_some();

@@ -549,11 +549,12 @@ impl AppShell {
                     store.update(cx, |s, cx| s.reconnected(cx));
                 }
             }
-            EngineListEvent::CapabilitiesChanged(id) => {
+            EngineListEvent::CapabilitiesChanged(id) | EngineListEvent::InfoChanged(id) => {
                 if let Some(store) = &self.store
                     && store.read(cx).engine_id() == id
+                    && let Some(info) = self.engines.read(cx).get(id).and_then(|s| s.info.clone())
                 {
-                    store.update(cx, |s, cx| s.fetch_info(cx));
+                    store.update(cx, |s, cx| s.apply_info(info, cx));
                 }
             }
         }

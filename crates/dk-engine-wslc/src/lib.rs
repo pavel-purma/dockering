@@ -5,8 +5,8 @@
 //!   (owner: `windows-platform` for `com/abi`, `com/ffi`, threading; ops may be shared).
 //! - `cli::WslcCliEngine` — fallback, `wslc.exe … --format json` (owner: `engine-integrator`).
 //!
-//! `WslcFactory` (ENG-008/013/109/110) detects WSL/WSLC without COM, picks the ABI module from
-//! the `wslservice.exe` version, self-checks, and falls back to the CLI.
+//! `WslcFactory` detects WSL/WSLC without COM and returns the private COM-first operation
+//! router (ENG-126). Forced preferences are strict; Auto prepares same-session CLI lazily.
 //! Windows-only code is behind `#[cfg(windows)]`; on other OSes discovery returns nothing.
 //!
 //! `unsafe` is allowed only under `src/com/` (ADR-0003).
@@ -14,6 +14,9 @@
 #![deny(unsafe_code)]
 
 pub mod cli;
+mod inspect;
+#[cfg(windows)]
+mod router;
 // ADR-0003: the COM transport (version-gated vtables, FFI, threading) is crate-private. Only
 // the in-process fake server and the contract/live tests see it, through feature
 // `test-support` (enabled by this crate's self dev-dependency).

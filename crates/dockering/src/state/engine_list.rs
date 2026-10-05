@@ -62,6 +62,8 @@ pub enum EngineListEvent {
     Reconnected(EngineId),
     /// Capabilities of an engine changed (transport switch).
     CapabilitiesChanged(EngineId),
+    /// Full metadata changed, including routing notes/limits with unchanged flags (ENG-136).
+    InfoChanged(EngineId),
 }
 
 impl EventEmitter<EngineListEvent> for EngineListStore {}
@@ -115,9 +117,7 @@ impl EngineListStore {
                     return;
                 }
                 if let Ok(list) = result {
-                    this.engines = list;
-                    this.loaded = true;
-                    this.set_active(active, cx);
+                    this.replace_snapshot(list, active, cx);
                     cx.notify();
                 }
             })
@@ -126,22 +126,26 @@ impl EngineListStore {
     }
 
     fn apply(&mut self, ev: HubEvent, cx: &mut Context<Self>) {
+        // A newer streamed update must not be overwritten by an in-flight resync.
+        self.revision += 1;
         match ev {
             HubEvent::Snapshot(list) => {
                 let active = list.iter().find(|s| s.active).map(|s| s.id().clone());
-                self.engines = list;
-                self.loaded = true;
-                self.set_active(active.or_else(|| self.hub.active_engine()), cx);
+                self.replace_snapshot(list, active.or_else(|| self.hub.active_engine()), cx);
             }
             HubEvent::Added(status) | HubEvent::StatusChanged(status) => {
                 let id = status.id().clone();
                 let active_now = status.active;
+                let info_changed = self.get(&id).map(|s| &s.info) != Some(&status.info);
                 match self.engines.iter_mut().find(|e| e.id() == &id) {
                     Some(slot) => *slot = status,
                     None => self.engines.push(status),
                 }
                 if active_now && self.active.as_ref() != Some(&id) {
-                    self.set_active(Some(id), cx);
+                    self.set_active(Some(id.clone()), cx);
+                }
+                if info_changed {
+                    cx.emit(EngineListEvent::InfoChanged(id));
                 }
             }
             HubEvent::Removed(id) => {
@@ -165,6 +169,30 @@ impl EngineListStore {
             HubEvent::Reconnected(id) => cx.emit(EngineListEvent::Reconnected(id)),
         }
         cx.notify();
+    }
+
+    fn replace_snapshot(
+        &mut self,
+        list: Vec<EngineStatus>,
+        active: Option<EngineId>,
+        cx: &mut Context<Self>,
+    ) {
+        let changed: Vec<_> = list
+            .iter()
+            .filter(|s| self.get(s.id()).map(|old| &old.info) != Some(&s.info))
+            .map(|s| s.id().clone())
+            .collect();
+        self.engines = list;
+        self.loaded = true;
+        self.set_active(active, cx);
+        for id in changed {
+            cx.emit(EngineListEvent::InfoChanged(id));
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_test_event(&mut self, ev: HubEvent, cx: &mut Context<Self>) {
+        self.apply(ev, cx);
     }
 
     fn set_active(&mut self, id: Option<EngineId>, cx: &mut Context<Self>) {

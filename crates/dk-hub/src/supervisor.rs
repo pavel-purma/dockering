@@ -28,6 +28,8 @@ pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const PING_INTERVAL: Duration = Duration::from_secs(10);
 pub(crate) const PING_TIMEOUT: Duration = Duration::from_secs(10);
+/// ENG-136: metadata refresh must not indefinitely delay active health supervision.
+pub(crate) const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Background probe interval for non-active engines (ENG-020); WSLC every other tick (60 s).
 pub(crate) const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -242,7 +244,13 @@ pub(crate) async fn supervise(
             }
         };
 
-        inner.set_state(&id, EngineState::Connecting);
+        {
+            let mut reg = lock(&inner.reg);
+            if token.is_cancelled() || !reg.is_active(&id) {
+                return;
+            }
+            reg.set_state(&id, EngineState::Connecting);
+        }
         let res = match pre.take() {
             Some(p) => Ok(p),
             None => tokio::select! {
@@ -257,16 +265,19 @@ pub(crate) async fn supervise(
                 tracing::info!(engine = %id, error = %e, failures, "engine connect failed");
                 let give_up = kind == Some(EngineKind::WslDistro) && failures >= WSL_MAX_FAILURES;
                 let delay = (!give_up).then(|| backoff_delay(failures - 1, rand::random()));
-                if token.is_cancelled() {
-                    return;
+                {
+                    let mut reg = lock(&inner.reg);
+                    if token.is_cancelled() || !reg.is_active(&id) {
+                        return;
+                    }
+                    reg.set_state(
+                        &id,
+                        EngineState::Failed {
+                            error: e,
+                            retry_in_ms: delay.map(|d| d.as_millis() as u64),
+                        },
+                    );
                 }
-                inner.set_state(
-                    &id,
-                    EngineState::Failed {
-                        error: e,
-                        retry_in_ms: delay.map(|d| d.as_millis() as u64),
-                    },
-                );
                 let manual = match delay {
                     Some(d) => tokio::select! {
                         _ = token.cancelled() => return,
@@ -287,7 +298,7 @@ pub(crate) async fn supervise(
                 let gen_ = inner.next_generation();
                 {
                     let mut reg = lock(&inner.reg);
-                    if token.is_cancelled() {
+                    if token.is_cancelled() || !reg.is_active(&id) {
                         return;
                     }
                     let daemon = info.daemon_id.clone();
@@ -309,13 +320,30 @@ pub(crate) async fn supervise(
                     }
                 }
                 tracing::info!(engine = %id, "engine connected");
-                let lost = ping_loop(&inner, &id, &engine, &token, &retry).await;
+                let conn = Conn {
+                    engine,
+                    token: conn_token.clone(),
+                    generation: gen_,
+                };
+                let lost = ping_loop(&inner, &id, &conn, &retry).await;
+                let lost_delay = backoff_delay(0, rand::random());
                 {
                     let mut reg = lock(&inner.reg);
-                    if let Some(e) = reg.get_mut(&id)
-                        && e.conn.as_ref().is_some_and(|c| c.generation == gen_)
-                    {
-                        e.conn = None;
+                    // Check and change state under the same lock: a late failure from the
+                    // previous connection must not mark its replacement Failed.
+                    if !reg.current_connection(&id, &conn) {
+                        conn_token.cancel();
+                        return;
+                    }
+                    reg.get_mut(&id).expect("current connection").conn = None;
+                    if let Lost::Failed(ref e) = lost {
+                        reg.set_state(
+                            &id,
+                            EngineState::Failed {
+                                error: e.clone(),
+                                retry_in_ms: Some(lost_delay.as_millis() as u64),
+                            },
+                        );
                     }
                 }
                 conn_token.cancel();
@@ -327,17 +355,9 @@ pub(crate) async fn supervise(
                         // WSL distros give up after 3, spec 20 §4.4).
                         failures = 1;
                         tracing::warn!(engine = %id, error = %e, "engine connection lost");
-                        let d = backoff_delay(0, rand::random());
-                        inner.set_state(
-                            &id,
-                            EngineState::Failed {
-                                error: e,
-                                retry_in_ms: Some(d.as_millis() as u64),
-                            },
-                        );
                         tokio::select! {
                             _ = token.cancelled() => return,
-                            _ = tokio::time::sleep(d) => {}
+                            _ = tokio::time::sleep(lost_delay) => {}
                             _ = retry.notified() => {}
                         }
                     }
@@ -355,14 +375,10 @@ async fn ping(engine: &Arc<dyn Engine>) -> EngineResult<()> {
 }
 
 /// Pings every 10 s; one failure → Degraded + immediate re-ping; two consecutive → lost.
-/// Detects capability changes (transport switches) on every ping.
-async fn ping_loop(
-    inner: &Arc<HubInner>,
-    id: &EngineId,
-    engine: &Arc<dyn Engine>,
-    token: &CancellationToken,
-    retry: &Notify,
-) -> Lost {
+/// Refreshes coherent full metadata after successful pings (ENG-136). Info failure alone
+/// preserves the last snapshot and does not degrade/reconnect an otherwise healthy engine.
+async fn ping_loop(inner: &Arc<HubInner>, id: &EngineId, conn: &Conn, retry: &Notify) -> Lost {
+    let token = &conn.token;
     let mut degraded = false;
     loop {
         if !degraded {
@@ -374,43 +390,64 @@ async fn ping_loop(
         }
         let r = tokio::select! {
             _ = token.cancelled() => return Lost::Cancelled,
-            r = ping(engine) => r,
+            r = ping(&conn.engine) => r,
         };
         match r {
             Ok(()) => {
-                let caps = std::panic::catch_unwind(AssertUnwindSafe(|| engine.capabilities()));
+                // Never hold the registry lock across engine I/O. Use only the flags
+                // from info(), not a separate capabilities() read of a different route.
+                let refreshed = tokio::select! {
+                    _ = token.cancelled() => return Lost::Cancelled,
+                    r = tokio::time::timeout(INFO_TIMEOUT, guarded(async { conn.engine.info().await })) => {
+                        r.unwrap_or(Err(EngineError::Timeout(INFO_TIMEOUT)))
+                    }
+                };
                 let mut reg = lock(&inner.reg);
-                if token.is_cancelled() {
+                if !reg.current_connection(id, conn) {
                     return Lost::Cancelled;
                 }
-                let mut changed = None;
-                if let (Ok(caps), Some(e)) = (caps, reg.get_mut(id))
-                    && let Some(info) = e.info.as_mut()
-                    && info.capabilities != caps
-                {
-                    info.capabilities = caps;
-                    changed = Some(caps);
+                let e = reg.get_mut(id).expect("current connection");
+                let mut status_changed = false;
+                let mut caps_changed = None;
+                match refreshed {
+                    Ok(info) => {
+                        if e.info
+                            .as_ref()
+                            .is_some_and(|old| old.capabilities != info.capabilities)
+                        {
+                            caps_changed = Some(info.capabilities);
+                        }
+                        status_changed = e.info.as_ref() != Some(&info);
+                        e.info = Some(info);
+                    }
+                    Err(error) => {
+                        tracing::debug!(engine = %id, %error, "engine metadata refresh failed; retaining snapshot")
+                    }
                 }
-                if let Some(capabilities) = changed {
+                if degraded {
+                    degraded = false;
+                    e.state = EngineState::Connected;
+                    status_changed = true;
+                }
+                if let Some(capabilities) = caps_changed {
                     reg.emit(HubEvent::CapabilitiesChanged {
                         id: id.clone(),
                         capabilities,
                     });
-                    reg.emit_status(id);
                 }
-                if degraded {
-                    degraded = false;
-                    reg.set_state(id, EngineState::Connected);
+                if status_changed {
+                    reg.emit_status(id);
                 }
             }
             Err(e) if degraded => return Lost::Failed(e),
             Err(e) => {
                 tracing::info!(engine = %id, error = %e, "ping failed; degraded");
                 degraded = true;
-                if token.is_cancelled() {
+                let mut reg = lock(&inner.reg);
+                if !reg.current_connection(id, conn) {
                     return Lost::Cancelled;
                 }
-                inner.set_state(id, EngineState::Degraded);
+                reg.set_state(id, EngineState::Degraded);
             }
         }
     }

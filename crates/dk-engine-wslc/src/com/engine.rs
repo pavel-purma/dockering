@@ -79,9 +79,22 @@ pub(crate) struct Com {
     /// `None` = the caller's default session (`OpenSessionByName(NULL)`).
     session_name: Option<String>,
     session: Mutex<Option<Agile<abi::IWSLCSession>>>,
+    binding: Mutex<Option<SessionTarget>>,
+    trusted_version: Option<WslVersion>,
+}
+
+/// Name is exact argv targeting; id + creator PID + owner SID are available replacement
+/// evidence, not a durable UUID. A missing/nonunique row prohibits mixed transport dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionTarget {
+    pub(crate) name: String,
+    pub(crate) id: u32,
+    pub(crate) creator_pid: u32,
+    pub(crate) sid: Option<String>,
 }
 
 fn com_err(e: windows::core::Error, subject: Option<Subject<'_>>) -> EngineError {
+    super::dispatch::record(e.code().0);
     map_err(&e, subject)
 }
 
@@ -102,7 +115,20 @@ impl Com {
     }
 
     fn open_session(&self) -> EngineResult<abi::IWSLCSession> {
-        let name = self.session_name.as_deref().map(wide_z);
+        self.revalidate_version()?;
+        let binding = self
+            .binding
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(target) = &binding {
+            self.verify_binding(target)?;
+        }
+        let resolved = binding
+            .as_ref()
+            .map(|b| b.name.as_str())
+            .or(self.session_name.as_deref());
+        let name = resolved.map(wide_z);
         let mut out: Option<abi::IWSLCSession> = None;
         // SAFETY: verified vtable slot 5; name is NUL-terminated UTF-16 or null (= default).
         let r = unsafe {
@@ -118,7 +144,62 @@ impl Com {
         ffi::check(r).map_err(|e| com_err(e, Some(subject)))?;
         let s = out.ok_or_else(|| EngineError::protocol("OpenSessionByName returned null"))?;
         blanket(&s);
+        if let Some(target) = &binding {
+            let actual = Self::session_identity(&s)?;
+            if actual != (target.id, target.name.clone()) {
+                return Err(target_changed());
+            }
+        }
         Ok(s)
+    }
+
+    fn revalidate_version(&self) -> EngineResult<()> {
+        if let Some(expected) = self.trusted_version
+            && (crate::version::service_binary_version() != Some(expected)
+                || super::abi::select(&expected).is_none())
+        {
+            return Err(EngineError::unreachable_with_hint(
+                "WSL service version changed or cannot be verified",
+                "Reconnect using Auto or CLI; no internal ABI calls were made.",
+            ));
+        }
+        Ok(())
+    }
+
+    fn session_display_name(s: &abi::IWSLCSession) -> EngineResult<String> {
+        let mut name = CoTaskMemWStr::null();
+        // SAFETY: verified slot 1, string freed by RAII.
+        ffi::check(unsafe { s.GetDisplayName(name.out()) }).map_err(|e| com_err(e, None))?;
+        let name = name
+            .to_string_opt()
+            .ok_or_else(|| EngineError::protocol("Session display name missing"))?;
+        crate::factory::validate_session_name(&name)?;
+        Ok(name)
+    }
+
+    fn session_identity(s: &abi::IWSLCSession) -> EngineResult<(u32, String)> {
+        let name = Self::session_display_name(s)?;
+        let mut id = 0;
+        // SAFETY: verified slot 0, plain id out-param.
+        ffi::check(unsafe { s.GetId(&mut id) }).map_err(|e| com_err(e, None))?;
+        Ok((id, name))
+    }
+
+    fn verify_binding(&self, target: &SessionTarget) -> EngineResult<()> {
+        self.revalidate_version()?;
+        let rows = list_sessions_on(&self.manager.0)?;
+        let matching: Vec<_> = rows
+            .iter()
+            .filter(|r| r.name.as_deref() == Some(&target.name))
+            .collect();
+        if matching.len() != 1
+            || matching[0].id != target.id
+            || matching[0].creator_pid != target.creator_pid
+            || matching[0].sid != target.sid
+        {
+            return Err(target_changed());
+        }
+        Ok(())
     }
 
     /// Cached session proxy (opened on first use).
@@ -132,6 +213,7 @@ impl Com {
         Ok(s)
     }
 
+    #[allow(dead_code)] // Used by router's explicit reopen once T7 is integrated.
     fn drop_session(&self) {
         self.session
             .lock()
@@ -139,51 +221,30 @@ impl Com {
             .take();
     }
 
-    /// Runs `f` with the session; on a disconnect HRESULT reopens the session once and
-    /// retries (spec 20 §5.4 Lifetime). Second failure → `Unreachable`.
+    /// One attempt only. Read retry/reopen belongs to the router; never replay closures.
     fn with_session<T>(
         &self,
         mut f: impl FnMut(&abi::IWSLCSession) -> Result<T, windows::core::Error>,
         subject: Option<Subject<'_>>,
     ) -> EngineResult<T> {
         let s = self.session()?;
-        match f(&s) {
-            Ok(v) => Ok(v),
-            Err(e) if ffi::is_disconnect(e.code().0) => {
-                tracing::info!(
-                    hr = format!("0x{:08X}", e.code().0 as u32),
-                    "WSLC session disconnected; reopening once"
-                );
-                self.drop_session();
-                let s = self.session()?;
-                f(&s).map_err(|e| {
-                    if ffi::is_disconnect(e.code().0) {
-                        EngineError::unreachable(format!(
-                            "WSL containers session disconnected (0x{:08X})",
-                            e.code().0 as u32
-                        ))
-                    } else {
-                        com_err(e, subject)
-                    }
-                })
-            }
-            Err(e) => Err(com_err(e, subject)),
-        }
+        super::pool::check_cancelled()?;
+        super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
+        f(&s).map_err(|e| com_err(e, subject))
     }
 
     /// `BeginContainerOperation` token: keeps the VM alive for the duration of a container
-    /// mutation (IDL comment on slot 44). Failure to obtain one is not fatal.
-    fn begin_op(s: &abi::IWSLCSession) -> Option<IUnknown> {
+    /// mutation (IDL comment on slot 44). Required: failure prevents protected dispatch.
+    fn begin_op(s: &abi::IWSLCSession) -> windows::core::Result<IUnknown> {
+        super::dispatch::phase(super::dispatch::DispatchPhase::NotDispatched);
         let mut tok: Option<IUnknown> = None;
         // SAFETY: verified vtable slot 44, out-param only.
         let r = unsafe { s.BeginContainerOperation(&mut tok) };
         if r.is_err() {
-            tracing::debug!(
-                hr = format!("0x{:08X}", r.0 as u32),
-                "BeginContainerOperation failed"
-            );
+            super::dispatch::phase(super::dispatch::DispatchPhase::NotDispatched);
         }
-        tok
+        ffi::check(r)?;
+        tok.ok_or_else(|| windows::core::Error::from_hresult(windows::core::HRESULT(hr::E_FAIL)))
     }
 
     fn open_container(
@@ -212,8 +273,11 @@ impl Com {
         let subject = Subject::new(ResourceKind::Container, id);
         self.with_session(
             |s| {
-                let _op = Self::begin_op(s);
+                super::dispatch::phase(super::dispatch::DispatchPhase::NotDispatched);
+                let _op = Self::begin_op(s)?;
                 let c = Self::open_container(s, id)?;
+                super::pool::admit_windows()?;
+                super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
                 f(&c)
             },
             Some(subject),
@@ -233,6 +297,13 @@ impl Com {
             .map(|s| (s.id, s.name))
             .collect())
     }
+}
+
+fn target_changed() -> EngineError {
+    EngineError::unreachable_with_hint(
+        "The pinned WSLC session disappeared, changed, or is not unique",
+        "Reconnect explicitly to the intended session. No replacement/default session was selected.",
+    )
 }
 
 /// One `ListSessions` row.
@@ -262,33 +333,62 @@ fn list_sessions_on(mgr: &abi::IWSLCSessionManager) -> EngineResult<Vec<SessionE
         .collect())
 }
 
+fn confirm_version(
+    mgr: &abi::IWSLCSessionManager,
+    expected: WslVersion,
+) -> EngineResult<(u32, u32, u32)> {
+    let mut version = abi::WSLCVersion::default();
+    // SAFETY: selected trusted ABI, plain out struct, first interface call after activation.
+    ffi::check(unsafe { mgr.GetVersion(&mut version) }).map_err(|e| com_err(e, None))?;
+    let got = (version.Major, version.Minor, version.Revision);
+    if got != expected.triple() {
+        super::dispatch::connect_failure(super::dispatch::ConnectFailure::SelfCheckMismatch);
+        return Err(EngineError::protocol("WSLC self-check version mismatch"));
+    }
+    Ok(got)
+}
+
+fn discovery_on(
+    mgr: &abi::IWSLCSessionManager,
+    v: WslVersion,
+) -> EngineResult<(Vec<SessionEntry>, Option<String>)> {
+    confirm_version(mgr, v)?;
+    let sessions = list_sessions_on(mgr)?;
+    let mut out: Option<abi::IWSLCSession> = None;
+    // SAFETY: trusted ABI confirmed above, NULL resolves caller default.
+    ffi::check(unsafe { mgr.OpenSessionByName(PCWSTR::null(), &mut out) })
+        .map_err(|e| com_err(e, None))?;
+    let default = if let Some(s) = out {
+        blanket(&s);
+        let mut name = CoTaskMemWStr::null();
+        // SAFETY: verified slot, out string owned by RAII.
+        ffi::check(unsafe { s.GetDisplayName(name.out()) }).map_err(|e| com_err(e, None))?;
+        name.to_string_opt()
+    } else {
+        None
+    };
+    Ok((sessions, default))
+}
+
 /// Lists WSLC sessions over COM through the ABI module selected for `v` (ENG-109), plus the
 /// caller's default session name (`OpenSessionByName(NULL)` → `GetDisplayName`; opening a
 /// session does not boot its VM). `None` module → `Err` (caller uses the CLI).
 pub async fn list_sessions(v: WslVersion) -> EngineResult<(Vec<SessionEntry>, Option<String>)> {
-    if crate::com::abi::select(&v).is_none() {
+    if crate::com::abi::select(&v).is_none() || crate::version::service_binary_version() != Some(v)
+    {
         return Err(EngineError::unreachable(format!(
             "WSL {v} has no verified COM ABI"
         )));
     }
     let pool = RpcPool::new(1);
-    pool.run(|| {
+    pool.run(move || {
+        if crate::version::service_binary_version() != Some(v) {
+            return Err(EngineError::unreachable(
+                "WSL version changed before discovery activation",
+            ));
+        }
         let mgr = Com::create_manager().map_err(|e| com_err(e, None))?;
-        let sessions = list_sessions_on(&mgr)?;
-        let mut out: Option<abi::IWSLCSession> = None;
-        // SAFETY: verified slot 5; null name = caller's default session.
-        let default = if unsafe { mgr.OpenSessionByName(PCWSTR::null(), &mut out) }.is_ok() {
-            out.and_then(|s| {
-                blanket(&s);
-                let mut name = CoTaskMemWStr::null();
-                // SAFETY: verified slot 1; LPWSTR freed by `name`.
-                unsafe { s.GetDisplayName(name.out()) }.ok().ok()?;
-                name.to_string_opt()
-            })
-        } else {
-            None
-        };
-        Ok((sessions, default))
+        discovery_on(&mgr, v)
     })
     .await
 }
@@ -318,6 +418,62 @@ pub struct SelfCheck {
 }
 
 impl WslcComEngine {
+    #[cfg(test)]
+    pub(crate) async fn connect_fake_pipeline(
+        session: Option<String>,
+        state: super::fake::Shared,
+    ) -> EngineResult<(Self, SelfCheck)> {
+        Self::connect_pipeline(
+            EngineId::new("fake-connect"),
+            session,
+            WslVersion::new(3, 0, 1, 0),
+            AbiModule::V3_0,
+            move || Ok(super::fake::FakeManager::new_interface(state)),
+            false,
+        )
+        .await
+    }
+    #[allow(dead_code)] // T6 router integration API.
+    pub(crate) fn resolved_session(&self) -> Option<SessionTarget> {
+        self.inner
+            .com
+            .binding
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Check immediately before CLI dispatch; never resolve NULL again.
+    #[allow(dead_code)] // T6 router integration API.
+    pub(crate) async fn validate_target(&self) -> EngineResult<SessionTarget> {
+        self.run(|inner| {
+            let target = inner.com.binding.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or_else(target_changed)?;
+            inner.com.verify_binding(&target)?;
+            if inner.com.trusted_version.is_some()
+                && !crate::factory::owned_sid(target.sid.as_deref(), win32::current_user_sid().as_deref()) {
+                return Err(EngineError::unreachable_with_hint("WSLC session ownership cannot be proved for mixed routing", "Use COM-only or explicitly connect using CLI. No cross-transport operation was dispatched."));
+            }
+            Ok(target)
+        }).await
+    }
+
+    #[allow(dead_code)] // T7 router integration API.
+    pub(crate) async fn reopen(&self) -> EngineResult<()> {
+        self.run(|inner| {
+            inner.com.revalidate_version()?;
+            let target = inner
+                .com
+                .binding
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .ok_or_else(target_changed)?;
+            inner.com.verify_binding(&target)?;
+            inner.com.drop_session();
+            inner.com.session().map(|_| ())
+        })
+        .await
+    }
     /// Connects through the ABI module `abi_module` selected for `wsl_version` (caller ran
     /// `abi::select`), then runs the self-check. Any failure → `Err` (factory falls back to CLI,
     /// except `WSLC_E_CONTAINER_DISABLED`, which surfaces as `Unreachable{policy hint}`).
@@ -327,21 +483,56 @@ impl WslcComEngine {
         wsl_version: WslVersion,
         abi_module: AbiModule,
     ) -> EngineResult<(WslcComEngine, SelfCheck)> {
+        if super::abi::select(&wsl_version) != Some(abi_module)
+            || crate::version::service_binary_version() != Some(wsl_version)
+        {
+            return Err(EngineError::unreachable(
+                "WSL service FileVersion is not exactly trusted; internal COM activation refused",
+            ));
+        }
         // Only one module exists; the match keeps future modules explicit.
         match abi_module {
             AbiModule::V3_0 => {}
         }
+        Self::connect_pipeline(
+            id,
+            session,
+            wsl_version,
+            abi_module,
+            Com::create_manager,
+            true,
+        )
+        .await
+    }
+
+    // One pipeline for production and fault injection; tests replace activation, not worker
+    // scheduling or the self-check path.
+    async fn connect_pipeline(
+        id: EngineId,
+        session: Option<String>,
+        wsl_version: WslVersion,
+        abi_module: AbiModule,
+        activate: impl FnOnce() -> windows::core::Result<abi::IWSLCSessionManager> + Send + 'static,
+        revalidate: bool,
+    ) -> EngineResult<(WslcComEngine, SelfCheck)> {
         let pool = RpcPool::new(DEFAULT_THREADS);
         let sess = session.clone();
         let inner = pool
             .run(move || {
-                let mgr = Com::create_manager().map_err(|e| com_err(e, None))?;
+                if revalidate && crate::version::service_binary_version() != Some(wsl_version) {
+                    return Err(EngineError::unreachable(
+                        "WSL version changed before COM activation",
+                    ));
+                }
+                let mgr = activate().map_err(|e| com_err(e, None))?;
                 Ok(Arc::new(Inner {
                     id,
                     com: Com {
                         manager: Agile(mgr),
                         session_name: sess,
                         session: Mutex::new(None),
+                        binding: Mutex::new(None),
+                        trusted_version: revalidate.then_some(wsl_version),
                     },
                     wsl_version: Some(wsl_version),
                     abi: Some(abi_module),
@@ -368,6 +559,8 @@ impl WslcComEngine {
                     manager: Agile(manager),
                     session_name: session,
                     session: Mutex::new(None),
+                    binding: Mutex::new(None),
+                    trusted_version: None,
                 },
                 wsl_version: None,
                 abi: None,
@@ -385,6 +578,9 @@ impl WslcComEngine {
                 let v = inner.com.version()?;
                 let got = (v.Major, v.Minor, v.Revision);
                 if let Some(exp) = expected.filter(|e| e.triple() != got) {
+                    super::dispatch::connect_failure(
+                        super::dispatch::ConnectFailure::SelfCheckMismatch,
+                    );
                     return Err(EngineError::protocol(format!(
                         "self-check: GetVersion {}.{}.{} != wslservice.exe {exp}",
                         got.0, got.1, got.2
@@ -392,24 +588,91 @@ impl WslcComEngine {
                 }
                 let sessions = inner.com.list_sessions()?;
                 if sessions.len() >= 1000 {
+                    super::dispatch::connect_failure(
+                        super::dispatch::ConnectFailure::SelfCheckMismatch,
+                    );
                     return Err(EngineError::protocol(format!(
                         "self-check: implausible session count {}",
                         sessions.len()
                     )));
                 }
                 if sessions.iter().any(|(_, n)| n.is_none()) {
+                    super::dispatch::connect_failure(
+                        super::dispatch::ConnectFailure::SelfCheckMismatch,
+                    );
                     return Err(EngineError::protocol(
                         "self-check: session name not NUL-terminated",
                     ));
                 }
                 let s = inner.com.session()?;
-                let mut name = CoTaskMemWStr::null();
-                // SAFETY: verified slot 1; callee-allocated LPWSTR freed by `name`.
-                let _ = unsafe { s.GetDisplayName(name.out()) };
+                *inner.com.binding.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                // Target proof is separate from ABI/session health. Keep the opened proxy
+                // usable even when identity/name uniqueness cannot establish mixed routing.
+                let Ok(name) = Com::session_display_name(&s) else {
+                    return Ok(SelfCheck {
+                        com_version: got,
+                        sessions: sessions.len(),
+                        default_session: None,
+                    });
+                };
+                if inner
+                    .com
+                    .session_name
+                    .as_ref()
+                    .is_some_and(|configured| configured != &name)
+                {
+                    // Positive contradiction is not merely missing mixed-routing proof.
+                    inner.com.drop_session();
+                    super::dispatch::connect_failure(super::dispatch::ConnectFailure::Final);
+                    return Err(target_changed());
+                }
+                let mut id = 0;
+                // SAFETY: verified slot 0, plain out-param. Identity failure can disable
+                // crossing but cannot hide a positive display-name contradiction checked above.
+                if let Err(e) = ffi::check(unsafe { s.GetId(&mut id) }) {
+                    let _ = com_err(e, None);
+                    return Ok(SelfCheck {
+                        com_version: got,
+                        sessions: sessions.len(),
+                        default_session: Some(name),
+                    });
+                }
+                let rows = list_sessions_on(&inner.com.manager.0).unwrap_or_default();
+                let matches: Vec<_> = rows
+                    .iter()
+                    .filter(|r| r.name.as_deref() == Some(&name))
+                    .collect();
+                if matches.len() != 1 || matches[0].id != id {
+                    return Ok(SelfCheck {
+                        com_version: got,
+                        sessions: sessions.len(),
+                        default_session: Some(name),
+                    });
+                }
+                let row = matches[0];
+                if inner.com.trusted_version.is_some()
+                    && !crate::factory::owned_sid(
+                        row.sid.as_deref(),
+                        win32::current_user_sid().as_deref(),
+                    )
+                {
+                    return Ok(SelfCheck {
+                        com_version: got,
+                        sessions: sessions.len(),
+                        default_session: Some(name),
+                    });
+                }
+                *inner.com.binding.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(SessionTarget {
+                        name: name.clone(),
+                        id,
+                        creator_pid: row.creator_pid,
+                        sid: row.sid.clone(),
+                    });
                 Ok(SelfCheck {
                     com_version: got,
                     sessions: sessions.len(),
-                    default_session: name.to_string_opt(),
+                    default_session: Some(name),
                 })
             })
             .await
@@ -435,7 +698,23 @@ impl WslcComEngine {
         f: impl FnOnce(&Inner) -> EngineResult<T> + Send + 'static,
     ) -> EngineResult<T> {
         let inner = self.inner.clone();
-        self.pool.run(move || f(&inner)).await
+        let evidence = super::dispatch::Evidence::current();
+        self.pool
+            .run(move || {
+                evidence.scope(|| {
+                    super::dispatch::phase(super::dispatch::DispatchPhase::NotDispatched);
+                    f(&inner)
+                })
+            })
+            .await
+    }
+
+    async fn mutate<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&Inner) -> EngineResult<T> + Send + 'static,
+    ) -> EngineResult<T> {
+        // Capture uses an existing outer router context when present.
+        super::dispatch::capture(self.run(f), true).await.0
     }
 
     async fn json_call(
@@ -753,7 +1032,7 @@ impl Engine for WslcComEngine {
 
     async fn inspect_container(&self, id: &str) -> EngineResult<ContainerDetails> {
         let v = self.inspect_container_json(id).await?;
-        docker_json::container_details(&v)
+        crate::inspect::container_details(&v)
     }
 
     async fn container_action(&self, id: &str, action: ContainerAction) -> EngineResult<()> {
@@ -766,7 +1045,7 @@ impl Engine for WslcComEngine {
             _ => 0,
         };
         let id = id.to_owned();
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             inner.com.with_container(&id, |c| {
                 // SAFETY (all arms): verified IWSLCContainer slots; null start options and
                 // callbacks are allowed by the IDL (`[in, unique]`).
@@ -812,7 +1091,7 @@ impl Engine for WslcComEngine {
         if opts.volumes {
             flags |= abi::WSLC_DELETE_FLAGS_DELETE_VOLUMES;
         }
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             // SAFETY: verified slot 3 (Delete), flags within WSLCDeleteFlagsValid.
             inner
                 .com
@@ -822,14 +1101,16 @@ impl Engine for WslcComEngine {
     }
 
     async fn prune_containers(&self) -> EngineResult<PruneReport> {
-        self.run(|inner| {
+        self.mutate(|inner| {
             inner.com.with_session(
                 |s| {
-                    let _op = Com::begin_op(s);
+                    let _op = Com::begin_op(s)?;
                     let mut res = abi::WSLCPruneContainersResults::default();
+                    super::pool::admit_windows()?;
+                    super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
                     // SAFETY: verified slot 20; `res.Containers` is callee-allocated and freed
                     // right below via CoTaskMemArray ownership.
-                    ffi::check(unsafe { s.PruneContainers(std::ptr::null(), 0, &mut res) })?;
+                    let r = unsafe { s.PruneContainers(std::ptr::null(), 0, &mut res) };
                     let mut arr = CoTaskMemArray::<abi::WSLCContainerId>::new();
                     {
                         let (p, n) = arr.out();
@@ -839,6 +1120,7 @@ impl Engine for WslcComEngine {
                             *n = res.ContainersCount;
                         }
                     }
+                    ffi::check(r)?;
                     Ok(PruneReport {
                         deleted: arr.as_slice().iter().map(|id| fixed_cstr(id)).collect(),
                         space_reclaimed: res.SpaceReclaimed,
@@ -877,7 +1159,9 @@ impl Engine for WslcComEngine {
             });
         }
         let id = id.to_owned();
-        let session = self.run(move |inner| start_exec(inner, &id, &req)).await?;
+        let session = self
+            .mutate(move |inner| start_exec(inner, &id, &req))
+            .await?;
         Ok(Box::new(session))
     }
 
@@ -938,7 +1222,7 @@ impl Engine for WslcComEngine {
     async fn remove_image(&self, id: &str, force: bool) -> EngineResult<Vec<ImageDeleteItem>> {
         validate::validate_image_ref(id)?;
         let id = id.to_owned();
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             let img = cstring(&id)?;
             let subj = Subject::new(ResourceKind::Image, &id);
             inner.com.with_session(
@@ -954,6 +1238,7 @@ impl Engine for WslcComEngine {
                     let mut arr = CoTaskMemArray::<abi::WSLCDeletedImageInformation>::new();
                     let (p, n) = arr.out();
                     // SAFETY: verified slot 13; `img` outlives the call; array freed by `arr`.
+                    super::pool::admit_windows()?;
                     ffi::check(unsafe { s.DeleteImage(&opts, p, n) })?;
                     Ok(deleted_items(arr.as_slice()))
                 },
@@ -964,7 +1249,7 @@ impl Engine for WslcComEngine {
     }
 
     async fn prune_images(&self, dangling_only: bool) -> EngineResult<PruneReport> {
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             let k = cstring("dangling")?;
             let v = cstring(if dangling_only { "true" } else { "false" })?;
             let filters = [abi::WSLCFilter {
@@ -977,6 +1262,7 @@ impl Engine for WslcComEngine {
                     let (p, n) = arr.out();
                     let mut space = 0u64;
                     // SAFETY: verified slot 16; filter strings outlive the call.
+                    super::pool::admit_windows()?;
                     ffi::check(unsafe { s.PruneImages(filters.as_ptr(), 1, p, n, &mut space) })?;
                     Ok(PruneReport {
                         deleted: arr
@@ -998,7 +1284,7 @@ impl Engine for WslcComEngine {
         let (repo, tag) = convert::split_tag_target(repo, tag);
         validate::validate_image_ref(&format!("{repo}:{tag}"))?;
         let id = id.to_owned();
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             let (i, r, t) = (cstring(&id)?, cstring(&repo)?, cstring(&tag)?);
             let subj = Subject::new(ResourceKind::Image, &id);
             inner.com.with_session(
@@ -1009,6 +1295,7 @@ impl Engine for WslcComEngine {
                         Tag: pcstr(&t),
                     };
                     // SAFETY: verified slot 14; strings outlive the call.
+                    super::pool::admit_windows()?;
                     ffi::check(unsafe { s.TagImage(&opts) })
                 },
                 Some(subj),
@@ -1067,9 +1354,16 @@ impl Engine for WslcComEngine {
     }
 
     async fn create_volume(&self, spec: VolumeSpec) -> EngineResult<VolumeSummary> {
-        let name = self.create_volume_raw(spec).await?;
-        let v = self.inspect_volume_json(&name).await?;
-        Ok(docker_json::volume_summary(&v))
+        super::dispatch::capture(
+            async {
+                let name = self.create_volume_raw(spec).await?;
+                let v = self.inspect_volume_json(&name).await?;
+                Ok(docker_json::volume_summary(&v))
+            },
+            true,
+        )
+        .await
+        .0
     }
 
     async fn remove_volume(&self, name: &str, force: bool) -> EngineResult<()> {
@@ -1077,11 +1371,15 @@ impl Engine for WslcComEngine {
         let _ = force;
         validate::validate_name(name)?;
         let name = name.to_owned();
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             let n = cstring(&name)?;
             inner.com.with_session(
                 // SAFETY: verified slot 31; `n` outlives the call.
-                |s| ffi::check(unsafe { s.DeleteVolume(pcstr(&n)) }),
+                |s| {
+                    super::pool::admit_windows()?;
+                    // SAFETY: verified slot 31, string lives through call.
+                    ffi::check(unsafe { s.DeleteVolume(pcstr(&n)) })
+                },
                 Some(Subject::new(ResourceKind::Volume, &name)),
             )
         })
@@ -1089,7 +1387,7 @@ impl Engine for WslcComEngine {
     }
 
     async fn prune_volumes(&self) -> EngineResult<PruneReport> {
-        self.run(|inner| {
+        self.mutate(|inner| {
             // Like Docker ≥ 1.42 + `all=true` (the Docker backend does the same): prune every
             // unused volume, not only anonymous ones.
             let k = cstring("all")?;
@@ -1104,6 +1402,7 @@ impl Engine for WslcComEngine {
                     let (p, n) = arr.out();
                     let mut space = 0u64;
                     // SAFETY: verified slot 36; filter strings outlive the call.
+                    super::pool::admit_windows()?;
                     ffi::check(unsafe {
                         s.PruneVolumes(filters.as_ptr(), 1, std::ptr::null_mut(), p, n, &mut space)
                     })?;
@@ -1143,11 +1442,15 @@ impl Engine for WslcComEngine {
     async fn remove_network(&self, id: &str) -> EngineResult<()> {
         validate::validate_id_or_name(id)?;
         let name = id.to_owned();
-        self.run(move |inner| {
+        self.mutate(move |inner| {
             let n = cstring(&name)?;
             inner.com.with_session(
                 // SAFETY: verified slot 38; `n` outlives the call.
-                |s| ffi::check(unsafe { s.DeleteNetwork(pcstr(&n)) }),
+                |s| {
+                    super::pool::admit_windows()?;
+                    // SAFETY: verified slot 38, string lives through call.
+                    ffi::check(unsafe { s.DeleteNetwork(pcstr(&n)) })
+                },
                 Some(Subject::new(ResourceKind::Network, &name)),
             )
         })
@@ -1155,12 +1458,13 @@ impl Engine for WslcComEngine {
     }
 
     async fn prune_networks(&self) -> EngineResult<PruneReport> {
-        self.run(|inner| {
+        self.mutate(|inner| {
             inner.com.with_session(
                 |s| {
                     let mut arr = CoTaskMemArray::<abi::WSLCNetworkName>::new();
                     let (p, n) = arr.out();
                     // SAFETY: verified slot 41; no filters.
+                    super::pool::admit_windows()?;
                     ffi::check(unsafe { s.PruneNetworks(std::ptr::null(), 0, p, n) })?;
                     Ok(PruneReport {
                         deleted: arr.as_slice().iter().map(|n| fixed_cstr(n)).collect(),
@@ -1199,7 +1503,7 @@ impl WslcComEngine {
         for k in spec.labels.keys().chain(spec.driver_opts.keys()) {
             validate::validate_env_key(k)?;
         }
-        self.run(move |inner| {
+        self.mutate(move |inner| {
                 let name = spec.name.as_deref().map(cstring).transpose()?;
                 let driver = spec.driver.as_deref().map(cstring).transpose()?;
                 let to_kv = |m: &BTreeMap<String, String>| -> EngineResult<Vec<(std::ffi::CString, std::ffi::CString)>> {
@@ -1222,7 +1526,9 @@ impl WslcComEngine {
                         // SAFETY: plain-data out struct (char arrays), zero-initialised.
                         let mut info: abi::WSLCVolumeInformation = unsafe { std::mem::zeroed() };
                         // SAFETY: verified slot 30; all option strings outlive the call.
+                        super::pool::admit_windows()?;
                         ffi::check(unsafe { s.CreateVolume(&opts, &mut info) })?;
+                        super::dispatch::phase(super::dispatch::DispatchPhase::Completed);
                         Ok(fixed_cstr(&info.Name))
                     },
                     None,
@@ -1356,8 +1662,35 @@ fn spawn_or_err<T: Send + 'static>(
     rx: mpsc::Receiver<EngineResult<T>>,
     body: impl FnOnce() + Send + 'static,
 ) -> EngineStream<T> {
-    match super::pool::spawn_stream_thread(name, body) {
-        Ok(_detached) => Box::pin(CancelOnDrop::new(rx, cancel)),
+    use futures::StreamExt;
+    let (startup_tx, startup_rx) = oneshot::channel();
+    let evidence = super::dispatch::Evidence::current();
+    let producer = evidence.producer();
+    match super::pool::spawn_stream_thread_checked(
+        name,
+        move || {
+            let _producer = producer;
+            evidence.scope(body)
+        },
+        move |ok| {
+            let _ = startup_tx.send(ok);
+        },
+    ) {
+        Ok(_detached) => {
+            let guarded = CancelOnDrop::new(rx, cancel);
+            Box::pin(
+                futures::stream::once(async move {
+                    if startup_rx.await.unwrap_or(false) {
+                        Box::pin(guarded) as EngineStream<T>
+                    } else {
+                        error_stream(EngineError::unreachable(
+                            "COM stream MTA initialization failed",
+                        ))
+                    }
+                })
+                .flatten(),
+            )
+        }
         Err(e) => error_stream(EngineError::protocol(format!(
             "failed to spawn {name} thread: {e}"
         ))),
@@ -1376,8 +1709,9 @@ fn events_raw_stream(inner: Arc<Inner>, since_unix: i64) -> EngineStream<Value> 
         // up while someone is watching.
         let stream = inner.com.with_session(
             |s| {
-                let _op = Com::begin_op(s);
+                let _op = Com::begin_op(s)?;
                 let mut out: Option<abi::IWSLCEventStream> = None;
+                super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
                 // SAFETY: verified slot 5; no filters; out interface.
                 ffi::check(unsafe {
                     s.GetEvents(since_unix.max(0), 0, std::ptr::null(), 0, &mut out)
@@ -1408,6 +1742,7 @@ fn events_raw_stream(inner: Arc<Inner>, since_unix: i64) -> EngineStream<Value> 
             let r = unsafe { stream.GetNext(c2.event().raw(), json.out()) };
             match r.0 {
                 0 => {
+                    super::dispatch::source_item(); // Before decoding and event filtering.
                     let text = json.to_string_lossy();
                     let item = serde_json::from_str::<Value>(&text)
                         .map_err(|e| EngineError::protocol(format!("event JSON: {e}")));
@@ -1487,24 +1822,28 @@ fn logs_stream(inner: Arc<Inner>, id: String, opts: LogOpts) -> EngineStream<Log
         // Token held for the whole stream (logs are a container operation in wslc).
         let opened = inner.com.with_session(
             |s| {
-                let op = Com::begin_op(s);
+                let op = Com::begin_op(s)?;
                 let c = Com::open_container(s, &id)?;
+                super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
                 let (mut so, mut se) = (abi::WSLCHandle::default(), abi::WSLCHandle::default());
-                // SAFETY: verified slot 9; out handles become ours (wrapped below).
-                ffi::check(unsafe { c.Logs(flags, &mut so, &mut se, since, 0, tail) })?;
-                Ok((op, so, se))
+                // SAFETY: verified slot 9; adopt partial outputs even when HRESULT fails.
+                let r = unsafe { c.Logs(flags, &mut so, &mut se, since, 0, tail) };
+                let handles = OwnedHandle::pair(so, se);
+                ffi::check(r)?;
+                let (stdout, stderr) = handles.map_err(|_| {
+                    windows::core::Error::from_hresult(windows::core::HRESULT(hr::E_INVALIDARG))
+                })?;
+                Ok((op, stdout, stderr))
             },
             Some(Subject::new(ResourceKind::Container, &id)),
         );
-        let (_op, so, se) = match opened {
+        let (_op, stdout, stderr) = match opened {
             Ok(v) => v,
             Err(e) => {
                 send_blocking(&mut tx, Err(e));
                 return;
             }
         };
-        let stdout = OwnedHandle::new(so.Handle);
-        let stderr = OwnedHandle::new(se.Handle);
         // TTY containers: only stdout is returned (raw, not multiplexed) → Console (LOG-008).
         let out_kind = if stderr.is_none() {
             LogStream::Console
@@ -1516,10 +1855,38 @@ fn logs_stream(inner: Arc<Inner>, id: String, opts: LogOpts) -> EngineStream<Log
         let err_thread = stderr.map(|h| {
             let mut tx2 = tx.clone();
             let c3 = c2.clone();
-            super::pool::spawn_stream_thread("logs-err", move || {
-                pump_lines(&h, &c3, LogStream::Stderr, ts, &mut tx2);
-            })
+            let evidence = super::dispatch::Evidence::current();
+            let producer = evidence.producer();
+            let mut startup_tx = tx.clone();
+            let startup_cancel = c2.clone();
+            super::pool::spawn_stream_thread_checked(
+                "logs-err",
+                move || {
+                    let _producer = producer;
+                    evidence.scope(|| pump_lines(&h, &c3, LogStream::Stderr, ts, &mut tx2));
+                },
+                move |ok| {
+                    if !ok {
+                        send_blocking(
+                            &mut startup_tx,
+                            Err(EngineError::unreachable(
+                                "COM stderr reader MTA initialization failed",
+                            )),
+                        );
+                        startup_cancel.fire();
+                    }
+                },
+            )
         });
+        if let Some(Err(e)) = &err_thread {
+            send_blocking(
+                &mut tx,
+                Err(EngineError::protocol(format!(
+                    "failed to spawn stderr reader: {e}"
+                ))),
+            );
+            c2.fire();
+        }
         if let Some(h) = stdout {
             pump_lines(&h, &c2, out_kind, ts, &mut tx);
         }
@@ -1538,6 +1905,7 @@ fn pump_lines(
 ) {
     let mut split = LineSplitter::default();
     let r = pump_handle(h, cancel, |data| {
+        super::dispatch::source_item();
         for line in split.push(&data) {
             if !send_blocking(tx, Ok(convert::log_line(kind, line, ts))) {
                 return false;
@@ -1554,7 +1922,454 @@ fn pump_lines(
         Ok(false) => {}
         Err(e) => {
             send_blocking(tx, Err(e));
+            // Wake sibling stdout/stderr readers before coordinator joins them.
+            cancel.fire();
         }
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::super::{dispatch, fake};
+    use super::*;
+    use futures::executor::block_on;
+
+    #[test]
+    fn connect_pipeline_evidence_on_activation_and_selfcheck_workers() {
+        for stage in [
+            "activation",
+            "GetVersion",
+            "ListSessions",
+            "OpenSessionByName",
+        ] {
+            let (_, state) = engine();
+            if stage != "activation" {
+                state
+                    .lock()
+                    .unwrap()
+                    .fail_next
+                    .insert(stage.into(), hr::RPC_S_SERVER_UNAVAILABLE);
+            }
+            let activate = move || {
+                if stage == "activation" {
+                    return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
+                        hr::RPC_S_SERVER_UNAVAILABLE,
+                    )));
+                }
+                Ok(fake::FakeManager::new_interface(state))
+            };
+            let (result, failure, _) =
+                block_on(dispatch::capture_connect(WslcComEngine::connect_pipeline(
+                    EngineId::new("pipeline"),
+                    None,
+                    WslVersion::new(3, 0, 1, 0),
+                    AbiModule::V3_0,
+                    activate,
+                    false,
+                )));
+            assert!(result.is_err(), "{stage}");
+            assert_eq!(
+                failure.unwrap().hresult,
+                hr::RPC_S_SERVER_UNAVAILABLE,
+                "{stage}"
+            );
+        }
+    }
+
+    #[test]
+    fn discovery_confirms_version_before_session_calls() {
+        for version in [(3, 0, 1), (3, 0, 2)] {
+            let (_, state) = engine();
+            state.lock().unwrap().version = version;
+            let copy = state.clone();
+            let result = block_on(RpcPool::new(1).run(move || {
+                discovery_on(
+                    &fake::FakeManager::new_interface(copy),
+                    WslVersion::new(3, 0, 1, 0),
+                )
+            }));
+            let calls = state.lock().unwrap().calls.clone();
+            assert_eq!(calls[0], "GetVersion");
+            if version == (3, 0, 2) {
+                assert!(result.is_err());
+                assert_eq!(calls, vec!["GetVersion"]);
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(
+                    &calls[..3],
+                    &["GetVersion", "ListSessions", "OpenSessionByName"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_binding_failure_preserves_opened_native_proxy() {
+        for failure in ["GetSessionId", "GetDisplayName"] {
+            let (e, state) = engine();
+            state
+                .lock()
+                .unwrap()
+                .fail_next
+                .insert(failure.into(), hr::E_FAIL);
+            block_on(e.self_check(None)).unwrap();
+            assert!(e.resolved_session().is_none());
+            assert!(block_on(e.validate_target()).is_err());
+            block_on(e.list_containers(ContainerQuery::default())).unwrap();
+            assert_eq!(
+                state
+                    .lock()
+                    .unwrap()
+                    .calls
+                    .iter()
+                    .filter(|c| *c == "OpenSessionByName")
+                    .count(),
+                1
+            );
+        }
+        let (e, state) = engine();
+        state
+            .lock()
+            .unwrap()
+            .sessions
+            .push((8, "exact session".into()));
+        block_on(e.self_check(None)).unwrap();
+        assert!(e.resolved_session().is_none());
+        block_on(e.list_containers(ContainerQuery::default())).unwrap();
+    }
+
+    #[test]
+    fn phase_survives_nontransport_abort_after_create() {
+        let (e, state) = engine();
+        state
+            .lock()
+            .unwrap()
+            .fail_next
+            .insert("InspectVolume".into(), hr::E_ABORT);
+        let (result, fault, phase) = block_on(dispatch::capture_with_phase(
+            e.create_volume(VolumeSpec {
+                name: Some("new-volume".into()),
+                ..Default::default()
+            }),
+            true,
+        ));
+        assert!(result.is_err());
+        assert!(fault.is_none());
+        assert_eq!(phase, dispatch::DispatchPhase::Completed);
+        assert_eq!(state.lock().unwrap().created_volumes.len(), 1);
+    }
+
+    #[test]
+    fn stream_mta_startup_failure_is_error_not_eof() {
+        use futures::StreamExt;
+        super::super::pool::FAIL_STREAM_MTA.with(|f| *f.borrow_mut() = true);
+        let (e, state) = engine();
+        let streams = [
+            e.events(EventFilter::default())
+                .map(|r| r.map(|_| ()))
+                .boxed(),
+            e.logs("abcdef123456", LogOpts::default())
+                .map(|r| r.map(|_| ()))
+                .boxed(),
+            e.stats("abcdef123456").map(|r| r.map(|_| ())).boxed(),
+            e.pull_image("hello-world", None)
+                .map(|r| r.map(|_| ()))
+                .boxed(),
+        ];
+        super::super::pool::FAIL_STREAM_MTA.with(|f| *f.borrow_mut() = false);
+        for mut stream in streams {
+            assert!(block_on(stream.next()).unwrap().is_err());
+            assert!(block_on(stream.next()).is_none());
+        }
+        assert!(
+            !state
+                .lock()
+                .unwrap()
+                .calls
+                .iter()
+                .any(|c| c == "PullImage" || c == "GetEvents")
+        );
+    }
+
+    #[test]
+    fn exec_created_reader_startup_failure_unknown_no_reexec() {
+        let (e, state) = engine();
+        let (result, _, phase) = block_on(dispatch::capture_with_phase(
+            e.mutate(|inner| {
+                super::super::pool::FAIL_STREAM_MTA.with(|f| *f.borrow_mut() = true);
+                let result = start_exec(
+                    inner,
+                    "abcdef123456",
+                    &ExecRequest {
+                        cmd: vec!["sh".into()],
+                        tty: true,
+                        ..Default::default()
+                    },
+                );
+                super::super::pool::FAIL_STREAM_MTA.with(|f| *f.borrow_mut() = false);
+                result
+            }),
+            true,
+        ));
+        assert_eq!(phase, dispatch::DispatchPhase::MayHaveDispatched);
+        let error = result.err().expect("startup must fail");
+        assert!(
+            error
+                .hint()
+                .is_some_and(|h| h.contains("Do not automatically")),
+            "{error:?}"
+        );
+        assert_eq!(
+            state
+                .lock()
+                .unwrap()
+                .calls
+                .iter()
+                .filter(|c| *c == "Exec")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn connect_pipeline_typed_policy_and_mismatch_not_strings() {
+        for mismatch in [false, true] {
+            let (_, state) = engine();
+            if mismatch {
+                state.lock().unwrap().version = (3, 0, 2);
+            } else {
+                state
+                    .lock()
+                    .unwrap()
+                    .fail_next
+                    .insert("ListSessions".into(), hr::WSLC_E_CONTAINER_DISABLED);
+            }
+            let (result, transport, kind) =
+                block_on(dispatch::capture_connect(WslcComEngine::connect_pipeline(
+                    EngineId::new("pipeline"),
+                    None,
+                    WslVersion::new(3, 0, 1, 0),
+                    AbiModule::V3_0,
+                    move || Ok(fake::FakeManager::new_interface(state)),
+                    false,
+                )));
+            assert!(result.is_err());
+            assert!(transport.is_none());
+            assert_eq!(
+                kind,
+                Some(if mismatch {
+                    dispatch::ConnectFailure::SelfCheckMismatch
+                } else {
+                    dispatch::ConnectFailure::Policy
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn pull_saturated_terminal_result_and_consumer_drop() {
+        use futures::StreamExt;
+        for fault in [None, Some(hr::RPC_E_DISCONNECTED)] {
+            let (e, state) = engine();
+            state.lock().unwrap().pull_progress_count = 2000;
+            if let Some(hr) = fault {
+                state
+                    .lock()
+                    .unwrap()
+                    .commit_fault
+                    .insert("PullImage".into(), hr);
+            }
+            let (stream, evidence) = dispatch::capture_stream(|| e.pull_image("hello-world", None));
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            // Wait for RPC completion while receiver remains unpolled, guaranteeing saturation.
+            while state
+                .lock()
+                .unwrap()
+                .calls
+                .iter()
+                .all(|c| c != "PullImageFinished")
+            {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            let items = block_on(stream.collect::<Vec<_>>());
+            if fault.is_some() {
+                assert!(items.last().unwrap().is_err());
+            } else {
+                assert!(matches!(items.last(), Some(Ok(PullProgress::Done { .. }))));
+            }
+            assert!(evidence.is_drained());
+        }
+        let (e, state) = engine();
+        state.lock().unwrap().pull_progress_count = 2000;
+        let (stream, evidence) = dispatch::capture_stream(|| e.pull_image("hello-world", None));
+        let completion_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .all(|c| c != "PullImageFinished")
+        {
+            assert!(std::time::Instant::now() < completion_deadline);
+            std::thread::yield_now();
+        }
+        drop(stream);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !evidence.is_drained() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
+    /// T1 maintained binding spike: reads only, does not boot a VM/create a session. Available
+    /// identity is a runtime u32 ID plus creator PID/SID, not a persistent generation UUID.
+    #[test]
+    #[ignore = "live: exact trusted WSL FileVersion and caller-owned default session"]
+    fn eng_127_live_default_explicit_identity_and_reopen() {
+        assert!(crate::init_process_com_security());
+        let v = crate::version::service_binary_version().expect("service FileVersion");
+        assert_eq!(v, WslVersion::new(3, 0, 1, 0));
+        let (default, _) = block_on(WslcComEngine::connect(
+            EngineId::new("binding-default"),
+            None,
+            v,
+            AbiModule::V3_0,
+        ))
+        .unwrap();
+        let target = block_on(default.validate_target()).unwrap();
+        eprintln!(
+            "ENG-127 FileVersion={v:?}; caller SID={:?}; target={target:?}",
+            win32::current_user_sid()
+        );
+        let (explicit, _) = block_on(WslcComEngine::connect(
+            EngineId::new("binding-explicit"),
+            Some(target.name.clone()),
+            v,
+            AbiModule::V3_0,
+        ))
+        .unwrap();
+        assert_eq!(block_on(explicit.validate_target()).unwrap(), target);
+        block_on(default.reopen()).unwrap();
+        assert_eq!(block_on(default.validate_target()).unwrap(), target);
+    }
+
+    fn engine() -> (WslcComEngine, fake::Shared) {
+        let state = Arc::new(Mutex::new(fake::FakeState {
+            sessions: vec![(7, "exact session".into())],
+            default_session: "exact session".into(),
+            version: (3, 0, 1),
+            containers: vec![fake::FakeContainerData {
+                id: "abcdef123456".into(),
+                state: abi::WSLC_CONTAINER_STATE_RUNNING,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        let e = WslcComEngine::from_manager_for_tests(
+            EngineId::new("test"),
+            fake::FakeManager::new_interface(state.clone()),
+            None,
+        );
+        (e, state)
+    }
+
+    #[test]
+    fn eng_127_default_pinned_reopen_replacement_refused() {
+        let (e, state) = engine();
+        block_on(e.self_check(None)).unwrap();
+        assert_eq!(e.resolved_session().unwrap().name, "exact session");
+        state.lock().unwrap().default_session = "different default".into();
+        block_on(e.reopen()).unwrap();
+        assert_eq!(block_on(e.validate_target()).unwrap().id, 7);
+        state.lock().unwrap().sessions[0].0 = 8;
+        assert!(block_on(e.validate_target()).is_err());
+        let before = state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .filter(|c| *c == "OpenSessionByName")
+            .count();
+        assert!(block_on(e.reopen()).is_err());
+        assert_eq!(
+            before,
+            state
+                .lock()
+                .unwrap()
+                .calls
+                .iter()
+                .filter(|c| *c == "OpenSessionByName")
+                .count()
+        );
+    }
+
+    #[test]
+    fn eng_129_typed_phase_survives_mapping() {
+        let (e, state) = engine();
+        state
+            .lock()
+            .unwrap()
+            .fail_next
+            .insert("BeginContainerOperation".into(), hr::RPC_E_DISCONNECTED);
+        let (_, failure) = block_on(dispatch::capture(
+            e.container_action("abcdef123456", ContainerAction::Stop { timeout_s: None }),
+            true,
+        ));
+        assert_eq!(
+            failure.unwrap().phase,
+            dispatch::DispatchPhase::NotDispatched
+        );
+        state
+            .lock()
+            .unwrap()
+            .commit_fault
+            .insert("Stop".into(), hr::RPC_S_CALL_FAILED);
+        let (result, failure) = block_on(dispatch::capture(
+            e.container_action("abcdef123456", ContainerAction::Stop { timeout_s: None }),
+            true,
+        ));
+        assert_eq!(
+            failure,
+            Some(dispatch::TransportFailure {
+                hresult: hr::RPC_S_CALL_FAILED,
+                phase: dispatch::DispatchPhase::MayHaveDispatched
+            })
+        );
+        assert!(result.unwrap_err().hint().unwrap().contains("Refresh"));
+        assert_eq!(state.lock().unwrap().stopped.len(), 1);
+    }
+
+    #[test]
+    fn eng_132_unknown_version_zero_activation() {
+        for v in [WslVersion::new(3, 0, 1, 1), WslVersion::new(3, 0, 2, 0)] {
+            assert!(
+                block_on(WslcComEngine::connect(
+                    EngineId::new("test"),
+                    None,
+                    v,
+                    AbiModule::V3_0
+                ))
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn eng_131_filtered_event_counts_as_source_activity() {
+        use futures::StreamExt;
+        let (e, state) = engine();
+        state.lock().unwrap().events =
+            vec![r#"{"Type":"container","Action":"start","Actor":{"ID":"abcdef123456"}}"#.into()];
+        let (stream, evidence) = dispatch::capture_stream(|| {
+            e.events(EventFilter {
+                kinds: vec![ResourceKind::Image],
+                ..Default::default()
+            })
+        });
+        let items: Vec<_> = block_on(stream.collect());
+        assert!(items.is_empty());
+        assert_eq!(evidence.source_items(), 1);
     }
 }
 
@@ -1573,6 +2388,9 @@ fn stats_stream(inner: Arc<Inner>, id: String) -> EngineStream<StatsSample> {
             }
             let item = stats_once(&inner, &id)
                 .and_then(|v| stats_sample(&mut norm, &v, OffsetDateTime::now_utc()));
+            if item.is_ok() {
+                super::dispatch::source_item();
+            }
             let fatal = matches!(
                 &item,
                 Err(EngineError::NotFound { .. }) | Err(EngineError::Unreachable { .. })
@@ -1641,6 +2459,7 @@ fn pull_stream(
     };
     let (tx, rx) = mpsc::channel::<EngineResult<PullProgress>>(512);
     spawn_or_err("pull", cancel, rx, move || {
+        let evidence = super::dispatch::Evidence::current();
         let mut done_tx = tx.clone();
         let sink = ProgressSink {
             tx: Mutex::new(tx),
@@ -1670,11 +2489,13 @@ fn pull_stream(
             )
         })();
         let digest = obj.digest.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let last = match r {
+        let last = match evidence.unknown_outcome(r) {
             Ok(()) => Ok(PullProgress::Done { digest }),
             Err(e) => Err(e),
         };
-        let _ = done_tx.try_send(last);
+        // Terminal result is lossless; callback progress remains deliberately best-effort.
+        // Consumer drop closes the channel and wakes this dedicated thread's pending send.
+        send_blocking(&mut done_tx, last);
     })
 }
 
@@ -1747,8 +2568,10 @@ fn start_exec(inner: &Inner, id: &str, req: &ExecRequest) -> EngineResult<WslcCo
     };
     let (op, process) = inner.com.with_session(
         |s| {
-            let op = Com::begin_op(s);
+            let op = Com::begin_op(s)?;
             let c = Com::open_container(s, id)?;
+            super::pool::admit_windows()?;
+            super::dispatch::phase(super::dispatch::DispatchPhase::MayHaveDispatched);
             let mut p: Option<abi::IWSLCProcess> = None;
             // SAFETY: verified slot 7 (F-7); option strings/arrays outlive the call.
             ffi::check(unsafe { c.Exec(&opts, &start, &mut p) })?;
@@ -1765,54 +2588,74 @@ fn start_exec(inner: &Inner, id: &str, req: &ExecRequest) -> EngineResult<WslcCo
     };
     let mut h = abi::WSLCHandle::default();
     // SAFETY: verified IWSLCProcess slot 2; handle ownership transfers to us.
-    ffi::check(unsafe { process.GetStdHandle(fd, &mut h) }).map_err(|e| com_err(e, None))?;
-    let tty =
-        OwnedHandle::new(h.Handle).ok_or_else(|| EngineError::protocol("Exec: no TTY handle"))?;
+    let r = unsafe { process.GetStdHandle(fd, &mut h) };
+    let tty = OwnedHandle::from_wslc(h);
+    ffi::check(r).map_err(|e| com_err(e, None))?;
+    let tty = tty?.ok_or_else(|| EngineError::protocol("Exec: no TTY handle"))?;
     let mut ev = HANDLE::default();
     // SAFETY: verified slot 1; event handle ownership transfers to us.
-    let exit_event = if unsafe { process.GetExitEvent(&mut ev) }.is_ok() {
-        OwnedHandle::new(ev)
-    } else {
-        None
-    };
+    let r = unsafe { process.GetExitEvent(&mut ev) };
+    let exit_event = OwnedHandle::new(ev);
+    let exit_event = exit_event.filter(|_| r.is_ok());
     let shared = Arc::new(ExecShared {
         process: Agile(process),
         tty,
         exit_event,
-        _op: op.map(Agile),
+        _op: Some(Agile(op)),
     });
     let cancel = Cancel::new()?;
+    let write_cancel = Cancel::new()?;
     let (mut tx, out_rx) = mpsc::channel::<EngineResult<Bytes>>(256);
     let (exit_tx, exit_rx) = oneshot::channel::<Option<i64>>();
     let sh = shared.clone();
     let c2 = cancel.clone();
-    super::pool::spawn_stream_thread("exec-tty", move || {
-        let r = pump_handle(&sh.tty, &c2, |data| send_blocking(&mut tx, Ok(data)));
-        if let Err(e) = r {
-            send_blocking(&mut tx, Err(e));
-        }
-        // Output ended: wait for the exit event (bounded) then read the exit code.
-        if let Some(ev) = &sh.exit_event {
-            let _ = win32::wait_handle_or_cancel(ev, c2.event());
-        }
-        let (mut state, mut code) = (0i32, 0i32);
-        // SAFETY: verified slot 5, plain out-params.
-        let ok = unsafe { sh.process.0.GetState(&mut state, &mut code) }.is_ok();
-        let exit = ok
-            .then_some(match state {
-                abi::WSLC_PROCESS_STATE_EXITED => Some(i64::from(code)),
-                abi::WSLC_PROCESS_STATE_SIGNALLED => Some(128 + i64::from(code)),
-                _ => None,
-            })
-            .flatten();
-        let _ = exit_tx.send(exit);
-    })
-    .map_err(|e| EngineError::protocol(format!("failed to spawn exec reader: {e}")))?;
+    let (startup_tx, startup_rx) = std::sync::mpsc::channel();
+    super::pool::spawn_stream_thread_checked(
+        "exec-tty",
+        move || {
+            let r = pump_handle(&sh.tty, &c2, |data| send_blocking(&mut tx, Ok(data)));
+            if let Err(e) = r {
+                send_blocking(&mut tx, Err(e));
+            }
+            // Output ended: wait for the exit event (bounded) then read the exit code.
+            if let Some(ev) = &sh.exit_event {
+                let _ = win32::wait_handle_or_cancel(ev, c2.event());
+            }
+            let (mut state, mut code) = (0i32, 0i32);
+            // SAFETY: verified slot 5, plain out-params.
+            let ok = unsafe { sh.process.0.GetState(&mut state, &mut code) }.is_ok();
+            let exit = ok
+                .then_some(match state {
+                    abi::WSLC_PROCESS_STATE_EXITED => Some(i64::from(code)),
+                    abi::WSLC_PROCESS_STATE_SIGNALLED => Some(128 + i64::from(code)),
+                    _ => None,
+                })
+                .flatten();
+            let _ = exit_tx.send(exit);
+        },
+        move |ok| {
+            let _ = startup_tx.send(ok);
+        },
+    )
+    .map_err(|e| {
+        EngineError::unreachable_with_hint(
+            format!(
+                "Exec may have been created, but reader thread spawn failed ({e}); outcome unknown"
+            ),
+            "Refresh before retrying. Do not automatically create another process.",
+        )
+    })?;
+    if !startup_rx.recv().unwrap_or(false) {
+        return Err(EngineError::unreachable_with_hint(
+            "Exec may have been created, but COM reader MTA startup failed; outcome unknown",
+            "Refresh before retrying. Do not automatically create another process.",
+        ));
+    }
     Ok(WslcComTerminal {
         shared,
         out_rx: Some(out_rx),
         cancel,
-        write_cancel: Cancel::new()?,
+        write_cancel,
         exit_rx: Mutex::new(Some(exit_rx)),
         io: RpcPool::new(1),
         ctl: RpcPool::new(1),

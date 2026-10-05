@@ -14,6 +14,8 @@
 pub(crate) mod abi;
 pub mod convert;
 #[cfg(windows)]
+pub(crate) mod dispatch;
+#[cfg(windows)]
 pub mod engine;
 #[cfg(all(windows, any(test, feature = "test-support")))]
 pub mod fake;
