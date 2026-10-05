@@ -1,11 +1,60 @@
 # Releasing Dockering
 
-The repository is public. The first release, **[0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0)**,
-is published with unsigned downloads for all six supported targets. Code signing, macOS notarization,
-the updater, winget, and release-bot setup are deferred.
+The repository is public. Releases are published with unsigned downloads for all six supported
+targets. Code signing, macOS notarization, the updater, winget, and release-bot setup are deferred.
 The workflow always creates a **draft**; publication is a separate maintainer action.
 See [the specification](spec/features/distribution.md) and
 [first-release plan](plan/features/unsigned-first-release.md).
+
+| Release | Published | Release commit | Record |
+|---|---|---|---|
+| [0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0) | 2026-10-05 22:04 UTC | [`813f543`](https://github.com/pavel-purma/dockering/commit/813f54343f9b995981e0bacf77825706a6322a93) | [checklist](plan/release-checklist.md#evidence-for-v020) |
+| [0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0) | 2026-10-04 20:09 UTC | [`041d8fa`](https://github.com/pavel-purma/dockering/commit/041d8fac06f1a2d26a61ed5e13ad16f47371f628) | [checklist](plan/release-checklist.md#evidence-for-v010) |
+
+## Later releases
+
+Each release gets a new workspace version and tag; never recreate a published tag or upload to a
+published release. The steps below are the manual-tag flow used for 0.2.0.
+
+1. **Prepare.** From current `main`, bump `[workspace.package] version` in `Cargo.toml`, run
+   `cargo update --workspace` (only the nine workspace crates change in `Cargo.lock`), and add a
+   `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`release.yml` fails without it and uses it as
+   the release notes). Use the UTC date of publication. A `feat:` since the last tag is a minor bump
+   while in `0.x`; fixes alone are a patch (REL-011). Copy the latest section of the
+   [release checklist](plan/release-checklist.md) for the new version.
+2. **Pull request.** Title `chore(release): vX.Y.Z`, squash-merge once every check is green. Register
+   the PR with the thread.
+3. **CI incidents.** If a job fails with "The job was not acquired by Runner of type hosted even after
+   multiple attempts", it was cancelled before any step ran. Check [githubstatus.com](https://www.githubstatus.com),
+   then `gh run rerun <run-id> --failed`. A job that fails *after* starting is a real failure: read its
+   log and fix the cause. Do not wave a red test through as a flake without reading it.
+4. **Tag** the merge commit on `main` (annotated, same message style as before), after checking that
+   `main` is still that commit and the tag does not exist:
+
+   ```sh
+   git fetch origin
+   git tag -a vX.Y.Z -m "Dockering X.Y.Z (unsigned)" <merge-commit>
+   git push origin vX.Y.Z
+   ```
+
+5. **Build.** The tag starts `release.yml`: `gh run list --workflow release.yml --branch vX.Y.Z`, then
+   `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly.
+6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`): exactly the
+   15 files and no `.minisig`; every `SHA256SUMS` line; the manifest's six platforms, versions, URLs,
+   hashes and sizes; the notes; PE/ELF/Debian/DMG formats and architectures; the Windows executables
+   are GUI-subsystem, carry the version and are `NotSigned`; the portable x64 build prints the version.
+   Then `gh attestation verify <file> -R pavel-purma/dockering` for all 15 files, pinned with
+   `--source-digest <release-commit> --source-ref refs/tags/vX.Y.Z --signer-workflow pavel-purma/dockering/.github/workflows/release.yml --deny-self-hosted-runners`.
+7. **Publish** after approval, once the draft passes:
+
+   ```sh
+   gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest
+   ```
+
+   Then check anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset URLs, the latest-release
+   API, and that the `winget` run publishing started was skipped.
+8. **Record.** In a docs PR: update the README download text and links, complete the checklist's
+   evidence section, and reconcile the spec status lines. Leave unperformed manual checks unchecked.
 
 ## First-release verification
 

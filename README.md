@@ -17,7 +17,7 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
 
 ## Download
 
-**[Dockering 0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0)** is available
+**[Dockering 0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0)** is available
 for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 
 | Windows | macOS | Linux |
@@ -26,12 +26,12 @@ for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 | winget: planned after signing | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.tar.gz) |
 | Portable: [x64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x64.zip) · [ARM64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-arm64.zip) | | |
 
-Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.1.0/SHA256SUMS).
+Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.2.0/SHA256SUMS).
 See [all releases](https://github.com/pavel-purma/dockering/releases) and the
-[verification record](docs/plan/release-checklist.md#evidence-for-v010).
+[verification record](docs/plan/release-checklist.md#evidence-for-v020).
 Public GitHub release builds generate build-provenance attestations: `gh attestation verify <file> -R pavel-purma/dockering`.
 
-> The first release uses unsigned downloads. Windows may show SmartScreen prompts; macOS builds
+> Downloads are unsigned. Windows may show SmartScreen prompts; macOS builds
 > are not notarized and may require approval in Privacy & Security. See [installation details](docs/release.md#unsigned-installation).
 > Automatic updates and winget are deferred until a signed release.
 
@@ -155,10 +155,11 @@ Windows, so the MSVC environment is loaded automatically):
 
 ## Releases
 
-The first release used the manual-tag flow: the release workflow built all six targets and
-created a draft GitHub Release, which was verified and published under maintainer approval.
+Releases so far (0.1.0, 0.2.0) used the manual-tag flow: a version-bump PR is merged, the
+maintainer pushes the `vX.Y.Z` tag, and the release workflow builds all six targets and
+creates a draft GitHub Release, which is verified and published under maintainer approval.
 [release-plz](https://release-plz.dev) automation can create release PRs and version tags after
-the release-bot App is configured. The first release is unsigned; signing is optional
+the release-bot App is configured. Releases are unsigned; signing is optional
 configuration for later releases. [docs/release.md](docs/release.md) has the details,
 including the publication checklist and future signing setup. PR titles use
 [conventional commits](https://www.conventionalcommits.org/), because they become the changelog.
