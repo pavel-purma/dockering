@@ -541,6 +541,17 @@ mod imp {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::time::Duration;
 
+        async fn wait_for_startup(session: &ConPtySession) {
+            let mut startup = session.startup.clone();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !*startup.borrow_and_update() {
+                    startup.changed().await.expect("startup acknowledgement");
+                }
+            })
+            .await
+            .expect("startup acknowledgement deadline");
+        }
+
         #[tokio::test]
         async fn conpty_flood_before_startup_ack_close_and_drop_reap() {
             for drop_session in [false, true] {
@@ -629,11 +640,13 @@ mod imp {
                 .expect("runtime");
             runtime.block_on(async {
                 // A real ConPTY child that never consumes input. No installed WSL required.
+                let (release_ack, ack_blocked) = std::sync::mpsc::channel();
+                let (at_ack, ack_seen) = tokio::sync::oneshot::channel();
                 let exe =
                     std::path::PathBuf::from(std::env::var_os("SystemRoot").expect("Windows"))
                         .join("System32/WindowsPowerShell/v1.0/powershell.exe");
                 let session = tokio::task::spawn_blocking(move || {
-                    spawn_session(
+                    spawn_session_startup(
                         &exe,
                         vec![
                             "-NoProfile".into(),
@@ -643,15 +656,33 @@ mod imp {
                         80,
                         24,
                         || Ok(()),
+                        move || {
+                            let _ = at_ack.send(());
+                            ack_blocked.recv().expect("release ack");
+                        },
                     )
                 })
                 .await
                 .expect("spawn worker")
                 .expect("ConPTY");
                 let session = Arc::new(session);
-                // Allow ConPTY's startup cursor query to be answered before flooding its
-                // input; otherwise the fixture stalls startup, not the user writer.
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                // This fixture bypasses write()'s startup gate to retain a stalled writer
+                // after its waiter drops. Wait for the actual cursor acknowledgement:
+                // elapsed time cannot guarantee that ConPTY has finished startup on CI.
+                tokio::time::timeout(Duration::from_secs(10), ack_seen)
+                    .await
+                    .expect("startup query deadline")
+                    .expect("startup query");
+                {
+                    let startup = wait_for_startup(&session);
+                    futures::pin_mut!(startup);
+                    assert!(
+                        futures::poll!(&mut startup).is_pending(),
+                        "raw input must wait while startup acknowledgement is withheld"
+                    );
+                    release_ack.send(()).expect("release ack");
+                    startup.await;
+                }
                 let writer = session.writer.clone();
                 let threads = session.io_threads.clone();
                 let entered = Arc::new(AtomicBool::new(false));
@@ -727,7 +758,8 @@ mod imp {
             .await
             .expect("spawn")
             .expect("ConPTY");
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            // Direct synchronous writes must obey the same startup gate as write().
+            wait_for_startup(&session).await;
             let mut exit = session.exit.clone();
             let writer = session.writer.clone();
             let threads = session.io_threads.clone();
