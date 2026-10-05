@@ -92,10 +92,34 @@ pub const NO_ACTIVE_ENGINE_TITLE: &str = "No engine connected";
 pub const NO_ACTIVE_ENGINE_BODY: &str = "Pick an engine to connect to.";
 
 // ── status bar ──────────────────────────────────────────────────────────────────────────
-pub fn status_bar_engine(version: &str, api: Option<&str>, os: &str, arch: &str) -> String {
+/// What the status bar says about the active engine (ENG-108). It has no field for
+/// `transport_note`: a route note belongs in Settings and Diagnostics (ENG-110).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusBarEngine {
+    pub label: &'static str,
+    pub facts: String,
+    pub transport: Option<String>,
+}
+
+impl StatusBarEngine {
+    pub fn of(info: &dk_core::EngineInfo) -> Self {
+        Self {
+            label: info.kind.label(),
+            facts: status_bar_facts(
+                &info.server_version,
+                info.api_version.as_deref(),
+                &info.os,
+                &info.arch,
+            ),
+            transport: info.transport.as_deref().map(transport_label),
+        }
+    }
+}
+
+pub fn status_bar_facts(version: &str, api: Option<&str>, os: &str, arch: &str) -> String {
     match api {
-        Some(api) => format!("Engine {version} · API {api} · {os}/{arch}"),
-        None => format!("Engine {version} · {os}/{arch}"),
+        Some(api) => format!("{version} · API {api} · {os}/{arch}"),
+        None => format!("{version} · {os}/{arch}"),
     }
 }
 pub fn status_bar_resources(cpus: Option<u32>, mem: Option<String>) -> String {
@@ -1052,4 +1076,60 @@ pub fn upd_updated(version: &str) -> String {
 }
 pub fn release_notes_url(version: &str) -> String {
     format!("{RELEASES_URL}/tag/v{version}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eng_108_status_bar_facts_format() {
+        assert_eq!(
+            status_bar_facts("27.3.1", Some("1.47"), "linux", "amd64"),
+            "27.3.1 · API 1.47 · linux/amd64"
+        );
+        assert_eq!(
+            status_bar_facts("3.0.1", Some("v3_0"), "linux", "amd64"),
+            "3.0.1 · API v3_0 · linux/amd64"
+        );
+        assert_eq!(
+            status_bar_facts("3.0.1", None, "linux", "arm64"),
+            "3.0.1 · linux/arm64"
+        );
+    }
+
+    fn info(kind: dk_core::EngineKind) -> dk_core::EngineInfo {
+        dk_core::EngineInfo {
+            name: "name-not-shown".into(),
+            kind,
+            transport: Some("com".into()),
+            transport_note: Some("CLI fallback: stats".into()),
+            server_version: "3.0.1".into(),
+            api_version: Some("v3_0".into()),
+            os: "linux".into(),
+            arch: "amd64".into(),
+            kernel: None,
+            cpus: None,
+            mem_total: None,
+            containers: Default::default(),
+            images: 0,
+            storage_driver: None,
+            root_dir: None,
+            daemon_id: None,
+            list_stats_limit: 0,
+            capabilities: dk_core::Capabilities::all(),
+        }
+    }
+
+    #[test]
+    fn eng_108_status_bar_names_the_kind_not_the_note() {
+        let wslc = StatusBarEngine::of(&info(dk_core::EngineKind::Wslc));
+        assert_eq!(wslc.label, "WSL containers");
+        assert_eq!(wslc.facts, "3.0.1 · API v3_0 · linux/amd64");
+        assert_eq!(wslc.transport.as_deref(), Some("via com"));
+        let docker = StatusBarEngine::of(&info(dk_core::EngineKind::Docker));
+        assert_eq!(docker.label, "Docker");
+        let shown = format!("{} {} {:?}", wslc.label, wslc.facts, wslc.transport);
+        assert!(!shown.contains("CLI fallback"), "{shown}");
+    }
 }

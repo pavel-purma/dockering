@@ -12,6 +12,7 @@ use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
 use gpui_kit::component::notification::Notification;
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::sidebar::Sidebar;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::status_bar::StatusBar;
@@ -1639,6 +1640,9 @@ impl AppShell {
             .and_then(|s| s.read(cx).info().cloned())
             .or_else(|| status.as_ref().and_then(|s| s.info.clone()));
         let state = status.as_ref().map(|s| s.state.clone());
+        let engine = info.as_ref().map(s::StatusBarEngine::of);
+        let foreground = cx.theme().foreground;
+        let divider = || Separator::vertical().h(px(12.));
         let left = h_flex()
             .gap_2()
             .items_center()
@@ -1646,20 +1650,28 @@ impl AppShell {
                 this.child(dot(engine_dot_color(st, cx)))
                     .child(engine_state_label(st))
             })
-            .when_some(info.as_ref(), |this, i| {
-                this.child(s::status_bar_engine(
-                    &i.server_version,
-                    i.api_version.as_deref(),
-                    &i.os,
-                    &i.arch,
-                ))
-                .when_some(i.transport.as_ref(), |this, t| {
-                    // ENG-110: active transport (+ fallback reason chip).
-                    this.child(Tag::secondary().small().child(s::transport_label(t)))
-                })
-                .when_some(i.transport_note.as_ref(), |this, n| {
-                    this.child(Tag::info().small().child(n.clone()))
-                })
+            .when_some(engine, |this, e| {
+                this.when(state.is_some(), |this| this.child(divider()))
+                    .child(
+                        h_flex()
+                            .debug_selector(|| "status-engine".into())
+                            .gap_1p5()
+                            .items_center()
+                            .child(
+                                div()
+                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                    .text_color(foreground)
+                                    .child(e.label),
+                            )
+                            .child(e.facts),
+                    )
+                    .when_some(e.transport, |this, t| {
+                        this.child(divider()).child(
+                            div()
+                                .debug_selector(|| "status-transport".into())
+                                .child(Tag::secondary().small().child(t)),
+                        )
+                    })
             });
         let resources = info.as_ref().map(|i| {
             s::status_bar_resources(i.cpus, i.mem_total.map(dk_core::format::format_size))
@@ -1677,7 +1689,7 @@ impl AppShell {
             .track_focus(&self.status_focus)
             .child(
                 StatusBar::new()
-                    .left(left)
+                    .left(left.debug_selector(|| "status-left".into()))
                     .when_some(right, |this, r| this.right(r)),
             )
             .into_any_element()

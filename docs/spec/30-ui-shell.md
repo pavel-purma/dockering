@@ -22,7 +22,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 │               │ ☐  redis           redis:7       Exited (0)                   ▶ ⟳ ⋮ │
 │               │                                                                      │
 ├───────────────┴──────────────────────────────────────────────────────────────────────┤
-│ StatusBar: ● Connected · Docker 27.3.1 · API 1.47 · linux/amd64        RAM —  CPU — │
+│ ● Connected │ Docker 27.3.1 · API 1.47 · linux/amd64 │ via unix  CPUs 8 · RAM 16 GB │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,7 +41,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Toasts | `Notification` via `window.push_notification` | |
 | Empty states | `empty` component + illustration icon + CTA | |
 | Loading | `Skeleton` rows (first load), `Spinner` in header (refresh) | |
-| Status bar | `StatusBar` | |
+| Status bar | `StatusBar` | Left: state dot and label │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, update item (UPD-008). The state dot is the only colour: never a route note or coloured chip (ENG-108, ENG-110) |
 
 ## 1a. Native menus & window chrome (SHL-020…)
 

@@ -1,8 +1,8 @@
 # Feature: Engine connections & switching
 
-- **Status:** implemented (2026-10-04, including WSLC repairs ENG-126…136; cross-OS release validation remains open in the plan)
+- **Status:** implemented (2026-10-04, including WSLC repairs ENG-126…136; cross-OS release validation remains open in the plan; status-bar change to ENG-108/110/136 in progress since 2026-10-05)
 - **Requirement prefix:** ENG (backend reqs ENG-001…025 live in [20-engine-backends.md](../20-engine-backends.md))
-- **Plan:** built in milestones M1, M2, M7, M8, and M9; scan/defaults: [engine-scan-and-defaults](../../plan/features/engine-scan-and-defaults.md) (done); WSLC repairs: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates)
+- **Plan:** built in milestones M1, M2, M7, M8, and M9; scan/defaults: [engine-scan-and-defaults](../../plan/features/engine-scan-and-defaults.md) (done); WSLC repairs: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates); status bar: [status-bar-engine-label](../../plan/features/status-bar-engine-label.md) (approved, in progress)
 
 ## User stories
 
@@ -22,9 +22,9 @@
 | ENG-105 | *Add engine* dialog: kind = Unix socket / Named pipe / TCP / TCP+TLS (CA, cert, key file pickers) / WSL distro (dropdown of detected distros, mode Bridge or TCP port) / WSLC (session name; transport *Auto*/*COM*/*CLI*). *Test* before *Save*. |
 | ENG-106 | A WSL distro that is stopped MUST show a *Start & connect* action. It MUST NOT be booted silently by background pings. |
 | ENG-107 | A failed connection MUST show the error with an actionable hint (permission, daemon not running, WSL version too old, socat missing, and so on). |
-| ENG-108 | The status bar MUST show the engine version, API version, and OS/arch of the active engine. |
+| ENG-108 | Once the engine has reported its info, the status bar MUST name the active engine by its kind label (for example *Docker*, *WSL containers*) and show, compactly, its version, API version, OS/arch and transport. It MUST NOT draw `transport_note` or any other coloured explanation of how a backend is implemented; the state dot is its only colour (changed 2026-10-05, planned). |
 | ENG-109 | WSLC sessions: the default session MUST remain listed. Further sessions appear with "Show all WSLC sessions" only when both caller and creator SIDs are known, valid and equal. Missing SID MUST fail closed; CLI session-table names alone are not ownership evidence (ENG-135), so discovery does not invoke CLI enumeration for extras. Preserve previously listed engines under ENG-114. |
-| ENG-110 | WSLC hover tooltip and Diagnostics MUST show primary transport and WSL version (`EngineInfo.server_version`). The existing `transport_note` info chip in the status bar, Settings → Engines and Diagnostics MUST describe limitations and mixed/degraded routes (e.g. "COM primary; Run uses CLI — native Run unverified"). Do not label the whole engine CLI merely because Run uses CLI, or use a last-call transport label; metadata MUST refresh even with unchanged capabilities (ENG-136). Strict COM note: "COM only; native Run unverified". |
+| ENG-110 | WSLC hover tooltip and Diagnostics MUST show primary transport and WSL version (`EngineInfo.server_version`). `transport_note` MUST be set only when the user should know something, in a few words, and be `None` otherwise: an Auto connection that fell back to the CLI (e.g. "WSL 3.1.0 not yet verified — using CLI"; a CLI you chose yourself needs no note), COM-only mode ("COM only — Run unavailable"), or operations that fell back to the CLI after a fault ("CLI fallback: pull_image, stats", at most three names, then "+N more"). A by-design difference, such as Auto sending Run through the CLI, gets no note. The note shows as the info chip in Settings → Engines and Diagnostics and MUST NOT be drawn in the status bar (changed 2026-10-05, planned). Do not label the whole engine CLI merely because Run uses CLI, or use a last-call transport label; metadata MUST refresh even with unchanged capabilities (ENG-136). |
 | ENG-111 | **First run / no engine.** When no engine is discovered or connected, the window shows a full-page welcome with per-OS guidance (Linux: install Docker Engine, add the user to the `docker` group. macOS: Docker Desktop / Colima / OrbStack. Windows: Docker Desktop, Docker in a WSL distro, or `wsl --update` for WSLC), plus *Rescan* and *Add engine…*. It's keyboard-operable (KBD-001). |
 | ENG-112 | **Unsupported engines** (ssh contexts, API < 1.41) are listed greyed out with the reason and are never contacted (ENG-010). |
 | ENG-113 | **Scan lifecycle** (new). Discovery MUST run once per app start and again only on an explicit *Rescan*: the button in Settings → Engines, the *Rescan engines* command-palette entry, or the first-run screen (ENG-111). Nothing else (engine switch, connect, reconnect, background probe, ping) may add, remove, or hide an engine. Background probes only change an engine's *state*. A *Rescan* made while no engine is active applies the ENG-103 startup order (default, last-used, auto-select). |
@@ -48,7 +48,7 @@ The stable IDs below describe implemented behavior. ENG-120…125 remain reserve
 | ENG-133 | COM and CLI inspect conversion MUST preserve equivalent typed ports and other shared fields and MUST preserve original inspect JSON in `raw`. |
 | ENG-134 | Canceled queued RPCs MUST NOT dispatch. Required operation-token failure MUST prevent the protected call. Resources MUST have handle-type-correct ownership/cancellation without blocking teardown on UI/hub workers. |
 | ENG-135 | Extra-session discovery MUST fail closed for unproven ownership. Policy errors MUST prohibit CLI enumeration/fallback. CLI table rows lacking ownership evidence MUST NOT become extra discovered engines. |
-| ENG-136 | Routing metadata MUST describe mixed/degraded routes and propagate to registry, active store, status bar, Settings and Diagnostics even when capabilities do not change. |
+| ENG-136 | Routing metadata MUST describe notable mixed/degraded routes (not Auto's by-design Run through the CLI) and propagate to registry, active store, status bar, Settings and Diagnostics even when capabilities do not change. The status bar refreshes its facts from the snapshot but never draws `transport_note` (changed 2026-10-05, planned). |
 
 ## UI
 
@@ -82,9 +82,9 @@ Manual, on real engines: tracked in the [release checklist](../../plan/release-c
 | ENG-105 | `eng_105_*` (mapping, dialog, test-then-save, failed test) |
 | ENG-106 | `eng_106_stopped_distro_is_listed_stopped_and_not_probed`, `eng_106_start_and_connect_activates_a_stopped_non_active_distro` |
 | ENG-107 | `eng_107_unreachable_hints`, `eng_107_decodes_wsl_errors_in_either_encoding`, `eng_105_failed_test_shows_hint_and_save_anyway` |
-| ENG-108 | `eng_108_engine_info_from_json` (data); the status-bar render is checked manually |
+| ENG-108 | `eng_108_engine_info_from_json` (data); the status-bar render is checked manually. Planned 2026-10-05: `eng_108_status_bar_facts_format`, `eng_108_status_bar_names_the_kind_not_the_note` |
 | ENG-109 | `eng_109_show_all_toggles_persist`, `eng_008_list_sessions_parses_table` |
-| ENG-110 | `cli_contract` (`transport_note`), `com_live` (ignored, `wsl` runner); the render is checked manually |
+| ENG-110 | `cli_contract` (`transport_note`), `com_live` (ignored, `wsl` runner); the render is checked manually. Planned 2026-10-05: `eng_110_status_bar_draws_no_route_note`, `eng_136_note_only_when_notable`, `eng_110_wslc_api_version_is_module_name` |
 | ENG-111 | `eng_111_first_run_add_engine_opens_dialog` |
 | ENG-112 | `eng_010_ssh_endpoint_unsupported_never_contacted`, `eng_010_ssh_and_unknown_are_unsupported` |
 | ENG-113 | `eng_113_no_discovery_after_start_until_rescan` |

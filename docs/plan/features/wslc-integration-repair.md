@@ -426,6 +426,7 @@ Windows final test/clippy/fmt/check-blocking passed. Linux/macOS validation is e
 
 ## 10. Revision log
 
+- 2026-10-05: follow-up, docs only. Superseded in part by [status-bar-engine-label](status-bar-engine-label.md): the status bar no longer draws `transport_note`, and the router reports a note only for notable routes, not Auto's by-design Run through the CLI (the Metadata propagation paragraph in §6.1 and the ENG-110/136 wording). This completion record describes what was built on 2026-10-04.
 - 2026-10-04: complete mode, docs only. Current implementation/tests and final Windows workspace output inspected; parent final reviewer approve and expanded four-Run live PASS recorded. Repair status done/feature specs implemented; cross-OS release validation explicitly remains open, native CreateContainer deferred, mixed identity-check/spawn race documented. No code change, test rerun or commit.
 - 2026-10-04: user approved implementation of the repair plan; native CreateContainer enablement remains outside this repair.
 - 2026-10-04: created draft documentation and planned spec changes from supplied live evidence and repository audit. No implementation or approval; native Run stays unverified.
