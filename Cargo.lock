@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "dk-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bitflags 2.13.2",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "dk-engine-docker"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bollard",
@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "dk-engine-wslc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "dk-hub"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1737,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "dk-terminal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alacritty_terminal",
  "bytes",
@@ -1747,7 +1747,7 @@ dependencies = [
 
 [[package]]
 name = "dk-update"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures",
  "hex",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "dk-wsl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1795,7 +1795,7 @@ dependencies = [
 
 [[package]]
 name = "dockering"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -9573,7 +9573,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "hex",
