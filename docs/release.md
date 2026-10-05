@@ -19,11 +19,11 @@ published release. The steps below are the manual-tag flow used for 0.2.0.
 1. **Prepare.** From current `main`, bump `[workspace.package] version` in `Cargo.toml`, run
    `cargo update --workspace` (only the nine workspace crates change in `Cargo.lock`), and add a
    `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`release.yml` fails without it and uses it as
-   the release notes). Use the UTC date of publication. A `feat:` since the last tag is a minor bump
-   while in `0.x`; fixes alone are a patch (REL-011). Copy the latest section of the
-   [release checklist](plan/release-checklist.md) for the new version.
-2. **Pull request.** Title `chore(release): vX.Y.Z`, squash-merge once every check is green. Register
-   the PR with the thread.
+   the release notes). Use the date you expect to publish on, and correct it in the PR if the release
+   slips. A `feat:` since the last tag is a minor bump while in `0.x`; fixes alone are a patch
+   (REL-011). Copy the latest section of the [release checklist](plan/release-checklist.md) for the
+   new version.
+2. **Pull request.** Title `chore(release): vX.Y.Z`; squash-merge once every check is green.
 3. **CI incidents.** If a job fails with "The job was not acquired by Runner of type hosted even after
    multiple attempts", it was cancelled before any step ran. Check [githubstatus.com](https://www.githubstatus.com),
    then `gh run rerun <run-id> --failed`. A job that fails *after* starting is a real failure: read its
@@ -51,8 +51,9 @@ published release. The steps below are the manual-tag flow used for 0.2.0.
    gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest
    ```
 
-   Then check anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset URLs, the latest-release
-   API, and that the `winget` run publishing started was skipped.
+   Then check anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset URLs and the
+   latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
+   `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset.
 8. **Record.** In a docs PR: update the README download text and links, complete the checklist's
    evidence section, and reconcile the spec status lines. Leave unperformed manual checks unchecked.
 
