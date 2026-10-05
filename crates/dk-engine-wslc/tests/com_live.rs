@@ -80,10 +80,7 @@ fn live_factory_discover_connect_auto_uses_com() {
     let info = block_on(engine.info()).expect("info");
     eprintln!("info: {info:#?}");
     assert_eq!(info.transport.as_deref(), Some("com"));
-    assert_eq!(
-        info.transport_note.as_deref(),
-        Some("COM primary; Run uses CLI — native Run unverified")
-    );
+    assert_eq!(info.transport_note, None);
 }
 
 #[test]

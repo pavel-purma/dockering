@@ -32,6 +32,8 @@ Run alone does neither. T12/T13 hub/UI full-info propagation is now implemented 
 in the final Windows workspace run; see the central plan rather than treating this backend
 handoff as pending work.
 
+Superseded 2026-10-05 (plan status-bar-engine-label): Auto no longer reports a route note; COM-only reports `COM only — Run unavailable`; fallbacks report `CLI fallback: <ops>`.
+
 Safety gates: mixed volume prune is refused (COM all-unused versus CLI anonymous-only).
 Mixed create-volume with explicit `local` driver is refused on CLI fallback (CLI substitutes
 its default, COM forwards the driver). Supplied pull auth cannot enter CLI or be ignored.

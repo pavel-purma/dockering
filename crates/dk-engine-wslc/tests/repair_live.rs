@@ -17,7 +17,6 @@ use dk_engine_wslc::{WslcFactory, com, version};
 use futures::{FutureExt, StreamExt};
 
 const CALL: Duration = Duration::from_secs(15);
-const MIXED: &str = "COM primary; Run uses CLI — native Run unverified";
 
 fn security_rejection(err: &EngineError) -> bool {
     // Live COM currently maps ERROR_ELEVATION_REQUIRED to Api 500. Admit only that
@@ -341,7 +340,8 @@ async fn eng_127_128_normal_user_hello_world_acceptance() {
                 let info = bounded(e.info()).await.expect("matrix info");
                 let expected = if pref == WslcTransportPref::Cli { "cli" } else { "com" };
                 assert_eq!(info.transport.as_deref(), Some(expected));
-                if pref == WslcTransportPref::Auto { assert_eq!(info.transport_note.as_deref(), Some(MIXED)); }
+                if pref == WslcTransportPref::Auto { assert_eq!(info.transport_note, None); }
+                if pref == WslcTransportPref::Com { assert_eq!(info.transport_note.as_deref(), Some("COM only — Run unavailable")); }
                 bounded(e.ping()).await.expect("target health");
                 if pref == WslcTransportPref::Com {
                     let r = bounded(e.run_image(RunSpec { image: "hello-world:latest".into(), name: Some(owned.names[0].clone()), ..Default::default() })).await;
@@ -357,9 +357,9 @@ async fn eng_127_128_normal_user_hello_world_acceptance() {
             let id = tokio::time::timeout(Duration::from_secs(45), e.run_image(RunSpec { image: "hello-world:latest".into(), name: Some(owned.names[n].clone()), ..Default::default() })).await.expect("Run timed out; do not retry").expect("Run once");
             verify_hello(&native, cli.as_ref(), &id, &owned.names[n]).await;
             if pref == WslcTransportPref::Auto {
-                let info = bounded(e.info()).await.expect("mixed after Run");
+                let info = bounded(e.info()).await.expect("info after Run");
                 assert_eq!(info.transport.as_deref(), Some("com"));
-                assert_eq!(info.transport_note.as_deref(), Some(MIXED));
+                assert_eq!(info.transport_note, None);
             }
             eprintln!("Run target={target:?} pref={pref:?} returnedID={id} both inspect: Exited/0 /hello PASS");
             // Other existing sessions are read-only. A security rejection is acceptable;

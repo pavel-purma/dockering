@@ -509,17 +509,22 @@ impl Engine for WslcEngine {
             }
             info.capabilities = caps;
             info.list_stats_limit = if routes.contains("stats") { 0 } else { 20 };
-            let mut notes = vec![if self.inner.strict {
-                "COM only; native Run unverified".to_owned()
+            info.transport_note = if self.inner.strict {
+                Some("COM only — Run unavailable".to_owned())
+            } else if routes.is_empty() {
+                None
             } else {
-                "COM primary; Run uses CLI — native Run unverified".to_owned()
-            }];
-            notes.extend(
-                routes
+                const SHOWN: usize = 3;
+                let mut ops: Vec<String> = routes
                     .iter()
-                    .map(|op| format!("{op} uses CLI — native transport fault")),
-            );
-            info.transport_note = Some(notes.join("; "));
+                    .take(SHOWN)
+                    .map(|op| (*op).to_owned())
+                    .collect();
+                if routes.len() > SHOWN {
+                    ops.push(format!("+{} more", routes.len() - SHOWN));
+                }
+                Some(format!("CLI fallback: {}", ops.join(", ")))
+            };
         }
         Ok(info)
     }
@@ -983,6 +988,36 @@ mod tests {
         assert_eq!(info.list_stats_limit, 0);
         assert!(!info.capabilities.contains(Capabilities::PULL_PROGRESS));
         assert_eq!(info.capabilities, r.capabilities());
+    }
+
+    #[tokio::test]
+    async fn eng_136_note_only_when_notable() {
+        let (r, _, _) = native(false).await;
+        assert_eq!(r.info().await.expect("info").transport_note, None);
+        r.run_image(RunSpec {
+            image: "hello-world".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("Run");
+        assert_eq!(r.info().await.expect("info").transport_note, None);
+        r.sticky("stats");
+        r.sticky("pull_image");
+        assert_eq!(
+            r.info().await.expect("info").transport_note.as_deref(),
+            Some("CLI fallback: pull_image, stats")
+        );
+        r.sticky("list_containers");
+        r.sticky("logs");
+        assert_eq!(
+            r.info().await.expect("info").transport_note.as_deref(),
+            Some("CLI fallback: list_containers, logs, pull_image, +1 more")
+        );
+        let (strict, _, _) = native(true).await;
+        assert_eq!(
+            strict.info().await.expect("info").transport_note.as_deref(),
+            Some("COM only — Run unavailable")
+        );
     }
 
     #[tokio::test]

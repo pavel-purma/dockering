@@ -50,8 +50,7 @@ fn eng_136_metadata_without_flags_preserves_focus_page_and_updates_stats(cx: &mu
         })
     });
     let initial_subscriptions = cx.read(|cx| page.read(cx).stats_subscription_count());
-    status.info.as_mut().unwrap().transport_note =
-        Some("COM primary; Run uses CLI — native Run unverified".into());
+    status.info.as_mut().unwrap().transport_note = Some("CLI fallback: pull_image".into());
     let note_only = status.info.clone().unwrap();
     cx.update(|cx| {
         list.update(cx, |s, cx| {
@@ -77,7 +76,7 @@ fn eng_136_metadata_without_flags_preserves_focus_page_and_updates_stats(cx: &mu
     h.wait_until(cx, "older info call started", |_, _| {
         !h.engine.calls_to("info").is_empty()
     });
-    let note = "COM primary; stats uses CLI — transport unavailable";
+    let note = "CLI fallback: stats";
     let info = status.info.as_mut().unwrap();
     info.transport = Some("com".into());
     info.transport_note = Some(note.into());
@@ -131,6 +130,53 @@ fn eng_136_metadata_without_flags_preserves_focus_page_and_updates_stats(cx: &mu
             && page.read(cx).table().read(cx).delegate(cx).show_stats
     });
     assert!(h.is_focused(cx, &focus));
+    h.shutdown();
+}
+
+/// ENG-108/110: the bar's left segment ends with the transport tag. A route note in the
+/// snapshot adds nothing after it, so no chip is drawn there.
+#[gpui_kit::test]
+fn eng_110_status_bar_draws_no_route_note(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.wait_until(cx, "info loaded", |_, cx| {
+        h.shell.read(cx).store().unwrap().read(cx).info().is_some()
+    });
+    let (store, list, mut status) = h.read(cx, |s, _, cx| {
+        (
+            s.store().unwrap().clone(),
+            s.engines().clone(),
+            s.engines().read(cx).active().unwrap().clone(),
+        )
+    });
+    let tail = |cx: &mut TestAppContext| {
+        h.draw(cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+        let left = visual.debug_bounds("status-left").expect("left segment");
+        let transport = visual
+            .debug_bounds("status-transport")
+            .expect("transport tag");
+        assert!(visual.debug_bounds("status-engine").is_some());
+        (left.right(), transport.right())
+    };
+    let (left_right, transport_right) = tail(cx);
+    assert_eq!(left_right, transport_right, "nothing follows the transport");
+    let info = status.info.as_mut().unwrap();
+    info.kind = dk_core::EngineKind::Wslc;
+    info.transport = Some("com".into());
+    info.api_version = Some("v3_0".into());
+    info.transport_note = Some("CLI fallback: pull_image, stats".into());
+    let expected = info.clone();
+    cx.update(|cx| {
+        list.update(cx, |s, cx| {
+            s.apply_test_event(dk_hub::HubEvent::StatusChanged(status.clone()), cx)
+        })
+    });
+    h.wait_until(cx, "snapshot applied", |_, cx| {
+        store.read(cx).info() == Some(&expected)
+    });
+    let (left_right, transport_right) = tail(cx);
+    assert_eq!(left_right, transport_right, "the note is not drawn");
     h.shutdown();
 }
 

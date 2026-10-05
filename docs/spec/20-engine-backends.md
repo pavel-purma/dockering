@@ -180,7 +180,7 @@ process, and supports TLS certificates.
 - **Implemented reconciliation:** 5 s bounded reads can establish start/stop on the same full ID, primary container removal without ancillary volume deletion, volume/network absence, or inspect recovery using a successful CreateVolume's returned name. Restart/kill/tag/ambiguous creates/pull/exec and lost reports/Run IDs remain unknown where completion cannot be proved; no generalized postcondition reconstruction is claimed.
 - **Streams (ENG-131):** logs/stats/events may fall back before the first source item on classified transport failure; cancel the old producer before starting CLI. Track source activity before filtering. After the first item a transport fault ends the subscription, without source splicing; explicit resubscription/refetch uses current route. Clean EOF is not a fallback trigger. Events-lost remains a gap/refetch signal, not a transport switch. Pull additionally requires proven predispatch failure, even with zero progress; exec MUST NOT recreate a process after a possibly dispatched call. Live TerminalSession methods remain transport-pinned.
 - **Safety.** Unverified vtables are never called; mismatched ABI can be undefined behavior. Operation-specific trust is separate from module trust, initially disabling native CreateContainer. IDL review and real marshalling/contract evidence are required to admit a new exact version (§5.7).
-- Primary/mixed/degraded route reasons and WSL version appear in existing tooltip/chip/Diagnostics metadata (ENG-110/136; §5.6).
+- The WSL version and primary transport appear in Settings → Engines and Diagnostics (the switcher row shows the version, its tooltip the transport). A short route note appears there only when notable (ENG-110/136; §5.6); the status bar never shows it (ENG-108/110).
 
 ### 5.4 COM transport (`WslcComTransport`)
 
@@ -196,7 +196,7 @@ process, and supports TLS certificates.
 
 | Engine op | COM call | Notes |
 |---|---|---|
-| `info` | `IWSLCSessionManager::GetVersion` + session state | No docker `/info`. `api_version = "COM ABI v3_0"` (the ABI module). `cpus` / `mem_total` are `None`. |
+| `info` | `IWSLCSessionManager::GetVersion` + session state | No docker `/info`. `api_version = "v3_0"` (the ABI module name). `cpus` / `mem_total` are `None`. |
 | `list_containers` | `IWSLCSession::ListContainers(opts{all})` → `WSLCContainerEntry[]` + `WSLCContainerPortMapping[]` | Labels, networks, and mounts are strings; parse them (Docker CLI-like `k=v,…`). |
 | `inspect_container` | `OpenContainer(id)` → `IWSLCContainer::Inspect(size) → LPSTR` | Shared `inspect::container_details` adapts WSLC top-level `Ports` for summary/bindings while preserving original parsed `raw` (ENG-133, CDT-030/040). |
 | start / stop / restart / kill | `IWSLCContainer::Start(flags, NULL, cb)` / `Stop(signal, timeout)` / `Restart` / `Kill(signal)` | `WSLC_STOP_TIMEOUT_DEFAULT` when no timeout is given |
@@ -275,7 +275,7 @@ Parsers are tolerant: unknown fields are ignored, and human-formatted sizes and 
 | STATS_STREAM (native) | ✘ (polled) | ✘ (polled) |
 | PAUSE, TOP, IMAGE_HISTORY, DISK_USAGE | ✘ | ✘ |
 
-**Router metadata (ENG-136).** Capabilities/info come from one coherent operation-route snapshot. `PULL_PROGRESS` follows future pull routes; CLI stats use `list_stats_limit = 0`. Run's CLI exception does not demote COM pull/stats. `transport = "com"` means COM-primary, with mixed/degraded note (e.g. "COM primary; Run uses CLI — native Run unverified"); strict COM note is "COM only; native Run unverified". Degraded names are sorted/deduplicated; CLI-only uses `"cli"`. No last-call transport label.
+**Router metadata (ENG-136).** Capabilities/info come from one coherent operation-route snapshot. `PULL_PROGRESS` follows future pull routes; CLI stats use `list_stats_limit = 0`. Run's CLI exception does not demote COM pull/stats. `transport = "com"` means COM-primary. `transport_note` is `None` for healthy Auto (Run through the CLI is by design, not a note); strict COM reports "COM only — Run unavailable"; operations that fell back to the CLI after a fault report "CLI fallback: <ops>" (sorted, deduplicated, at most three names, then "+N more"); CLI-only connections keep the factory's short reason. CLI-only uses `"cli"`. No last-call transport label.
 
 Full EngineInfo refresh runs after successful active health ping under a bounded timeout outside registry locks, current-connection guarded. Existing StatusChanged publishes metadata changes even with unchanged flags; CapabilitiesChanged remains for real flag changes. Info-only failure preserves prior snapshot without degrading a healthy engine. Local EngineListEvent::InfoChanged/EngineStore::apply_info updates active store, Settings, status bar and Diagnostics without reconnect/remount/focus movement. No new Engine method or public hub event was added.
 

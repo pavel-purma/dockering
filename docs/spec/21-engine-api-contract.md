@@ -145,7 +145,7 @@ pub enum EngineKind { Docker, WslDistro, Wslc, AppleContainer /* reserved, ENG-0
 pub struct EngineInfo {
     pub name: String, pub kind: EngineKind,
     pub transport: Option<String>,          // e.g. "com", "cli", "xpc"; display/diagnostics only
-    pub transport_note: Option<String>,     // existing code field; limitation/mixed/degraded route explanation (ENG-110/136)
+    pub transport_note: Option<String>,     // existing code field; short reason a fallback or limited route is in use, None when nothing is notable (ENG-110/136)
     pub server_version: String, pub api_version: Option<String>,
     pub os: String, pub arch: String, pub kernel: Option<String>,   // engine-wide facts are optional (ENG-031)
     pub cpus: Option<u32>, pub mem_total: Option<u64>,
@@ -157,7 +157,7 @@ pub struct EngineInfo {
 pub enum EngineState { Disconnected, Connecting, Connected, Degraded, Failed { error: EngineError, retry_at: Option<Instant> } }
 ```
 
-For WSLC operation routing, `transport` describes the primary transport, not the last call; `transport_note` names CLI exceptions/degraded routes. Capabilities and existing `list_stats_limit` reflect a coherent snapshot. Hub full-info refresh publishes existing StatusChanged even when flags are unchanged (ENG-136); CapabilitiesChanged remains for actual flag changes. Local UI InfoChanged/apply_info propagation does not add a public hub event or Engine method.
+For WSLC operation routing, `transport` describes the primary transport, not the last call; `transport_note` is a short reason, shown in Settings → Engines and Diagnostics only when a fallback or degraded route is notable (`None` otherwise, ENG-110); the status bar never draws it. Capabilities and existing `list_stats_limit` reflect a coherent snapshot. Hub full-info refresh publishes existing StatusChanged even when flags are unchanged (ENG-136); CapabilitiesChanged remains for actual flag changes. Local UI InfoChanged/apply_info propagation does not add a public hub event or Engine method.
 
 ### 3.2 Containers
 

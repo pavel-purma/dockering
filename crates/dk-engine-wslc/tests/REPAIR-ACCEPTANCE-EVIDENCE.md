@@ -53,6 +53,8 @@ Auto retained COM-primary mixed metadata (`COM primary; Run uses CLI — native 
 after Run; strict COM Run returned **501** in both targets. Native CreateContainer was
 not exercised or enabled.
 
+Superseded 2026-10-05 (plan status-bar-engine-label): Auto no longer reports a route note; COM-only reports `COM only — Run unavailable`; fallbacks report `CLI fallback: <ops>`.
+
 Existing admin-session access was **rejected under Auto, COM and CLI without elevation**.
 No session was created; no administrator resource was inspected or removed. This proves
 normal-user rejection isolation, not successful admin-session enumeration or elevated-client

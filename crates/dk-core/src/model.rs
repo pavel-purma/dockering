@@ -329,7 +329,7 @@ pub struct EngineInfo {
     pub kind: EngineKind,
     /// e.g. "com", "cli", "xpc", "bridge"; display/diagnostics only.
     pub transport: Option<String>,
-    /// Why a fallback transport is in use (ENG-110 info chip).
+    /// Short reason a fallback or limited route is in use (ENG-110); `None` when nothing is notable.
     #[serde(default)]
     pub transport_note: Option<String>,
     pub server_version: String,

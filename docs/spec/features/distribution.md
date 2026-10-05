@@ -94,8 +94,8 @@ does not enable those features. See [the first-release plan](../../plan/features
 ## UI
 
 ```
-StatusBar:  ● Connected · Docker 29.8.1 · API 1.53 · linux/amd64          [⟳ Restart to update (0.3.0)]
-                                                                            ^ accent button, focusable (F6 → status bar)
+StatusBar:  ● Connected │ Docker 29.8.1 · API 1.53 · linux/amd64 │ via npipe      [⟳ Restart to update (0.3.0)]
+                                                                               ^ accent button, focusable (F6 → status bar)
 ```
 
 Keyboard (KBD-076): *Check for Updates*, *Restart to Update*, and *View Release Notes* are command-palette

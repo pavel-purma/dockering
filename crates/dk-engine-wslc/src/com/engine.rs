@@ -52,10 +52,7 @@ pub const COM_CAPABILITIES: Capabilities = Capabilities::EVENTS
 /// Stats polling period on COM (spec 20 §5.4).
 pub const STATS_INTERVAL: Duration = Duration::from_secs(2);
 
-/// `EngineInfo.transport_note` of the COM transport (diagnostics, ENG-110).
-pub const COM_TRANSPORT_NOTE: &str = "Run via COM is not verified for this WSL version";
-
-/// Message returned by `run_image` (CreateContainer is not verified live, see the note).
+/// Message returned by `run_image` (CreateContainer is not verified live).
 pub const RUN_NOT_VERIFIED: &str = "Run via COM is not verified for this WSL version";
 
 // ───────────────────────────── COM pointer wrappers ─────────────────────────────
@@ -995,12 +992,11 @@ impl Engine for WslcComEngine {
                 },
                 kind: EngineKind::Wslc,
                 transport: Some("com".into()),
-                // ENG-110 diagnostics: COM is fully in use except Run (CreateContainer's
-                // 30-field options struct is not verified live, so run_image returns 501).
-                transport_note: Some(COM_TRANSPORT_NOTE.into()),
+                // The router owns the route note (ENG-110).
+                transport_note: None,
                 server_version: wsl.map(|w| w.to_string()).unwrap_or(server_version),
                 // Diagnostics: which verified ABI module is in use (none for the test fake).
-                api_version: inner.abi.map(|m| format!("COM ABI {}", m.name())),
+                api_version: inner.abi.map(|m| m.name().to_owned()),
                 os: "linux".into(),
                 arch: std::env::consts::ARCH
                     .replace("aarch64", "arm64")
@@ -2353,6 +2349,20 @@ mod safety_tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn eng_110_wslc_api_version_is_module_name() {
+        let state = Arc::new(Mutex::new(fake::FakeState {
+            sessions: vec![(7, "exact session".into())],
+            default_session: "exact session".into(),
+            version: (3, 0, 1),
+            ..Default::default()
+        }));
+        let (e, _) = block_on(WslcComEngine::connect_fake_pipeline(None, state)).unwrap();
+        let info = block_on(e.info()).unwrap();
+        assert_eq!(info.api_version.as_deref(), Some("v3_0"));
+        assert_eq!(info.transport_note, None);
     }
 
     #[test]

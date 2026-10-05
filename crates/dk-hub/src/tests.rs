@@ -1387,7 +1387,7 @@ async fn eng_136_info_without_caps_change_and_cli_stats_limit() {
     for field in ["note", "transport", "list_stats_limit"] {
         let mut expected = status_of(&hub, "a").await.info.unwrap();
         match field {
-            "note" => expected.transport_note = Some("COM primary; stats uses CLI".into()),
+            "note" => expected.transport_note = Some("CLI fallback: stats".into()),
             "transport" => expected.transport = Some("com".into()),
             _ => expected.list_stats_limit = 0,
         }
@@ -1427,7 +1427,7 @@ async fn eng_136_caps_and_metadata_commit_one_coherent_snapshot() {
     let (hub, _dir, engine, _) = metadata_hub().await;
     let mut expected = status_of(&hub, "a").await.info.unwrap();
     expected.capabilities.remove(Capabilities::PULL_PROGRESS);
-    expected.transport_note = Some("pull_image uses CLI".into());
+    expected.transport_note = Some("CLI fallback: pull_image".into());
     expected.list_stats_limit = 0;
     // capabilities() deliberately still returns the old flags: use info's snapshot.
     *lock(&engine.metadata) = Some(expected.clone());
