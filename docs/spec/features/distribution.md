@@ -123,7 +123,7 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 | UPD-005 | `upd_005_disabled_makes_no_requests`, `upd_005_not_compiled_or_demo_is_disabled`, `upd_005_policy_read_does_not_panic` |
 | UPD-006 | `upd_006_install_kind_from_path` |
 | UPD-007 | `upd_007_installer_args`, `upd_007_manual_check_downloads_and_is_ready`; manual round trip 0.1.0 → 0.2.0 with relaunch (S-9) |
-| UPD-008 | `upd_008_status_bar_renders_each_state`, `upd_008_ready_notification_once_per_version`, `upd_008_previous_version_and_notified_once` |
+| UPD-008 | `upd_008_status_bar_renders_each_state`, `upd_008_ready_notification_once_per_version`, `upd_008_previous_version_and_notified_once`, `upd_008_first_launch_after_update_shows_notice`, `upd_008_fresh_profile_shows_no_updated_notice` |
 | UPD-009 / SET-090 | `set_090_updates_section_states`, `set_090_policy_disables_controls`, `set_090_manual_check_without_updater_reports_disabled`, `set_090_short_time` |
 | UPD-011 | `upd_011_stale_manual_check_dropped` |
 | UPD-012 | `upd_012_cleanup_keeps_only_pending`, `upd_012_*` |
