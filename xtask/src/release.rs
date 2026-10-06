@@ -1,6 +1,7 @@
 //! Release metadata (spec `features/distribution.md`):
 //! - `update-manifest`: `dockering-update.json` from the built assets (UPD-002)
 //! - `sign-manifest`: minisign signature `<file>.minisig` (UPD-003)
+//! - `verify-manifest`: that signature against the public keys compiled into the app (UPD-003)
 //! - `gen-update-keys`: one-time minisign key pair for the updater (UPD-003)
 //! - `checksums`: `SHA256SUMS` over every asset (REL-012)
 //! - `verify-assets`: require every distribution file before collecting metadata (REL-017)
@@ -16,7 +17,10 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::package::{ArtifactKind, stable_name};
-use crate::util::Args;
+use crate::util::{Args, workspace_root};
+
+/// The app's compiled-in manifest keys (`PUBLIC_KEYS`), relative to the workspace root.
+pub const KEYS_SOURCE: &str = "crates/dk-update/src/keys.rs";
 
 /// Six supported release targets and their mandatory package formats (REL-012/017).
 const DISTRIBUTIONS: &[(&str, &[ArtifactKind])] = &[
@@ -129,6 +133,8 @@ const PLATFORMS: &[(&str, &str, &str)] = &[
 const KEY_ENV: &str = "UPDATE_SIGNING_KEY";
 /// Password for an encrypted key (optional).
 const KEY_PASSWORD_ENV: &str = "UPDATE_SIGNING_KEY_PASSWORD";
+/// The update manifest asset (UPD-002).
+const MANIFEST: &str = "dockering-update.json";
 
 /// `cargo xtask update-manifest --assets <dir> --version <semver> [--repo owner/name] [--out <file>]`
 pub fn run_update_manifest(args: &[String]) -> anyhow::Result<()> {
@@ -210,15 +216,28 @@ pub fn run_sign_manifest(args: &[String]) -> anyhow::Result<()> {
     let password = std::env::var(KEY_PASSWORD_ENV)
         .ok()
         .filter(|p| !p.is_empty());
-    let sk = minisign::SecretKeyBox::from_string(&key_text)
-        .and_then(|b| b.into_secret_key(password))
-        .map_err(|e| anyhow::anyhow!("invalid ${KEY_ENV}: {e}"))?;
+    let sk = load_secret_key(&key_text, password)?;
     let data = fs::read(file).with_context(|| format!("reading {file}"))?;
     let sig = sign_bytes(&sk, &data)?;
     let out = format!("{file}.minisig");
     fs::write(&out, sig).with_context(|| format!("writing {out}"))?;
     println!("xtask: wrote {out}");
     Ok(())
+}
+
+/// Without a password the key must be unencrypted (what `gen-update-keys` writes); with one it must
+/// be encrypted. Never prompts: a missing password for an encrypted key is an error.
+fn load_secret_key(text: &str, password: Option<String>) -> anyhow::Result<minisign::SecretKey> {
+    let boxed = minisign::SecretKeyBox::from_string(text)
+        .map_err(|e| anyhow::anyhow!("invalid ${KEY_ENV}: {e}"))?;
+    match password {
+        Some(password) => boxed.into_secret_key(Some(password)).map_err(|e| {
+            anyhow::anyhow!("${KEY_ENV} can't be opened with ${KEY_PASSWORD_ENV}: {e}")
+        }),
+        None => boxed.into_unencrypted_secret_key().map_err(|e| {
+            anyhow::anyhow!("${KEY_ENV} is not an unencrypted key (set ${KEY_PASSWORD_ENV} if it is encrypted): {e}")
+        }),
+    }
 }
 
 fn sign_bytes(sk: &minisign::SecretKey, data: &[u8]) -> anyhow::Result<String> {
@@ -231,6 +250,107 @@ fn sign_bytes(sk: &minisign::SecretKey, data: &[u8]) -> anyhow::Result<String> {
     )
     .map_err(|e| anyhow::anyhow!("signing failed: {e}"))?;
     Ok(sig.into_string())
+}
+
+/// `cargo xtask verify-manifest --assets <dir> [--keys <file>]`: checks `dockering-update.json.minisig`
+/// against the public keys compiled into the app, with the app's own verifier (UPD-003).
+pub fn run_verify_manifest(args: &[String]) -> anyhow::Result<()> {
+    let parsed = Args::new(args);
+    parsed.reject_unknown(&["--assets", "--keys"], &[])?;
+    let assets = Path::new(parsed.value("--assets")?.context("--assets is required")?);
+    let keys_path = parsed
+        .value("--keys")?
+        .map_or_else(|| workspace_root().join(KEYS_SOURCE), PathBuf::from);
+    let source = fs::read_to_string(&keys_path)
+        .with_context(|| format!("reading {}", keys_path.display()))?;
+    let keys = parse_public_keys(&source)?;
+    if keys.is_empty() {
+        bail!(
+            "{} has no public keys: the updater would reject every manifest (UPD-003)",
+            keys_path.display()
+        );
+    }
+    let signature = assets.join(format!("{MANIFEST}.minisig"));
+    if !signature.is_file() {
+        bail!("{} is missing: an unsigned release", signature.display());
+    }
+    let data = fs::read(assets.join(MANIFEST)).with_context(|| format!("reading {MANIFEST}"))?;
+    let signature = fs::read_to_string(&signature).context("reading the signature")?;
+    let index = verifying_key(&data, &signature, &keys)?;
+    let role = if index == 0 { "current" } else { "next" };
+    println!("xtask: {MANIFEST} verifies with public key #{index} ({role})");
+    Ok(())
+}
+
+/// The string literals of `const PUBLIC_KEYS` in `crates/dk-update/src/keys.rs`; comments are skipped.
+pub(crate) fn parse_public_keys(source: &str) -> anyhow::Result<Vec<String>> {
+    let after = source
+        .split_once("const PUBLIC_KEYS")
+        .context("no `const PUBLIC_KEYS` in the keys source")?
+        .1;
+    let value = after.split_once('=').context("PUBLIC_KEYS has no value")?.1;
+    let body = value.split_once('[').context("PUBLIC_KEYS has no `[`")?.1;
+    let mut keys = Vec::new();
+    let mut chars = body.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            ']' => return Ok(keys),
+            '"' => {
+                let mut key = String::new();
+                loop {
+                    match chars.next().context("unterminated string in PUBLIC_KEYS")? {
+                        '"' => break,
+                        '\\' => match chars.next().context("dangling escape in PUBLIC_KEYS")? {
+                            'n' => key.push('\n'),
+                            'r' => key.push('\r'),
+                            't' => key.push('\t'),
+                            other => key.push(other),
+                        },
+                        other => key.push(other),
+                    }
+                }
+                keys.push(key);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                let mut previous = ' ';
+                for c in chars.by_ref() {
+                    if previous == '*' && c == '/' {
+                        break;
+                    }
+                    previous = c;
+                }
+            }
+            _ => {}
+        }
+    }
+    bail!("PUBLIC_KEYS is not closed by `]`")
+}
+
+/// The base64 line of a public key given bare or as a whole `.pub` file (as `dk_update::verify`).
+fn key_line(key: &str) -> &str {
+    key.lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty() && !l.starts_with("untrusted comment:"))
+        .unwrap_or("")
+}
+
+/// Index of the first key that verifies `data`, using the verifier the app uses.
+fn verifying_key(data: &[u8], signature: &str, keys: &[String]) -> anyhow::Result<usize> {
+    let signature = minisign_verify::Signature::decode(signature)
+        .map_err(|e| anyhow::anyhow!("malformed signature: {e}"))?;
+    keys.iter()
+        .position(|key| {
+            minisign_verify::PublicKey::from_base64(key_line(key))
+                .is_ok_and(|pk| pk.verify(data, &signature, false).is_ok())
+        })
+        .context("no compiled-in public key verifies the manifest signature")
 }
 
 /// `cargo xtask gen-update-keys <dir>`: writes `<name>.key` (secret) and `<name>.pub` for the
@@ -311,7 +431,7 @@ fn hash_file(path: &Path) -> anyhow::Result<(String, u64)> {
 }
 
 /// SemVer without build metadata: digits, dots, and an optional `-pre.release` suffix.
-fn validate_version(v: &str) -> anyhow::Result<()> {
+pub(crate) fn validate_version(v: &str) -> anyhow::Result<()> {
     let (core, pre) = v.split_once('-').unwrap_or((v, ""));
     let parts: Vec<&str> = core.split('.').collect();
     let core_ok = parts.len() == 3
@@ -470,5 +590,107 @@ mod tests {
         assert!(validate_version("0.2").is_err());
         assert!(validate_version("0.2.0+meta").is_err());
         assert!(validate_version("0.2.0;rm").is_err());
+    }
+
+    fn keys_source(keys: &[&str]) -> String {
+        let list: Vec<String> = keys.iter().map(|k| format!("{k:?}")).collect();
+        format!(
+            "// \"RWQdoc/not/a/key\"\npub const PUBLIC_KEYS: &[&str] = &[{}];\n",
+            list.join(", ")
+        )
+    }
+
+    #[test]
+    fn upd_003_parse_public_keys() {
+        assert_eq!(
+            parse_public_keys("pub const PUBLIC_KEYS: &[&str] = &[];").unwrap(),
+            Vec::<String>::new()
+        );
+        let source = "/// PUBLIC_KEYS: docs\npub const PUBLIC_KEYS: &[&str] = &[\n    // \"RWQcommentedOut\",\n    \"RWQ//a+b/c\", // current\n    /* \"RWQblock\" */ \"RWQnext\",\n];\n";
+        assert_eq!(
+            parse_public_keys(source).unwrap(),
+            ["RWQ//a+b/c", "RWQnext"]
+        );
+        let file = "pub const PUBLIC_KEYS: &[&str] = &[\"untrusted comment: x\\nRWQfile\\n\"];";
+        assert_eq!(
+            parse_public_keys(file).unwrap(),
+            ["untrusted comment: x\nRWQfile\n"]
+        );
+        assert!(parse_public_keys("const OTHER: &[&str] = &[];").is_err());
+        assert!(parse_public_keys("const PUBLIC_KEYS: &[&str] = &[\"RWQ\"").is_err());
+    }
+
+    #[test]
+    fn upd_003_committed_keys_source_parses() {
+        let source = include_str!("../../crates/dk-update/src/keys.rs");
+        assert!(parse_public_keys(source).is_ok());
+    }
+
+    #[test]
+    fn upd_003_verify_manifest_finds_the_signing_key() {
+        let (current, next) = (
+            minisign::KeyPair::generate_unencrypted_keypair().unwrap(),
+            minisign::KeyPair::generate_unencrypted_keypair().unwrap(),
+        );
+        let manifest = b"{\"schema\":1}";
+        let keys = parse_public_keys(&keys_source(&[
+            &current.pk.to_base64(),
+            &next.pk.to_base64(),
+        ]))
+        .unwrap();
+        let by_current = sign_bytes(&current.sk, manifest).unwrap();
+        let by_next = sign_bytes(&next.sk, manifest).unwrap();
+        assert_eq!(verifying_key(manifest, &by_current, &keys).unwrap(), 0);
+        assert_eq!(verifying_key(manifest, &by_next, &keys).unwrap(), 1);
+        assert!(verifying_key(b"{\"schema\":2}", &by_current, &keys).is_err());
+        assert!(verifying_key(manifest, "not a signature", &keys).is_err());
+        assert!(verifying_key(manifest, &by_current, &[]).is_err());
+        let stranger = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let by_stranger = sign_bytes(&stranger.sk, manifest).unwrap();
+        assert!(verifying_key(manifest, &by_stranger, &keys).is_err());
+    }
+
+    #[test]
+    fn upd_003_generated_keys_sign_through_the_ci_path() {
+        let kp = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let text = kp
+            .sk
+            .to_box(Some("Dockering update signing key (secret)"))
+            .unwrap()
+            .into_string();
+        let pub_key = kp.pk.to_base64();
+        let sk = load_secret_key(&text, None).unwrap();
+        let sig = sign_bytes(&sk, b"manifest").unwrap();
+        assert_eq!(verifying_key(b"manifest", &sig, &[pub_key]).unwrap(), 0);
+        // the secret holds the key with its trailing newline, as `gh secret set < file` stores it
+        assert!(load_secret_key(&format!("{text}\n"), None).is_ok());
+        assert!(load_secret_key("not a key", None).is_err());
+    }
+
+    #[test]
+    fn upd_003_encrypted_key_needs_its_password() {
+        let kp = minisign::KeyPair::generate_encrypted_keypair(Some("pw".into())).unwrap();
+        let text = kp.sk.to_box(None).unwrap().into_string();
+        let sk = load_secret_key(&text, Some("pw".into())).unwrap();
+        let sig = sign_bytes(&sk, b"manifest").unwrap();
+        assert_eq!(
+            verifying_key(b"manifest", &sig, &[kp.pk.to_base64()]).unwrap(),
+            0
+        );
+        let missing = load_secret_key(&text, None).err().unwrap().to_string();
+        assert!(missing.contains(KEY_PASSWORD_ENV), "{missing}");
+        assert!(load_secret_key(&text, Some("wrong".into())).is_err());
+        // an unencrypted key with a password set is refused rather than silently accepted
+        let plain = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let plain = plain.sk.to_box(None).unwrap().into_string();
+        assert!(load_secret_key(&plain, Some("pw".into())).is_err());
+    }
+
+    #[test]
+    fn upd_003_verify_manifest_accepts_a_whole_pub_file() {
+        let kp = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+        let file = kp.pk.to_box().unwrap().into_string();
+        let sig = sign_bytes(&kp.sk, b"manifest").unwrap();
+        assert_eq!(verifying_key(b"manifest", &sig, &[file]).unwrap(), 0);
     }
 }

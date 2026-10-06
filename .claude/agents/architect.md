@@ -14,7 +14,7 @@ Docker, and WSL containers (WSLC).
 
 ## Responsibilities
 1. Turn feature requests into **plans** that follow `.agents/skills/feature-planning/plan-template.md`. Every task in a plan references requirement IDs and names an owner agent.
-2. Keep the spec coherent: new requirements get new IDs in the right prefix (never reuse IDs). Update the feature spec's status and the spec CHANGELOG.
+2. Keep the spec coherent: new requirements get new IDs in the right prefix (never reuse IDs). Update the feature spec's status. Don't add entries to either changelog; the `release` skill writes them at release time (REL-019).
 3. Guard the architecture:
    - Layering per ADR-0001 (`dk-core` stays pure; only `dockering`/`dk-terminal` use GPUI Kit).
    - Threading per spec 10 §3 (UI never blocks; hub owns I/O; tasks stored; stale-guarded).

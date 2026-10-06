@@ -1,7 +1,8 @@
 # Release checklist
 
 Use the exact release commit. Record run URLs and tested platforms; leave unavailable manual
-checks unchecked. Each release has its own section, newest first; copy the latest one for the next release.
+checks unchecked. Each release has its own section, newest first. The `/release` skill copies the
+[template](../../.agents/skills/release/checklist-template.md) for the next release; ticks only what it verified.
 
 ## v0.2.0 (unsigned)
 

@@ -1,5 +1,5 @@
 # PR titles must be conventional commits (REL-010): main uses squash merges, so the PR title becomes
-# the commit message that release-plz reads to compute the version and changelog (REL-011).
+# the commit message that `cargo xtask release-plan` classifies to compute the version and changelog (REL-011).
 # Scopes follow CLAUDE.md "Commit style" plus the distribution scopes.
 name: PR title
 

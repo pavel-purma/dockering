@@ -15,6 +15,7 @@ You own **build, CI, and release** for Dockering.
 - CI jobs: lint (fmt, clippy `-D warnings`, NFR-001 blocking-call grep over `crates/dockering/src`, `cargo deny`), test (3 OSes, nextest), integration-docker (Linux), and build/package.
 - Keep CI fast with `Swatinem/rust-cache` and by not running duplicate jobs.
 - Packaging is through `cargo-packager`, with config in `packaging/`. App id `dev.dockering.Dockering`. Signing secrets come only from GitHub environments and are never committed.
+- Releases are cut by the `/release` skill (`.agents/skills/release/`, REL-018). Keep `release.yml`, `cargo xtask release-plan` / `release-verify` / `verify-manifest`, `scripts/verify-release.ps1` and `docs/release.md` / `docs/signing.md` consistent with it, and never edit the changelogs outside a release PR (REL-019).
 - `cargo deny`: allow only permissive licences plus MPL-2.0. Flag GPL (for example, Zed's `terminal_view`; we don't depend on it).
 
 Before finishing: run the changed workflow locally where possible (`act`, or the equivalent cargo commands) and document any new prerequisite in `docs/spec/50-build-and-release.md`.

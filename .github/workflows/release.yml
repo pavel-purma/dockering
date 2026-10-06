@@ -1,27 +1,28 @@
-# Release on tag v* (REL-010…013, REL-030…032, UPD-002/003; docs/spec/features/distribution.md).
+# Release on tag v* (REL-010…013, REL-030…034, UPD-002/003; docs/spec/features/distribution.md).
 #
-# The tag is normally created by release-plz (release-plz.yml) when a release PR merges; a
-# maintainer can also push it by hand. This workflow builds, signs, attests, and uploads every
-# asset to a DRAFT GitHub Release. Publishing the draft (by hand, after a smoke test) is what
+# The tag is normally pushed by the `/release` skill (REL-018) once the release PR has merged; a
+# maintainer can also push it by hand (docs/release.md). This workflow builds, signs, attests, and
+# uploads every asset to a DRAFT GitHub Release. Publishing the draft (after verification) is what
 # makes a version visible to users, the in-app updater, and winget.
 #
 # Branch dispatches build all six targets and a complete review artifact; they never create a
 # release or tag. Tag runs create a DRAFT only. Unsigned mode explicitly disables signing and
 # the updater, even when credentials are configured (REL-016/017).
-# Signing secrets live only in the GitHub environment `release` (required reviewers).
+# Secrets live only in the GitHub environment `release` (restricted to main and v* refs).
 #
 # Repository variables:
-#   WINDOWS_SIGNING   signpath | azure | none (default none)          REL-031
-#   PUBLIC_RELEASES   'true' → signed channel; tags require signing   REL-031, UPD-005
-#   SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG                    (signpath)
-#   WINDOWS_SIGNER_SUBJECT  expected Authenticode subject DN           REL-032
+#   PUBLIC_RELEASES   'true' → signed channel; tags are signed          REL-031, UPD-005
+#   WINDOWS_SIGNING   signpath | azure | none (default none)            REL-031
+#   MACOS_SIGNING     apple | none (default none), independent of Windows   REL-034
+#   SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG                      (signpath)
+#   WINDOWS_SIGNER_SUBJECT  expected Authenticode subject DN; required on signed tags   REL-032
 # Secrets (environment `release`):
-#   SIGNPATH_API_TOKEN                                                 (signpath)
+#   SIGNPATH_API_TOKEN                                                   (signpath)
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-#   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE  (azure)
-#   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)        UPD-003 manifest signature
+#   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE    (azure)
+#   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)          UPD-003 manifest signature
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
-#   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8                  (macOS)
+#   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8                    (macOS, MACOS_SIGNING=apple)
 name: Release
 
 on:
@@ -57,6 +58,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
       unsigned: ${{ steps.v.outputs.unsigned }}
+      macos_signed: ${{ steps.v.outputs.macos_signed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,6 +71,8 @@ jobs:
           REQUESTED_UNSIGNED: ${{ inputs.unsigned }}
           PUBLIC_RELEASES: ${{ vars.PUBLIC_RELEASES }}
           WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
+          MACOS_SIGNING: ${{ vars.MACOS_SIGNING || 'none' }}
+          WINDOWS_SIGNER_SUBJECT: ${{ vars.WINDOWS_SIGNER_SUBJECT }}
           HAS_AZURE: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_SIGNING_ENDPOINT != '' && secrets.AZURE_SIGNING_ACCOUNT != '' && secrets.AZURE_CERT_PROFILE != '' }}
           HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_PROJECT_SLUG != '' }}
           HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_API_KEY != '' && secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_KEY_P8 != '' }}
@@ -112,15 +116,35 @@ jobs:
             echo "::error::expected a v* tag or a workflow_dispatch branch"
             exit 1
           fi
+          macos_signed=false
           if [[ "$unsigned" == false ]]; then
             case "$WINDOWS_SIGNING" in
               azure) [[ "$HAS_AZURE" == true ]] || { echo "::error::Azure signing configuration is incomplete"; exit 1; } ;;
               signpath) [[ "$HAS_SIGNPATH" == true ]] || { echo "::error::SignPath signing configuration is incomplete"; exit 1; } ;;
               *) echo "::error::signed mode requires WINDOWS_SIGNING=azure or signpath"; exit 1 ;;
             esac
-            [[ "$HAS_APPLE" == true ]] || { echo "::error::macOS signing/notarisation configuration is incomplete"; exit 1; }
+            case "$MACOS_SIGNING" in
+              apple)
+                [[ "$HAS_APPLE" == true ]] || { echo "::error::macOS signing/notarisation configuration is incomplete"; exit 1; }
+                macos_signed=true ;;
+              none) ;;
+              *) echo "::error::MACOS_SIGNING must be apple or none"; exit 1 ;;
+            esac
             [[ "$HAS_UPDATE_KEY" == true ]] || { echo "::error::signed mode requires UPDATE_SIGNING_KEY"; exit 1; }
+            python3 - <<'PY'
+          import re
+          source = open('crates/dk-update/src/keys.rs', encoding='utf-8').read()
+          match = re.search(r'PUBLIC_KEYS[^=]*=\s*&\[(.*?)\];', source, re.S)
+          body = re.sub(r'(?m)^\s*//.*$', '', match.group(1)) if match else ''
+          if not re.search(r'"[^"]+"', body):
+              raise SystemExit('::error::signed mode requires a public key in crates/dk-update/src/keys.rs (UPD-003)')
+          PY
+            if [[ "$GITHUB_REF" == refs/tags/v* && -z "$WINDOWS_SIGNER_SUBJECT" ]]; then
+              echo "::error::signed tags require the variable WINDOWS_SIGNER_SUBJECT (REL-032)"
+              exit 1
+            fi
           fi
+          echo "macos_signed=$macos_signed" >> "$GITHUB_OUTPUT"
       - name: Refuse to change an already published release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -149,6 +173,9 @@ jobs:
     needs: verify
     runs-on: ${{ matrix.os }}
     environment: release
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -166,8 +193,6 @@ jobs:
       # (cargo build scripts, cargo install, …), only the steps that use them (NFR-020, REL-013).
       HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
       HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
-      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
-      HAS_APPLE_API: ${{ secrets.APPLE_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Linux prerequisites (GPUI Kit)
@@ -235,11 +260,14 @@ jobs:
           artifact-configuration-slug: exe
           github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
           wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: target/${{ matrix.target }}/release
+          parameters: |
+            version: "${{ needs.verify.outputs.version }}"
 
-      # --- macOS: cargo-packager signs and notarises the .app when the identity is set ---
+      # --- macOS: cargo-packager signs and notarises the .app when the identity is set (REL-034) ---
       - name: Prepare macOS signing
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true'
+        if: needs.verify.outputs.macos_signed == 'true' && runner.os == 'macOS'
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -261,10 +289,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         env:
-          APPLE_CERTIFICATE: ${{ needs.verify.outputs.unsigned != 'true' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ needs.verify.outputs.unsigned != 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_API_KEY: ${{ needs.verify.outputs.unsigned != 'true' && secrets.APPLE_API_KEY || '' }}
-          APPLE_API_ISSUER: ${{ needs.verify.outputs.unsigned != 'true' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_CERTIFICATE: ${{ needs.verify.outputs.macos_signed == 'true' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ needs.verify.outputs.macos_signed == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY: ${{ needs.verify.outputs.macos_signed == 'true' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ needs.verify.outputs.macos_signed == 'true' && secrets.APPLE_API_ISSUER || '' }}
         run: bash scripts/package-macos.sh "$TARGET"
 
       # --- Windows, stage 2: sign the installer ---
@@ -302,24 +330,42 @@ jobs:
           artifact-configuration-slug: installer
           github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
           wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
           output-artifact-directory: target/dist/${{ matrix.target }}
+          parameters: |
+            version: "${{ needs.verify.outputs.version }}"
 
-      - name: Verify Windows signatures (REL-032)
+      - name: Verify Windows signatures (REL-030, REL-032)
         id: verify-signatures
         if: needs.verify.outputs.unsigned != 'true' && runner.os == 'Windows' && env.SIGNING != 'none'
         shell: pwsh
+        env:
+          EXPECTED_SIGNER: ${{ vars.WINDOWS_SIGNER_SUBJECT }}
         run: |
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+          function Get-DigestOid([string] $Path) {
+            $b = [IO.File]::ReadAllBytes($Path)
+            $pe = [BitConverter]::ToInt32($b, 0x3C)
+            $dir = $pe + 24 + $(if ([BitConverter]::ToUInt16($b, $pe + 24) -eq 0x20B) { 112 } else { 96 })
+            $off = [BitConverter]::ToUInt32($b, $dir + 32)
+            $len = [BitConverter]::ToUInt32($b, $off)
+            $cms = [Security.Cryptography.Pkcs.SignedCms]::new()
+            $cms.Decode([byte[]]$b[($off + 8)..($off + $len - 1)])
+            $cms.SignerInfos[0].DigestAlgorithm.Value
+          }
           $files = @("target\${{ matrix.target }}\release\dockering.exe") + (Get-ChildItem "target\dist\${{ matrix.target }}\Dockering-Setup-*.exe").FullName
           foreach ($f in $files) {
             $sig = Get-AuthenticodeSignature $f
             if ($sig.Status -ne 'Valid') { Write-Host "::error::$f signature: $($sig.Status)"; exit 1 }
+            if (-not $sig.TimeStamperCertificate) { Write-Host "::error::$f has no RFC 3161 timestamp"; exit 1 }
+            $oid = Get-DigestOid $f
+            if ($oid -ne '2.16.840.1.101.3.4.2.1') { Write-Host "::error::$f digest is $oid, expected SHA-256"; exit 1 }
             Write-Host "$f signed by $($sig.SignerCertificate.Subject)"
           }
           $subjects = @($files | ForEach-Object { (Get-AuthenticodeSignature $_).SignerCertificate.Subject } | Sort-Object -Unique)
           if ($subjects.Count -ne 1) { Write-Host "::error::signers differ: $subjects"; exit 1 }
           # REL-032: the signer must be the expected publisher (repo variable WINDOWS_SIGNER_SUBJECT).
-          $expected = "${{ vars.WINDOWS_SIGNER_SUBJECT }}"
-          if ($expected -and $subjects[0] -ne $expected) { Write-Host "::error::signer '$($subjects[0])' is not '$expected'"; exit 1 }
+          if ($env:EXPECTED_SIGNER -and $subjects[0] -ne $env:EXPECTED_SIGNER) { Write-Host "::error::signer '$($subjects[0])' is not '$env:EXPECTED_SIGNER'"; exit 1 }
 
       - name: Installer smoke test (REL-014)
         if: runner.os == 'Windows'
@@ -331,7 +377,7 @@ jobs:
           pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version "${{ needs.verify.outputs.version }}" -AllUsers
 
       - name: Sign, notarise and staple the DMG
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'macOS' && env.HAS_APPLE_CERT == 'true' && env.HAS_APPLE_API == 'true'
+        if: needs.verify.outputs.macos_signed == 'true' && runner.os == 'macOS'
         shell: bash
         env:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -428,10 +474,15 @@ jobs:
         run: |
           [[ -n "$UPDATE_SIGNING_KEY" ]] || { echo "::error::signed mode requires UPDATE_SIGNING_KEY"; exit 1; }
           target/debug/xtask sign-manifest dist/dockering-update.json
+      - name: Manifest signature verifies against the app's public keys (UPD-003)
+        if: needs.verify.outputs.unsigned != 'true'
+        run: target/debug/xtask verify-manifest --assets dist
       - name: Release notes from CHANGELOG.md
         shell: bash
         env:
           UNSIGNED: ${{ needs.verify.outputs.unsigned }}
+          MACOS_SIGNED: ${{ needs.verify.outputs.macos_signed }}
+          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
           PUBLIC_REPOSITORY: ${{ github.event.repository.private != true }}
         run: |
           version="${{ needs.verify.outputs.version }}"
@@ -441,11 +492,20 @@ jobs:
             on { print }
           ' CHANGELOG.md > dist/RELEASE_NOTES.md
           [[ -s dist/RELEASE_NOTES.md ]] || { echo "::error::release changelog section is empty"; exit 1; }
+          policy="https://github.com/$GITHUB_REPOSITORY#code-signing-policy"
           {
             echo
             echo "---"
             if [[ "$UNSIGNED" == true ]]; then
               echo "**Unsigned release:** Windows files are not Authenticode-signed; macOS files are not Developer ID-signed or notarised. Windows SmartScreen and macOS Gatekeeper may warn or block launch. Automatic updates are disabled in these builds; the update manifest has no signature."
+            else
+              echo "**Signed release:** \`dockering.exe\` and the Windows installers are Authenticode-signed. See the [Code signing policy]($policy)."
+              if [[ "$WINDOWS_SIGNING" == signpath ]]; then
+                echo "Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)"
+              fi
+              if [[ "$MACOS_SIGNED" != true ]]; then
+                echo "macOS files are not Developer ID-signed or notarised; Gatekeeper may warn or block launch."
+              fi
             fi
             if [[ "$PUBLIC_REPOSITORY" == true ]]; then
               echo "**Verify a download:** \`gh attestation verify <file> -R $GITHUB_REPOSITORY\` · checksums in \`SHA256SUMS\`."

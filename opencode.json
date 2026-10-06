@@ -7,6 +7,10 @@
     "feature-planning": {
       "description": "Plan, revise, complete, or report status using the shared Dockering feature-planning skill.",
       "template": "Load the feature-planning skill and follow it for this request: $ARGUMENTS. Use OpenCode's question tool when the skill calls for AskUserQuestion."
+    },
+    "release": {
+      "description": "Cut a release, report release status, or guide the Windows signing setup using the shared Dockering release skill.",
+      "template": "Load the release skill and follow it for this request: $ARGUMENTS. Use OpenCode's question tool when the skill calls for AskUserQuestion."
     }
   },
   "agent": {

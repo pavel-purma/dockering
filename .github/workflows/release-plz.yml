@@ -1,4 +1,5 @@
-# Release automation with release-plz (REL-010, REL-011, REL-013).
+# Release automation with release-plz (REL-010, REL-011, REL-013). DORMANT: releases are cut with the
+# `/release` skill (REL-018), and enabling the bot secrets next to it would open competing release PRs.
 #
 # `release-pr` opens or updates ONE release PR `chore(release): vX.Y.Z` on every push (version bump,
 # Cargo.lock, CHANGELOG.md section). `release` runs on the same pushes but only acts when the push

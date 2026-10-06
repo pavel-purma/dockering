@@ -9,6 +9,7 @@ mod fixtures;
 mod icons;
 mod package;
 mod release;
+mod release_plan;
 mod util;
 mod wslc_abi;
 
@@ -30,8 +31,14 @@ commands:
   verify-assets --assets <dir> [--target <triple>]
                                       require every nonempty distribution package (REL-017)
   sign-manifest <file>                minisign-sign <file> with $UPDATE_SIGNING_KEY (UPD-003)
+  verify-manifest --assets <dir> [--keys <file>]
+                                      check <dir>/dockering-update.json.minisig against the app's keys (UPD-003)
   gen-update-keys <dir>               generate the current + next updater key pairs (UPD-003)
-  checksums <dir>                     write <dir>/SHA256SUMS (REL-012)";
+  checksums <dir>                     write <dir>/SHA256SUMS (REL-012)
+  release-plan [--since <tag>] [--to <rev>] [--bump <patch|minor|major|X.Y.Z>] [--bodies]
+                                      commits since the last release, the bump and next version as JSON (REL-011)
+  release-verify --version <semver> [--remote] [--allow-existing-tag]
+                                      the release.yml verify checks, run locally (REL-018)";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,8 +57,11 @@ fn main() -> anyhow::Result<()> {
         "update-manifest" => release::run_update_manifest(rest),
         "verify-assets" => release::run_verify_assets(rest),
         "sign-manifest" => release::run_sign_manifest(rest),
+        "verify-manifest" => release::run_verify_manifest(rest),
         "gen-update-keys" => release::run_gen_update_keys(rest),
         "checksums" => release::run_checksums(rest),
+        "release-plan" => release_plan::run_release_plan(rest),
+        "release-verify" => release_plan::run_release_verify(rest),
         "help" | "-h" | "--help" => {
             println!("{USAGE}");
             Ok(())

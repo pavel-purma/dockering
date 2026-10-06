@@ -46,7 +46,9 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
   `architect`, `rust-core`, `engine-integrator`, `windows-platform`, `gpui-ui`,
   `qa-engineer`, `reviewer`, `release-engineer`.
 - Reference requirement IDs (for example, `CON-011`) in commit messages, PR descriptions, and test names.
-- When a feature is complete → `/feature-planning complete <slug>` to reconcile the spec, set the status to `implemented`, and add a `docs/spec/CHANGELOG.md` entry.
+- When a feature is complete → `/feature-planning complete <slug>` to reconcile the spec and set the status to `implemented`.
+- Changelog entries (`CHANGELOG.md` sections, `docs/spec/CHANGELOG.md` lines) are written only at release time by `/release` (REL-019). Never add one in a feature or fix PR: concurrent PRs conflict on their first lines. Describe the change, and any spec change, in the PR description instead.
+- To cut a release, prepare a changelog, bump the version or set up signing → `/release` (see `.agents/skills/release/SKILL.md`). Agents don't tag, publish or edit a release outside that flow.
 - Definition of Done: `docs/spec/60-quality.md`.
 
 ## Shared agent setup
@@ -62,6 +64,8 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
 - For feature planning, revision, completion, or status requests, load `feature-planning`
   with the host's skill tool, or read `.agents/skills/feature-planning/SKILL.md` if the host
   does not discover that directory. Resolve supporting files relative to its directory.
+- For release, version, changelog or code-signing requests, load `release` the same way
+  (`.agents/skills/release/SKILL.md`).
 - Use the host's equivalent tools: `AskUserQuestion` in Claude Code is `question` in
   OpenCode; `Task` delegation is `task`; `Read`/`Grep`/`Glob` are `read`/`grep`/`glob`.
 - See `docs/agent-setup.md` for usage, maintenance, and validation commands.

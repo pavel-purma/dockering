@@ -29,4 +29,4 @@ Docker.
 5. Capability gating is applied for any op that isn't universal.
 6. A screenshot (light and dark) is attached to the PR for UI changes.
 7. **Keyboard:** every new control or action is a GPUI `Action`, has a binding or a command-palette entry, is reachable by Tab/arrows, shows its shortcut in its tooltip/menu, and has a keystroke view test (KBD-002, 010, 091…093).
-8. `docs/spec/CHANGELOG.md` has an entry if the spec changed.
+8. The PR description says what changed in the spec, because the release skill writes `docs/spec/CHANGELOG.md` from it at release time (REL-019). Neither changelog gets an entry in the PR.

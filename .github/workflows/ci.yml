@@ -36,8 +36,14 @@ jobs:
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
-      - name: macOS packaging recovery tests (REL-017)
+      - name: Script tests (macOS packaging recovery REL-017, release verify step REL-031…034)
         run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Release verifier parses (REL-018)
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/verify-release.ps1), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Host "::error file=scripts/verify-release.ps1,line=$($_.Extent.StartLineNumber)::$($_.Message)" }; exit 1 }
       - name: Linux prerequisites (GPUI Kit)
         run: bash scripts/bootstrap.sh
       - uses: dtolnay/rust-toolchain@master
