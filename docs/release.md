@@ -8,7 +8,7 @@ See [the specification](spec/features/distribution.md) and
 
 | Release | Published | Release commit | Record |
 |---|---|---|---|
-| [0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0) | 2026-10-05 22:04 UTC | [`813f543`](https://github.com/pavel-purma/dockering/commit/813f54343f9b995981e0bacf77825706a6322a93) | [checklist](plan/release-checklist.md#evidence-for-v020) |
+| [0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0) | 2026-10-06 00:37 UTC | [`2d25f6c`](https://github.com/pavel-purma/dockering/commit/2d25f6c108f2749f7a2225b4b968742516713d23) | [checklist](plan/release-checklist.md#evidence-for-v020); a first build (`813f543`) crashed at launch after an upgrade and was withdrawn |
 | [0.1.0](https://github.com/pavel-purma/dockering/releases/tag/v0.1.0) | 2026-10-04 20:09 UTC | [`041d8fa`](https://github.com/pavel-purma/dockering/commit/041d8fac06f1a2d26a61ed5e13ad16f47371f628) | [checklist](plan/release-checklist.md#evidence-for-v010) |
 
 ## Later releases
@@ -45,6 +45,14 @@ published release. The steps below are the manual-tag flow used for 0.2.0.
    are GUI-subsystem, carry the version and are `NotSigned`; the portable x64 build prints the version.
    Then `gh attestation verify <file> -R pavel-purma/dockering` for all 15 files, pinned with
    `--source-digest <release-commit> --source-ref refs/tags/vX.Y.Z --signer-workflow pavel-purma/dockering/.github/workflows/release.yml --deny-self-hosted-runners`.
+
+   **Start the application from the downloaded files.** Every check above passed for the first v0.2.0
+   build, which crashed at launch after an upgrade. Back up `state.json` and `config.toml` (under
+   `%APPDATA%\dockering\Dockering`), run the downloaded portable `dockering.exe` on a profile written by
+   the previous release (`updates.last_run_version` older than this version), and require that it stays
+   running for several seconds, shows a window, closes with exit code 0, and leaves no `crash-*.txt` next
+   to `state.json`; then repeat on a fresh profile (`--demo`) and restore the backed-up files. Crash
+   reports and the log are in `%APPDATA%\dockering\Dockering\data` and `%LOCALAPPDATA%\dockering\Dockering\data\logs`.
 7. **Publish** after approval, once the draft passes:
 
    ```sh
@@ -54,7 +62,13 @@ published release. The steps below are the manual-tag flow used for 0.2.0.
    Then check anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset URLs and the
    latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
    `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset.
-8. **Record.** In a docs PR: update the README download text and links, complete the checklist's
+8. **If a published build is broken,** take it down first (`gh release delete vX.Y.Z --yes`; the tag stays),
+   fix `main` through a PR whose test fails without the fix, and ship the next patch version. Reusing the
+   version is an exception that needs the maintainer's say-so, as for 0.2.0: check that no release
+   exists for the tag, then `git tag -f -a vX.Y.Z -m "Dockering X.Y.Z (unsigned)" <fix-commit>` and
+   `git push origin vX.Y.Z --force-with-lease=refs/tags/vX.Y.Z:<old-tag-object>`, which starts a new tag run.
+   Say in the changelog section and the checklist that a build was withdrawn.
+9. **Record.** In a docs PR: update the README download text and links, complete the checklist's
    evidence section, and reconcile the spec status lines. Leave unperformed manual checks unchecked.
 
 ## First-release verification
