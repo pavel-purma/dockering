@@ -13,6 +13,7 @@ copies, symlinks, or additional packages are needed, including on Windows and in
 | Agent metadata / tool access | Claude frontmatter + OpenCode registration | `name`, `description`, `tools` frontmatter | `agent.<name>` in `opencode.json` |
 | Skills and supporting files | `.agents/skills/<name>/` | Read through command adapters and shared repository guidance | Discovered natively and explicitly included through `skills.paths` |
 | Feature-planning command | Shared `feature-planning` skill | `.claude/commands/feature-planning.md` reads the shared skill | `command.feature-planning` adapter in `opencode.json` loads that skill |
+| Release command | Shared `release` skill | `.claude/commands/release.md` reads the shared skill | `command.release` adapter in `opencode.json` loads that skill |
 
 OpenCode reads each complete Claude agent file as prompt text, including its frontmatter.
 That frontmatter is context, **not OpenCode configuration**. The OpenCode registration sets
@@ -41,6 +42,19 @@ Both tools support the existing planning workflow:
 /feature-planning complete container-rename
 /feature-planning status
 ```
+
+and the release workflow:
+
+```text
+/release                      # next version, from the merged commits
+/release minor                # or patch, or an explicit 0.3.0 / 0.3.0-rc.1
+/release --dry-run            # changelogs, version and local build; pushes nothing
+/release status               # unreleased changes, channel, signing readiness
+/release signing              # guided one-time Windows signing setup
+```
+
+`/release` pauses before the release PR is created and before the draft is published
+([skill](../.agents/skills/release/SKILL.md), [signing](signing.md), [runbook](release.md)).
 
 In Claude Code, ask the main agent to delegate to a specialist, or select one with `/agents`.
 In OpenCode, mention the specialist directly, for example:

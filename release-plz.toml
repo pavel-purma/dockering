@@ -1,4 +1,5 @@
 # release-plz configuration (REL-010, REL-011). Reference: https://release-plz.dev/docs/config
+# Dormant while the `/release` skill cuts releases (REL-018); kept in case the bot flow is wanted again.
 #
 # Git-only mode: the last released version comes from `v*` tags; nothing is published to crates.io.
 # All workspace crates share one version (`version.workspace = true`), so they form one

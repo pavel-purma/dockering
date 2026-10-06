@@ -86,6 +86,25 @@ You can turn the update check off three ways:
 
 Before anything runs, a download is checked against a signed manifest and its SHA-256 hash.
 
+## Code signing policy
+
+Releases 0.1.0 and 0.2.0 are unsigned. From the first signed release, the Windows executables
+(`dockering.exe` and the installers) are signed through [SignPath Foundation](https://signpath.org),
+which provides free code signing for open-source projects. macOS files stay unsigned until Developer
+ID signing is set up.
+
+- **Source and builds:** Dockering is MIT-licensed. Every release is built from this repository by
+  [GitHub Actions](.github/workflows/release.yml) on GitHub-hosted runners, and only what that
+  workflow builds is signed. The workflow, packaging scripts and signing configuration are in the repository.
+- **Roles:** the maintainer, [@pavel-purma](https://github.com/pavel-purma), is the author, the reviewer
+  of changes from anyone else, and the approver of every signing request.
+- **Approval:** each release needs the approver's manual approval in SignPath before anything is signed.
+- **Accounts:** every team member must use multi-factor authentication on GitHub and SignPath.
+- **Product metadata:** the product name is *Dockering*, and every file of a build carries the same product version.
+- **Privacy:** see [Privacy & network](#privacy--network).
+
+How signing is set up and operated: [docs/signing.md](docs/signing.md).
+
 ## Build from source
 
 Rust is pinned in `rust-toolchain.toml` (rustup installs it automatically). GPUI Kit also needs
@@ -155,14 +174,14 @@ Windows, so the MSVC environment is loaded automatically):
 
 ## Releases
 
-Releases so far (0.1.0, 0.2.0) used the manual-tag flow: a version-bump PR is merged, the
-maintainer pushes the `vX.Y.Z` tag, and the release workflow builds all six targets and
-creates a draft GitHub Release, which is verified and published under maintainer approval.
-[release-plz](https://release-plz.dev) automation can create release PRs and version tags after
-the release-bot App is configured. Releases are unsigned; signing is optional
-configuration for later releases. [docs/release.md](docs/release.md) has the details,
-including the publication checklist and future signing setup. PR titles use
-[conventional commits](https://www.conventionalcommits.org/), because they become the changelog.
+Releases are cut with the `/release` skill ([`.agents/skills/release`](.agents/skills/release/SKILL.md)).
+It writes the changelogs from the merged commits, picks the version, builds locally, opens and merges
+the release PR, tags, watches the build, verifies the draft release, and publishes it after the
+maintainer's approval. Feature pull requests never edit `CHANGELOG.md`. Releases so far (0.1.0, 0.2.0)
+are unsigned; Windows signing through SignPath Foundation is prepared ([docs/signing.md](docs/signing.md)).
+[docs/release.md](docs/release.md) is the runbook. PR titles use
+[conventional commits](https://www.conventionalcommits.org/), because they decide the version and
+the changelog.
 
 ## License
 
@@ -174,5 +193,5 @@ Third-party notices: [THIRD_PARTY_LICENSES.html](THIRD_PARTY_LICENSES.html).
 This repository uses a spec-driven agentic workflow with **Claude Code and OpenCode**.
 Start with the shared [AGENTS.md](AGENTS.md) and the [specification](docs/spec/README.md).
 Both tools use the same skills and specialist agent prompts. Plan features with
-`/feature-planning <idea>`. See [the agent setup guide](docs/agent-setup.md) for usage,
+`/feature-planning <idea>` and cut releases with `/release`. See [the agent setup guide](docs/agent-setup.md) for usage,
 configuration, and maintenance.

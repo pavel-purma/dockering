@@ -26,7 +26,8 @@
 | `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
 | `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
 | `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux) | `cargo install cargo-packager --locked --version 0.11.8` |
-| `release-plz` (optional, REL-010) | Release PRs and tags (CI); locally only for `release-plz update --dry-run` previews | `cargo install release-plz --locked` |
+| PowerShell 7 (`pwsh`) (REL-018) | `scripts/verify-release.ps1`, which the `/release` skill runs against every draft | `winget install Microsoft.PowerShell` · preinstalled on GitHub runners |
+| `release-plz` (dormant; don't enable with the skill, REL-010) | Bot-driven release PRs, only if the skill is retired | `cargo install release-plz --locked` |
 | Inno Setup **6.3+** (`ISCC.exe`) (REL-020) | `cargo xtask package` on Windows | CI checks and installs it if needed · `winget install JRSoftware.InnoSetup` |
 
 Windows packaging uses Inno Setup for both architectures; cargo-packager is used for macOS
@@ -36,14 +37,19 @@ Inno Setup if the Windows runner does not already provide it. macOS CI/release p
 most three package attempts, and detaches only a reported disk whose image path is verified
 inside the current target distribution directory. Other failures retain their original exit status.
 
-**Release signing** is optional for the explicitly authorized unsigned first release (REL-016).
+**Release signing** is optional for the explicitly authorized unsigned releases (REL-016).
 Unsigned mode skips signing and notarization even when secrets exist and builds without the
 updater. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
 expose an `unsigned` boolean defaulting to true. Public build-provenance attestations remain
-independent of signing. The signed channel supports `WINDOWS_SIGNING` = `signpath` | `azure`;
-its secrets live in the `release` environment. See [the release runbook](../release.md).
-Windows: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
+independent of signing. The signed channel (`PUBLIC_RELEASES=true`) supports `WINDOWS_SIGNING` =
+`signpath` | `azure` and, independently, `MACOS_SIGNING` = `apple` | `none` (REL-034); its secrets live
+in the `release` environment, which only `main` and `v*` refs can use. Setup and operation:
+[signing guide](../signing.md); the release steps: [runbook](../release.md) and the `/release` skill.
+SignPath: `SIGNPATH_API_TOKEN` and the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`; the artifact
+configurations are in `packaging/signpath/`.
+Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
+Updater: `UPDATE_SIGNING_KEY` (minisign), with the public keys in `crates/dk-update/src/keys.rs`.
 
 ## Cargo profiles
 
@@ -61,10 +67,10 @@ macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE
 | `test` | ubuntu-24.04, windows-2025, macos-15 | `cargo nextest run --workspace` (unit, contract with fixtures, gpui `TestAppContext` view tests) |
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
 | `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package (on `main`). On Windows, every push and PR also builds the Inno installer (x64, arm64) and runs silent install → `--version` → uninstall (REL-014) |
-| `release` | on `v*` tags or manual dispatch; 6 targets | Verify version/changelog → package six targets → require all 12 distributions → manifest, notes, SHA256SUMS → public provenance → review artifact; tag runs create a draft. Explicit unsigned mode (REL-016); complete-asset validation (REL-017). |
+| `release` | on `v*` tags or manual dispatch; 6 targets | Verify version/changelog/channel configuration → package six targets (signed channel: Windows files go through the signing provider; macOS per `MACOS_SIGNING`) → require all 12 distributions → manifest (signed and checked against the app's public keys in the signed channel), notes, SHA256SUMS → public provenance → review artifact; tag runs create a draft. Explicit unsigned mode (REL-016); complete-asset validation (REL-017). |
 | `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
-| `release-plz` *(planned)* | push to `main` / `release/*` | `release-pr`: open or update the release PR (version + changelog). `release`: after a release PR merges, create the `v*` tag, which starts `release` (REL-010/011) |
-| `pr-title` *(planned)* | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that release-plz reads) |
+| `release-plz` *(dormant)* | push to `main` / `release/*` | Skips without the release-bot secrets. Not used while the `/release` skill cuts releases (REL-010) |
+| `pr-title` | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that `cargo xtask release-plan` classifies, REL-011) |
 | Dependabot | weekly (Mondays), `.github/dependabot.yml` | Version-update PRs for `cargo` and `github-actions`, titled `chore(deps): …`. Minor/patch bumps grouped per ecosystem; majors separate. Security updates are on too. |
 | `wslc-abi-watch` | weekly schedule, ubuntu-24.04 | `cargo xtask wslc-abi-check latest`. If the latest `microsoft/WSL` release changed `wslc.idl`, open an issue (20 §5.7). |
 
@@ -96,4 +102,4 @@ Releases go out through GitHub Releases and OS package managers (winget; Homebre
 
 ## Versioning
 
-SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`. release-plz computes the next version from conventional commits and writes the changelog in a release PR (REL-010/011).
+SemVer. `CHANGELOG.md` at the repo root follows the "Keep a Changelog" format. The version shows in Settings → Diagnostics and in `--version`. The `/release` skill computes the next version from the conventional commits (`cargo xtask release-plan`) and writes both changelogs in the release PR (REL-010, REL-011, REL-018, REL-019); feature PRs never edit them.

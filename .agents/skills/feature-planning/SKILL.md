@@ -1,6 +1,6 @@
 ---
 name: feature-planning
-description: Spec-driven feature planning for Dockering. Use when the user asks to plan, design, add, or change a feature (e.g. "/feature-planning add container rename", "plan image search"), or to finalize a finished feature ("/feature-planning complete <slug>"). Reads docs/spec, writes a plan to docs/plan/features/<slug>.md, and updates the spec (requirements, status, changelog) so spec and code never drift.
+description: Spec-driven feature planning for Dockering. Use when the user asks to plan, design, add, or change a feature (e.g. "/feature-planning add container rename", "plan image search"), or to finalize a finished feature ("/feature-planning complete <slug>"). Reads docs/spec, writes a plan to docs/plan/features/<slug>.md, and updates the spec (requirements, status) so spec and code never drift. Never edits a changelog: the release skill writes both at release time.
 ---
 
 # Feature planning (spec-driven)
@@ -58,7 +58,7 @@ Work out, delegating to the `architect` agent for non-trivial designs:
 - If new: add a row to the feature table in `docs/spec/README.md`.
 - If the contract changed: update `docs/spec/21-engine-api-contract.md` (trait, DTOs, capability matrix, mapping table) and `docs/spec/20-engine-backends.md` §5.4 (WSLC COM) / §5.5 (WSLC CLI).
 - Changed requirements: edit in place. Removed ones: ~~strike through~~ + `(removed YYYY-MM-DD)`.
-- Append to `docs/spec/CHANGELOG.md`: `- YYYY-MM-DD · <area> · <summary> · [plan](../plan/features/<slug>.md)` (newest first).
+- Do **not** add an entry to `docs/spec/CHANGELOG.md` or `CHANGELOG.md`: concurrent PRs conflict on their first lines. The `release` skill writes both from the merged commits (REL-019), so make the spec edit and the commit message say what changed.
 
 ### Step 6: Write the plan
 Create `docs/plan/features/<slug>.md` from [plan-template.md](plan-template.md) (kebab-case slug,
@@ -74,16 +74,14 @@ On approval, set the plan status to `approved`.
 
 ## Mode: revise (`update <slug> …`)
 Load the plan and its spec, apply the change, keep IDs stable (add new IDs, strike removed
-ones), and add a *Revision log* entry in the plan and a spec CHANGELOG line. Then present the
-diff summary and stop.
+ones), and add a *Revision log* entry in the plan. Then present the diff summary and stop.
 
 ## Mode: complete (`complete <slug>`)
 1. Read the plan and the spec. Inspect the implementation (`Grep` for the requirement IDs in code and tests, `git log --grep <ID>`).
 2. For every requirement ID in the plan, verify that it's implemented and tested. Build a table: ID · implemented? · test(s) · notes.
 3. **Reconcile the spec with reality.** Wherever the implementation deliberately differs (different UX, a skipped capability, an extra behaviour), update the spec text so it describes what was built. Requirements that weren't done either move to a follow-up plan or are marked `deferred` in the spec. Never leave the spec claiming something the code doesn't do.
 4. Set the feature spec `Status: implemented` (or keep `in-progress` if items are deferred). Set the plan status to `done`.
-5. Add a CHANGELOG line: `… · <area> · implemented <summary> · [plan](…)`.
-6. Report the table and any spec edits to the user.
+5. Report the table and any spec edits to the user.
 
 ## Mode: status
 Print a table: feature · spec status · plan · plan status · open requirement IDs.
@@ -92,6 +90,7 @@ Print a table: feature · spec status · plan · plan status · open requirement
 
 ## Rules
 - Never write production code in this skill. The output is docs only.
+- Never add entries to `CHANGELOG.md` or `docs/spec/CHANGELOG.md` here. They're written only at release time by the `release` skill (`.agents/skills/release/changelog.md`), so feature PRs don't conflict on them.
 - Never invent `wslc` or Docker behaviour. Mark unverified items `⚠ verify (spike)` and add a spike task.
 - Keep plans executable by the agents in `.claude/agents/`: every task has an owner, IDs, and a verification step.
 - Use dates in absolute `YYYY-MM-DD` form.

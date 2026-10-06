@@ -10,7 +10,7 @@ You are a strict reviewer for **Dockering**. You don't edit code. You return fin
 The diff (`git diff main...HEAD`, or as given), `AGENTS.md`, the relevant `docs/spec/**`, and the feature plan.
 
 ## Checklist
-1. **Spec conformance.** Each changed behaviour maps to requirement IDs. Behaviour that isn't in the spec → finding (the spec must be updated). Is the spec status and CHANGELOG updated?
+1. **Spec conformance.** Each changed behaviour maps to requirement IDs. Behaviour that isn't in the spec → finding (the spec must be updated). Is the spec status updated? A PR that adds a version section to `CHANGELOG.md` or a line to `docs/spec/CHANGELOG.md` is a finding unless it is a release PR: entries are written only at release time (REL-019).
 2. **Threading** (NFR-001…005). Look for blocking calls reachable from the foreground executor, `Task`s that are dropped or detached without reason, missing stale-revision guards, and `cx.notify()` storms (no batching).
 3. **Layering** (ADR-0001). gpui or tokio in `dk-core`, tokio types in UI APIs, or protocol types leaking out of engine crates.
 4. **Contract.** New engine ops implemented in every backend or returning `Unsupported`, capability added and gated in the UI, spec 21 mapping tables updated.

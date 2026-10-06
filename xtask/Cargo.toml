@@ -13,9 +13,12 @@ resvg = { version = "=0.48.1", default-features = false, features = ["system-fon
 serde_json.workspace = true
 # release metadata (update manifest, minisign, SHA256SUMS)
 minisign.workspace = true
+minisign-verify.workspace = true
 sha2.workspace = true
 hex.workspace = true
 time.workspace = true
+# release planning (SemVer precedence of v* tags)
+semver.workspace = true
 
 [lints]
 workspace = true

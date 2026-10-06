@@ -1,10 +1,13 @@
 # Releasing Dockering
 
-The repository is public. Releases are published with unsigned downloads for all six supported
-targets. Code signing, macOS notarization, the updater, winget, and release-bot setup are deferred.
-The workflow always creates a **draft**; publication is a separate maintainer action.
-See [the specification](spec/features/distribution.md) and
-[first-release plan](plan/features/unsigned-first-release.md).
+The repository is public. Releases so far are unsigned for all six supported targets. Windows code
+signing through SignPath Foundation is prepared ([signing.md](signing.md)); macOS notarization, the
+updater, winget, and the release bot stay deferred. The workflow always creates a **draft**;
+publication is a separate maintainer action. See [the specification](spec/features/distribution.md),
+the [signing guide](signing.md) and the [first-release plan](plan/features/unsigned-first-release.md).
+
+**Releases are cut with the `/release` skill** ([`.agents/skills/release`](../.agents/skills/release/SKILL.md),
+REL-018). The rest of this page is what it automates, so a maintainer can follow or repeat any step by hand.
 
 | Release | Published | Release commit | Record |
 |---|---|---|---|
@@ -14,15 +17,40 @@ See [the specification](spec/features/distribution.md) and
 ## Later releases
 
 Each release gets a new workspace version and tag; never recreate a published tag or upload to a
-published release. The steps below are the manual-tag flow used for 0.2.0.
+published release.
 
-1. **Prepare.** From current `main`, bump `[workspace.package] version` in `Cargo.toml`, run
-   `cargo update --workspace` (only the nine workspace crates change in `Cargo.lock`), and add a
-   `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`release.yml` fails without it and uses it as
-   the release notes). Use the date you expect to publish on, and correct it in the PR if the release
-   slips. A `feat:` since the last tag is a minor bump while in `0.x`; fixes alone are a patch
-   (REL-011). Copy the latest section of the [release checklist](plan/release-checklist.md) for the
-   new version.
+### With the skill
+
+```text
+/release                # next version, from the merged commits
+/release minor          # or patch, or an explicit 0.3.0 / 0.3.0-rc.1
+/release --dry-run      # changelogs, version and local build; pushes nothing
+/release status         # unreleased changes, channel, signing readiness
+```
+
+The skill runs these steps and pauses twice: before the release PR is created (it shows the version,
+the reason for it and the changelog diff) and before the verified draft is published. It resumes
+from whatever state it finds if a run is interrupted.
+
+| # | Skill step | Manual equivalent below |
+|---|---|---|
+| 1–3 | Plan from the conventional commits since the last tag (`cargo xtask release-plan`), write both changelogs ([rules](../.agents/skills/release/changelog.md)) | **Prepare** |
+| 4–5 | Local gate on a scratch worktree, bump, local release build | **Prepare** |
+| 6–7 | Gate 1, release PR, wait for every check, squash-merge | **Pull request** |
+| 8–9 | Annotated tag on the merge commit, watch `release.yml` (signed channel: approve the SignPath requests) | **Tag**, **Build** |
+| 10–11 | `scripts/verify-release.ps1`, Gate 2, publish, check the public URLs | **Verify the draft**, **Publish** |
+| 12 | Record PR: README, release table, checklist | **Record** |
+
+`CHANGELOG.md` and `docs/spec/CHANGELOG.md` are written only here (REL-019): feature PRs never edit them.
+
+### By hand (fallback)
+
+1. **Prepare.** From current `main`, run `cargo xtask release-plan` for the next version (a `feat:` since the last tag
+   is a minor bump while in `0.x`; fixes alone are a patch, REL-011). Set `[workspace.package] version` in
+   `Cargo.toml`, run `cargo update --workspace` (only the nine workspace crates change in `Cargo.lock`), and add a
+   `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`release.yml` fails without it and uses it as the release
+   notes) and the matching lines to `docs/spec/CHANGELOG.md`. Check with `cargo xtask release-verify --version X.Y.Z`.
+   Copy the latest section of the [release checklist](plan/release-checklist.md) for the new version.
 2. **Pull request.** Title `chore(release): vX.Y.Z`; squash-merge once every check is green.
 3. **CI incidents.** If a job fails with "The job was not acquired by Runner of type hosted even after
    multiple attempts", it was cancelled before any step ran. Check [githubstatus.com](https://www.githubstatus.com),
@@ -38,36 +66,44 @@ published release. The steps below are the manual-tag flow used for 0.2.0.
    ```
 
 5. **Build.** The tag starts `release.yml`: `gh run list --workflow release.yml --branch vX.Y.Z`, then
-   `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly.
-6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`): exactly the
-   15 files and no `.minisig`; every `SHA256SUMS` line; the manifest's six platforms, versions, URLs,
-   hashes and sizes; the notes; PE/ELF/Debian/DMG formats and architectures; the Windows executables
-   are GUI-subsystem, carry the version and are `NotSigned`; the portable x64 build prints the version.
-   Then `gh attestation verify <file> -R pavel-purma/dockering` for all 15 files, pinned with
+   `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly. On the
+   signed channel each Windows job waits for two SignPath approvals ([signing.md](signing.md)).
+6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`):
+
+   ```sh
+   pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y.Z -Version X.Y.Z \
+     -Expect Unsigned -Changelog CHANGELOG.md -Attest -Commit <release-commit>
+   ```
+
+   (`-Expect Signed` on the signed channel, plus `cargo xtask verify-manifest --assets <dir>`). It checks exactly the
+   15 files (16 with `.minisig`), every `SHA256SUMS` line, the manifest's six platforms, versions, URLs, hashes and
+   sizes, the notes, PE/ELF/Debian/DMG formats and architectures, that the Windows executables are GUI-subsystem,
+   carry the version and are `NotSigned` (or `Valid`, timestamped, SHA-256 and one signer when signed), and that the
+   portable x64 build prints the version. `-Attest` runs `gh attestation verify` for every file, pinned with
    `--source-digest <release-commit> --source-ref refs/tags/vX.Y.Z --signer-workflow pavel-purma/dockering/.github/workflows/release.yml --deny-self-hosted-runners`.
 
    **Start the application from the downloaded files.** Every check above passed for the first v0.2.0
-   build, which crashed at launch after an upgrade. Back up `state.json` and `config.toml` (under
-   `%APPDATA%\dockering\Dockering`), run the downloaded portable `dockering.exe` on a profile written by
-   the previous release (`updates.last_run_version` older than this version), and require that it stays
-   running for several seconds, shows a window, closes with exit code 0, and leaves no `crash-*.txt` next
-   to `state.json`; then repeat on a fresh profile (`--demo`) and restore the backed-up files. Crash
-   reports and the log are in `%APPDATA%\dockering\Dockering\data` and `%LOCALAPPDATA%\dockering\Dockering\data\logs`.
+   build, which crashed at launch after an upgrade. `-LaunchSmoke` does it: it backs up `state.json` and
+   `config.toml` (under `%APPDATA%\dockering\Dockering`), seeds `updates.last_run_version` with an older version,
+   runs the downloaded portable `dockering.exe`, requires that it stays running for several seconds, shows a window,
+   closes with exit code 0 and leaves no `crash-*.txt` next to `state.json`, repeats that for `--demo`, and restores
+   the backed-up files. Crash reports and the log are in `%APPDATA%\dockering\Dockering\data` and
+   `%LOCALAPPDATA%\dockering\Dockering\data\logs`. Run it only with Dockering closed.
 7. **Publish** after approval, once the draft passes:
 
    ```sh
    gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest
    ```
 
-   Then check anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset URLs and the
-   latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
+   Then `verify-release.ps1 ... -Published`: anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset
+   URLs and the latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
    `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset.
 8. **If a published build is broken,** take it down first (`gh release delete vX.Y.Z --yes`; the tag stays),
    fix `main` through a PR whose test fails without the fix, and ship the next patch version. Reusing the
    version is an exception that needs the maintainer's say-so, as for 0.2.0: check that no release
    exists for the tag, then `git tag -f -a vX.Y.Z -m "Dockering X.Y.Z (unsigned)" <fix-commit>` and
    `git push origin vX.Y.Z --force-with-lease=refs/tags/vX.Y.Z:<old-tag-object>`, which starts a new tag run.
-   Say in the changelog section and the checklist that a build was withdrawn.
+   Say in the changelog section and the checklist that a build was withdrawn. The skill never does this on its own.
 9. **Record.** In a docs PR: update the README download text and links, complete the checklist's
    evidence section, and reconcile the spec status lines. Leave unperformed manual checks unchecked.
 
@@ -223,49 +259,46 @@ version, have a changelog section, and be contained in `main` or a `release/*` b
 Minimum systems: Windows 10 22H2, macOS 15, and compatible Linux with Vulkan. Updates for this
 unsigned release are manual downloads from GitHub Releases.
 
-## Future release-plz automation
+## release-plz (dormant)
 
-The release bot is optional for this first release. To automate later release PRs and tags:
+`release-plz.yml` and `release-plz.toml` are kept but do nothing: without the repository secrets
+`RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY` both jobs print a notice and skip. **Don't enable
+them next to the `/release` skill**: both open a `chore(release): vX.Y.Z` PR and would fight over the
+version and the changelog. To switch back to bot-driven release PRs, create a GitHub App with
+**Contents** and **Pull requests** read/write permissions and no webhook, add the two secrets, and stop
+using `/release`. `GITHUB_TOKEN` cannot trigger other workflows by pushing tags, which is why the App
+token is needed.
 
-1. Create a GitHub App installed only here, with **Contents** and **Pull requests** read/write
-   permissions and no webhook.
-2. Add repository secrets `RELEASE_BOT_APP_ID` (App ID or Client ID) and
-   `RELEASE_BOT_PRIVATE_KEY` (full PEM).
-3. release-plz keeps one `chore(release): vX.Y.Z` PR open. Merge after reviewing its version,
-   changelog, and checklist. The App token creates the tag and triggers the release workflow.
+## Signed releases
 
-Without the secrets, release-plz skips its jobs; manual tags work. `GITHUB_TOKEN` cannot trigger
-other workflows by pushing tags. Application crates share a version; nothing goes to crates.io.
-Conventional `feat:` commits bump minor while in `0.x`; fixes normally bump patch. For prereleases,
-edit the workspace version and changelog to e.g. `0.2.0-rc.1` and refresh workspace lockfile versions.
-Prereleases do not become latest stable. Use `main` or `release/X.Y` for hotfixes.
+The signing setup, the per-release routine and the operations (renewal, key rotation, incidents) are in
+[signing.md](signing.md); `/release signing` walks through the one-time setup and `/release status` shows
+how far it got. The channel is chosen by repository variables:
 
-## Future signed releases
-
-Configure signing secrets in the `release` environment and appropriate maintainer protection.
-Signing secrets reach only the signing steps. `WINDOWS_SIGNING` selects:
-
-| Value | Requirements |
+| Variable | Meaning |
 |---|---|
-| `none` | Unsigned; valid for this first release. |
-| `signpath` | `SIGNPATH_API_TOKEN`; variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`; `exe`/`installer` artifact configurations; `release-signing` policy. |
-| `azure` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`. |
+| `PUBLIC_RELEASES=true` | the signed channel: tag builds are signed and contain the updater. Its historical name means the channel, not repository visibility. Manual `unsigned=true` overrides it. |
+| `WINDOWS_SIGNING` | `signpath` \| `azure` \| `none` (default). |
+| `MACOS_SIGNING` | `apple` \| `none` (default). Independent of Windows (REL-034): a signed release never requires it. |
+| `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | SignPath project. |
+| `WINDOWS_SIGNER_SUBJECT` | the expected signer subject; **required** by signed tag builds (REL-032). |
 
-Set `WINDOWS_SIGNER_SUBJECT` to pin the expected publisher. Windows binaries are signed before
-packaging, then installers are signed and verified. Inno's generated uninstaller needs a local
-compile-time `DOCKERING_INNO_SIGNTOOL`; remote signing alone does not cover it.
+Secrets live in the `release` environment (restricted to `main` and `v*` refs) and reach only the steps
+that use them: `SIGNPATH_API_TOKEN`; `UPDATE_SIGNING_KEY` (+ optional `UPDATE_SIGNING_KEY_PASSWORD`);
+Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`,
+`AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`; Apple: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`. Never commit a key.
 
-macOS requires `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
-`APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_KEY_P8` for signing and notarization.
+A signed run fails early, in `verify`, when the configuration is incomplete, when `keys.rs` has no
+public key, or when a tag has no `WINDOWS_SIGNER_SUBJECT`. Windows binaries are signed before
+packaging, then the installers are signed and verified (Authenticode `Valid`, RFC 3161 timestamp,
+SHA-256, one signer). Inno's generated uninstaller needs a local compile-time
+`DOCKERING_INNO_SIGNTOOL`; remote signing alone does not cover it.
 
-Generate updater keys with `cargo xtask gen-update-keys <private-directory>`, store the current
-private key as `UPDATE_SIGNING_KEY`, and commit reviewed current/next **public** keys to
-`crates/dk-update/src/keys.rs`. Optional password: `UPDATE_SIGNING_KEY_PASSWORD`.
-See [key rotation](../crates/dk-update/keys/README.md). Never commit private keys.
-
-Only then set `PUBLIC_RELEASES=true`. Its historical name now means the signed/updater channel,
-not repository visibility. Manual `unsigned=true` overrides it. Signed mode checks configuration
-before builds and preserves signing guards. Public build provenance is independent of this setting.
+Updater keys: `cargo xtask gen-update-keys <private-directory>`; the current private key becomes
+`UPDATE_SIGNING_KEY` and the reviewed **public** keys go into `crates/dk-update/src/keys.rs`
+([key rotation](../crates/dk-update/keys/README.md)). The assembled manifest signature is verified
+against those keys before the draft is created.
 
 Submit the first signed winget version manually, configure `WINGET_TOKEN`, then set
 `WINGET_ENABLED=true`. The workflow also requires published stable release metadata with a

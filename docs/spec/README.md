@@ -17,7 +17,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | [50-build-and-release.md](50-build-and-release.md) | Toolchain, CI matrix, packaging per OS |
 | [60-quality.md](60-quality.md) | Testing strategy, fixtures, definition of done |
 | [features/](features/) | One file per user-facing feature (requirements + UI + contract usage) |
-| [CHANGELOG.md](CHANGELOG.md) | Chronological log of spec changes |
+| [CHANGELOG.md](CHANGELOG.md) | Chronological log of spec changes, written at release time (REL-019) |
 
 ### Feature specs
 
@@ -34,7 +34,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Networks | [features/networks.md](features/networks.md) | implemented |
 | Settings | [features/settings.md](features/settings.md) | implemented |
 | Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open) |
-| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; signed channel deferred) |
+| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; `/release` skill and SignPath signing flow built, signed channel not yet enabled) |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 
 Each implemented spec has a *Verification* table (requirement → tests) and a *Known gaps (v1)*
@@ -92,7 +92,9 @@ Requirement keywords follow RFC 2119: **MUST**, **SHOULD**, **MAY**.
    spec files with status `planned`.
 2. Implementation PRs reference requirement IDs and move the status to `in-progress`.
 3. When a feature lands, the spec is reconciled with what was actually built
-   (`/feature-planning complete <slug>`), status → `implemented`, and a line is added to
-   [CHANGELOG.md](CHANGELOG.md).
+   (`/feature-planning complete <slug>`) and the status becomes `implemented`.
+4. Feature PRs add no line to [CHANGELOG.md](CHANGELOG.md) (concurrent PRs would conflict on it).
+   The `/release` skill adds a line for every merged spec change when it prepares a release
+   (REL-019), from the PR text and the diff of `docs/spec/**`.
 
 A PR that changes user-visible behaviour without a spec update is incomplete.
