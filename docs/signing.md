@@ -53,8 +53,11 @@ No GitHub App of ours takes part in signing. Three separate credentials are invo
 
 - **SignPath** has its own GitHub App. As far as its documentation says, it is needed only for
   *audit-log* checks of repository rulesets (a stricter policy option), and for some private-repository
-  permission setups. Dockering's `release-signing` policy doesn't depend on it; if SignPath asks for
-  it during phase 2, installing it on this one repository (read-only access) is the supported way.
+  permission setups. Dockering's `release-signing` policy doesn't depend on it, so don't install it
+  unless SignPath asks for it. Its public GitHub listing requests broad permissions: `contents`,
+  `actions` and `metadata` read, but also `administration` write on a repository and
+  `organization_administration` write. If you do install it, read the permission prompt first and
+  limit it to this one repository.
 - The **release-bot App** in `release-plz.yml` is the dormant bot flow. It isn't created, isn't
   needed for signing or for `/release`, and shouldn't be enabled next to the skill ([release.md](release.md#release-plz-dormant)).
 - Only collaborators can open pull requests here, so `/release` runs as you. Its PRs and tags are
