@@ -80,9 +80,10 @@ failed exactly the two GUI-subsystem checks otherwise.
   the first launch after an upgrade passed everything. The check that found it was installing over an
   older version and starting the app. A launch check on a profile with an older `last_run_version` is
   the missing test; whether hosted Windows runners can open a GPUI window is not known.
-- `net_004_prune_unused_networks` failed once on Linux CI in the first preparation PR
-  (`assert!(h.has_dialog(cx))`), and passed on rerun and across 300 local scheduler seeds. #25 already
-  fixed one race in it, so another remains and needs a root-cause look.
+- `net_004_prune_unused_networks` is flaky on CI: `assert!(h.has_dialog(cx))` failed on Linux in the
+  first preparation PR and on Windows in the CI of the docs-only PR that records this release (the code
+  was identical to the green run on `main`), and it passed on rerun. 300 local scheduler seeds did not
+  reproduce it, and #25 already fixed one race in it. Root cause not found.
 - The first preparation PR's CI also lost three jobs ("The job was not acquired by Runner of type
   hosted even after multiple attempts") during a GitHub Actions incident; reruns passed.
 
