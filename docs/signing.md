@@ -41,6 +41,25 @@ A trusted certificate cannot be generated locally: Windows trusts only certifica
 certificate authority after it validated an identity. A self-signed one gives the same "unknown
 publisher" warning as no signature.
 
+## Credentials and GitHub Apps
+
+No GitHub App of ours takes part in signing. Three separate credentials are involved:
+
+| Credential | Held by | Used for |
+|---|---|---|
+| `GITHUB_TOKEN` of the release job | GitHub, created per run, `actions: read` + `contents: read` | the SignPath action reads the job and the artifact it uploaded, so SignPath can check where the file came from |
+| `SIGNPATH_API_TOKEN` (secret in the `release` environment) | you, from SignPath's CI user | the action authenticates to SignPath and submits the signing request; it can only do what that CI user's policy allows |
+| your own `gh` login | you | what `/release` uses to open PRs, push tags and publish, as you |
+
+- **SignPath** has its own GitHub App. As far as its documentation says, it is needed only for
+  *audit-log* checks of repository rulesets (a stricter policy option), and for some private-repository
+  permission setups. Dockering's `release-signing` policy doesn't depend on it; if SignPath asks for
+  it during phase 2, installing it on this one repository (read-only access) is the supported way.
+- The **release-bot App** in `release-plz.yml` is the dormant bot flow. It isn't created, isn't
+  needed for signing or for `/release`, and shouldn't be enabled next to the skill ([release.md](release.md#release-plz-dormant)).
+- Only collaborators can open pull requests here, so `/release` runs as you. Its PRs and tags are
+  yours, which also means the tag push starts `release.yml` (a push made with `GITHUB_TOKEN` would not).
+
 ## One-time setup
 
 `/release signing` detects which phase is next and guides you through it. Phases 1, 2, 6 and 7 are

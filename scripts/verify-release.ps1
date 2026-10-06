@@ -744,6 +744,7 @@ function Invoke-Main {
         Provider = $Provider; SignerSubject = $SignerSubject; Repo = $Repo; Commit = $Commit; SourceRef = $SourceRef
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.Security.Cryptography.Pkcs
     try {
         Invoke-Check 'files.set' { Test-FileSet }
         Invoke-Check 'checksums' { Test-Checksums }

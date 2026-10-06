@@ -611,8 +611,18 @@ fn spec_files(files: &[String]) -> Vec<&String> {
         .collect()
 }
 
+/// Slugs of the feature plans a commit touched; the index is not a plan.
+fn plan_slugs(files: &[String]) -> Vec<&str> {
+    files
+        .iter()
+        .filter_map(|f| f.strip_prefix("docs/plan/features/")?.strip_suffix(".md"))
+        .filter(|slug| !slug.contains('/') && *slug != "README")
+        .collect()
+}
+
 fn commit_json(c: &Commit, bodies: bool) -> Value {
     let spec_files = spec_files(&c.files);
+    let plans = plan_slugs(&c.files);
     let mut value = json!({
         "sha": c.sha,
         "short": c.short,
@@ -627,6 +637,7 @@ fn commit_json(c: &Commit, bodies: bool) -> Value {
         "body_ids": c.body_ids,
         "files": c.files,
         "spec_files": spec_files,
+        "plans": plans,
         "user_visible": c.visible,
         "level": c.level.as_str(),
     });
@@ -1160,6 +1171,27 @@ mod tests {
     }
 
     #[test]
+    fn rel_019_plan_slugs_skip_the_index() {
+        let files: Vec<String> = [
+            "docs/plan/features/README.md",
+            "docs/plan/features/status-bar-engine-label.md",
+            "docs/plan/features/windows-distribution/icon.png",
+            "docs/plan/features/windows-distribution/notes.md",
+            "docs/plan/release-checklist.md",
+            "docs/plan/adr/0006-x.md",
+            "docs/spec/features/engines.md",
+            "docs/plan/features/wslc-integration-repair.md",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(
+            plan_slugs(&files),
+            ["status-bar-engine-label", "wslc-integration-repair"]
+        );
+        assert!(plan_slugs(&[]).is_empty());
+    }
+
+    #[test]
     fn rel_018_workspace_version_of_manifest() {
         let manifest = "[workspace]\nmembers = []\n\n[workspace.package]\nversion = \"0.2.0\"\nedition = \"2024\"\n\n[workspace.dependencies]\nsemver = { version = \"1\" }\n";
         assert_eq!(workspace_version_of(manifest).as_deref(), Some("0.2.0"));
@@ -1379,6 +1411,7 @@ mod tests {
         assert_eq!(commits[0]["level"], "patch");
         assert_eq!(commits[1]["user_visible"], false);
         assert_eq!(commits[1]["spec_files"], json!(["docs/spec/x.md"]));
+        assert_eq!(commits[1]["plans"], json!([]));
         assert_eq!(commits[2]["breaking"], true);
         assert_eq!(commits[2]["level"], "minor");
         assert!(commits[0]["date"].as_str().unwrap().len() == 10);

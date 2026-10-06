@@ -342,6 +342,7 @@ jobs:
         env:
           EXPECTED_SIGNER: ${{ vars.WINDOWS_SIGNER_SUBJECT }}
         run: |
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
           function Get-DigestOid([string] $Path) {
             $b = [IO.File]::ReadAllBytes($Path)
             $pe = [BitConverter]::ToInt32($b, 0x3C)

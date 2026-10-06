@@ -65,11 +65,11 @@ git worktree add -b chore/release-tmp target/release-wt origin/main
 
 ### 2. Plan the release
 
-`cargo xtask release-plan [--bump <arg>]` prints JSON: the commits since the last stable tag (type, scope, PR, requirement IDs, files, `user_visible`, `level`), the `bump` and `next_version`, the `reason`, `internal_only` and `warnings`. Rules are REL-011. `bump: none` means nothing user-visible: stop and tell the maintainer (an explicit `--bump patch` is allowed after they confirm). Show the warnings.
+`cargo xtask release-plan [--bump <arg>] [--bodies]` prints JSON: the commits since the last stable tag (`date`, type, scope, PR, requirement IDs, `files`, `spec_files`, `plans`, `user_visible`, `level`), the `bump` and `next_version`, the `reason`, `internal_only` and `warnings`. Rules are REL-011. To replay an old range, add `--since <tag> --to <rev>` (a replay warns that the version isn't greater than the latest tag; that is expected). `bump: none` means nothing user-visible: stop and tell the maintainer (an explicit `--bump patch` is allowed after they confirm). Show the warnings.
 
 ### 3. Changelogs
 
-Write both with the rules in [changelog.md](changelog.md): the `CHANGELOG.md` section (user-facing prose) and the `docs/spec/CHANGELOG.md` lines for merged changes under `docs/spec/**`. Build the coverage table: every merged PR → its entry, or the reason it has none. Then derive the bump the written sections imply (Added or a breaking mark → minor in 0.x; only Changed/Fixed/Security → patch). It must equal `bump`; if it differs, fix the sections or the commit classification before going on.
+Write both with the rules in [changelog.md](changelog.md): the `CHANGELOG.md` section (user-facing prose) and the `docs/spec/CHANGELOG.md` lines for merged changes under `docs/spec/**`. Build the coverage table: every merged PR → its entry, or the reason it has none. Then derive the bump the written sections imply (Added, Removed or a breaking mark → minor in 0.x; only Changed/Deprecated/Fixed/Security → patch). It must equal `bump`; if it differs, fix the sections or the commit classification before going on.
 
 **First signed release** (the channel is signed and the previous release was unsigned): the signed notes link to the README's *Code signing policy*, so this release's PR also rewrites the README: the Download notice (`> Downloads are unsigned…`), the *Updates* paragraph and the status paragraph of *Code signing policy*, which then carries the attribution sentence SignPath requires ([signing.md](signing.md) phase 7). Show that diff at Gate 1. The changelog intro says that Windows files are signed, that updates are available, and that macOS stays unsigned while `MACOS_SIGNING` is `none`.
 
