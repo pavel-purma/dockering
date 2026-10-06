@@ -1,7 +1,7 @@
 //! Updater UI view tests (UPD-008, UPD-009, SET-090, KBD-076). Statuses are injected into the
 //! `UpdateStore`; the hub side is covered by `dk-hub`'s `updates_tests`.
 
-use dk_hub::{DisabledReason, UpdateStatus};
+use dk_hub::{DisabledReason, UiState, UpdateState, UpdateStatus};
 use gpui_kit::component::WindowExt;
 use gpui_kit::{Entity, TestAppContext};
 
@@ -104,6 +104,34 @@ fn upd_008_ready_notification_once_per_version(cx: &mut TestAppContext) {
     );
     set(&h, cx, ready("9.9.10"));
     assert_eq!(notifications(&h, cx), before + 2);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn upd_008_first_launch_after_update_shows_notice(cx: &mut TestAppContext) {
+    let h = start(
+        cx,
+        Setup {
+            ui_state: UiState {
+                updates: UpdateState {
+                    last_run_version: Some("0.0.1".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Setup::default()
+        },
+    );
+    h.wait_containers(cx);
+    assert_eq!(notifications(&h, cx), 1);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn upd_008_fresh_profile_shows_no_updated_notice(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    assert_eq!(notifications(&h, cx), 0);
     h.shutdown();
 }
 

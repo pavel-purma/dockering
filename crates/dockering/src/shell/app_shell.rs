@@ -252,18 +252,20 @@ impl AppShell {
                 .push(cx.observe_in(&updates, window, Self::on_update_status));
         }
         // UPD-008: first launch after an update.
-        if let Some(_previous) = AppState::hub(cx).take_previous_version() {
-            let version = env!("CARGO_PKG_VERSION");
-            let url = s::release_notes_url(version);
-            let note = Notification::info(s::upd_updated(version)).action(move |_, _, _| {
-                let url = url.clone();
-                Button::new("upd-whats-new")
-                    .small()
-                    .ghost()
-                    .label(s::UPD_WHATS_NEW)
-                    .on_click(move |_, _, cx| cx.open_url(&url))
+        if AppState::hub(cx).take_previous_version().is_some() {
+            window.defer(cx, |window, cx| {
+                let version = env!("CARGO_PKG_VERSION");
+                let url = s::release_notes_url(version);
+                let note = Notification::info(s::upd_updated(version)).action(move |_, _, _| {
+                    let url = url.clone();
+                    Button::new("upd-whats-new")
+                        .small()
+                        .ghost()
+                        .label(s::UPD_WHATS_NEW)
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                });
+                window.push_notification(note, cx);
             });
-            window.push_notification(note, cx);
         }
         let active = this.engines.read(cx).active_id().cloned();
         this.set_engine(active, window, cx);
