@@ -10,6 +10,7 @@
 | Hub | `dk-hub` | supervisor state machine, backoff, cancellation on drop, stale-revision handling, StatsService dedup | `tokio::test(start_paused = true)`, `FakeEngine` |
 | View | `dockering` | stores react to hub results; pages render states (loading, empty, error, data); actions call the hub | `gpui::TestAppContext` + `FakeEngine` |
 | E2E (manual) | release checklist | Real engines on all three OSes, including WSL distro + WSLC on Windows | `docs/plan/release-checklist.md` |
+| E2E (Linux, automated; first GitHub run pending) | `linux-smoke.yml` ([distribution §8](features/distribution.md#8-linux-install-and-launch-smoke-test-rel-070077)) | The published Linux packages installed in clean Ubuntu, Fedora and Arch containers; launch, keyboard walk, quit, screenshots; software rendering, `--demo` engine | Xvfb, headless sway, xdotool/wtype, AT-SPI |
 
 `dk-core` provides `FakeEngine`: a scriptable in-memory engine with configurable latency,
 errors, and event injection. It's used by the hub and view tests. View tests MUST NOT need
