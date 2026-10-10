@@ -35,6 +35,8 @@ mod view_tests;
 #[cfg(test)]
 mod view_tests_detail;
 #[cfg(test)]
+mod view_tests_kbd;
+#[cfg(test)]
 mod view_tests_m6;
 #[cfg(test)]
 mod view_tests_settings;

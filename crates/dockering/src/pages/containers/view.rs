@@ -69,6 +69,14 @@ pub struct ContainersPage {
     stats_tasks: HashMap<String, Task<()>>,
     stats: HashMap<String, RowStats>,
     stats_flush: Option<Task<()>>,
+    /// Parked by the shell (SHL-014): no list stats subscriptions while true.
+    suspended: bool,
+    /// A container to put the cursor on once the next build lands (KBD-042).
+    pending_reveal: Option<String>,
+    /// `Enter` was pressed in the search field and no build has landed since (KBD-094).
+    pending_enter: bool,
+    /// The cursor is placed; the table takes focus at the next render (KBD-094).
+    pending_focus: bool,
     menu: Option<KeyMenu>,
     filter_focus: FocusHandle,
     group_focus: FocusHandle,
@@ -159,6 +167,10 @@ impl ContainersPage {
             stats_tasks: HashMap::new(),
             stats: HashMap::new(),
             stats_flush: None,
+            suspended: false,
+            pending_reveal: None,
+            pending_enter: false,
+            pending_focus: false,
             menu: None,
             filter_focus,
             group_focus,
@@ -208,15 +220,49 @@ impl ContainersPage {
     }
 
     /// Puts the cursor on container `id`, expanding its group (KBD-042: `Alt+↑` from the
-    /// container detail lands on this row). Focuses the table.
+    /// container detail lands on this row). Focuses the table. A search or status filter that
+    /// hides the container is cleared first.
     pub fn reveal_row(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let id = id.to_owned();
+        let hidden_by = self
+            .containers(cx)
+            .iter()
+            .find(|c| c.id == id || c.id.starts_with(id))
+            .map(|c| {
+                (
+                    !model::matches_search(c, &self.query),
+                    !self.filter.matches(c),
+                )
+            });
+        if let Some((by_search, by_filter)) = hidden_by
+            && (by_search || by_filter)
+        {
+            if by_search {
+                self.search_task = None;
+                self.query.clear();
+                self.search.update(cx, |i, cx| i.set_value("", window, cx));
+            }
+            self.pending_reveal = Some(id.to_owned());
+            if by_filter {
+                // Rebuilds.
+                self.set_filter(StatusFilter::All, cx);
+            } else {
+                self.rebuild(cx);
+            }
+        } else {
+            self.reveal_in_model(id, cx);
+        }
+        let h = self.table.focus_handle(cx);
+        window.focus(&h, cx);
+        cx.notify();
+    }
+
+    fn reveal_in_model(&mut self, id: &str, cx: &mut Context<Self>) {
         self.table.update(cx, |t, cx| {
             t.update_model(cx, |m| {
                 let full = m
                     .all_item_keys()
                     .into_iter()
-                    .find(|k| k.as_ref() == id || k.starts_with(id.as_str()));
+                    .find(|k| k.as_ref() == id || k.starts_with(id));
                 let Some(full) = full else { return };
                 let group = m.nodes().iter().find_map(|n| match n {
                     crate::ui::list_table::ListNode::Group { key, children, .. }
@@ -232,13 +278,28 @@ impl ContainersPage {
                 m.set_cursor(Some(full));
             });
         });
-        let h = self.table.focus_handle(cx);
-        window.focus(&h, cx);
-        cx.notify();
     }
 
     fn caps(&self, cx: &App) -> Capabilities {
         self.store.read(cx).capabilities()
+    }
+
+    /// Parked by the shell (SHL-014): stop the per-row stats streams and drop open menus.
+    pub fn suspend(&mut self, cx: &mut Context<Self>) {
+        self.suspended = true;
+        self.pending_enter = false;
+        self.pending_focus = false;
+        self.stats_tasks.clear();
+        self.stats_flush = None;
+        self.menu = None;
+        self.table.update(cx, |t, cx| t.suspend(cx));
+    }
+
+    /// Shown again after [`Self::suspend`]: streams resume for the visible rows.
+    pub fn resume(&mut self, cx: &mut Context<Self>) {
+        self.suspended = false;
+        self.update_stats_subscriptions(cx);
+        cx.notify();
     }
 
     fn read_only(&self, cx: &App) -> bool {
@@ -370,6 +431,25 @@ impl ContainersPage {
         }
     }
 
+    /// `Enter` in the search field (KBD-094): the next build that lands puts the cursor on the
+    /// first match, and the table takes focus if the search field still has it. A newer
+    /// rebuild in between doesn't lose the request.
+    fn rebuild_and_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pending_enter = true;
+        self.rebuild(cx);
+        self.focus_table_if_requested(window, cx);
+    }
+
+    fn focus_table_if_requested(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.pending_focus {
+            return;
+        }
+        self.pending_focus = false;
+        if !self.suspended && self.search.focus_handle(cx).is_focused(window) {
+            self.table.update(cx, |t, cx| t.focus_table(window, cx));
+        }
+    }
+
     fn apply_build(&mut self, out: model::BuildOutput, cx: &mut Context<Self>) {
         self.running = out.running;
         self.stopped = out.stopped;
@@ -379,6 +459,15 @@ impl ContainersPage {
             t.update_model(cx, |m| m.set_force_expanded(force));
             t.set_nodes(nodes, cx);
         });
+        if let Some(id) = self.pending_reveal.take() {
+            self.reveal_in_model(&id, cx);
+        }
+        if std::mem::take(&mut self.pending_enter) {
+            let keep = self.query.is_empty();
+            self.pending_focus = self
+                .table
+                .update(cx, |t, cx| t.place_cursor_for_search(keep, cx));
+        }
         self.sync_delegate(cx);
         self.update_stats_subscriptions(cx);
         cx.notify();
@@ -434,20 +523,36 @@ impl ContainersPage {
         &mut self,
         _: &Entity<InputState>,
         event: &InputEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let InputEvent::Change = event {
-            let value = self.search.read(cx).value().to_string();
-            // Debounce 120 ms (SHL-006); replacing the task cancels the previous one.
-            self.search_task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-                this.update(cx, |this, cx| {
-                    this.query = value;
-                    this.rebuild(cx);
-                })
-                .ok();
-            }));
+        match event {
+            InputEvent::Change => {
+                let value = self.search.read(cx).value().to_string();
+                // Only an edit cancels `Enter`; the field re-reports the text it applied.
+                if value != self.query {
+                    self.pending_enter = false;
+                }
+                // Debounce 120 ms (SHL-006); replacing the task cancels the previous one.
+                self.search_task = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+                    this.update(cx, |this, cx| {
+                        this.query = value;
+                        this.rebuild(cx);
+                    })
+                    .ok();
+                }));
+            }
+            // KBD-094: apply the query now, then move into the table.
+            InputEvent::PressEnter {
+                secondary: false,
+                shift: false,
+            } => {
+                self.search_task = None;
+                self.query = self.search.read(cx).value().to_string();
+                self.rebuild_and_enter(window, cx);
+            }
+            _ => {}
         }
     }
 
@@ -1142,7 +1247,7 @@ impl ContainersPage {
     /// Subscribes to `hub.stats` for visible running rows only, capped at
     /// `EngineInfo.list_stats_limit`; hidden when that is 0.
     fn update_stats_subscriptions(&mut self, cx: &mut Context<Self>) {
-        if !self.stats_enabled(cx) {
+        if self.suspended || !self.stats_enabled(cx) {
             self.stats_tasks.clear();
             return;
         }
@@ -1437,7 +1542,8 @@ impl PageView for ContainersPage {
 }
 
 impl Render for ContainersPage {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focus_table_if_requested(window, cx);
         let toolbar = self.render_toolbar(cx);
         let body = self.render_body(cx);
         // Tab order: toolbar controls → table (one stop) → out (KBD-004).

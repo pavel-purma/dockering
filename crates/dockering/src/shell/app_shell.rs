@@ -3,6 +3,7 @@
 //! actions (KBD-017…029).
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use dk_core::{EngineId, EngineState};
@@ -86,6 +87,33 @@ impl ShellPage {
             ShellPage::None => None,
         }
     }
+
+    /// The `EngineStore` a list page was built on.
+    fn store_id(&self, cx: &App) -> Option<gpui_kit::EntityId> {
+        match self {
+            ShellPage::Containers(e) => Some(e.read(cx).store_entity().entity_id()),
+            ShellPage::Dyn(p) => p.store_id(),
+            _ => None,
+        }
+    }
+
+    /// A list page leaving the screen (SHL-014).
+    fn suspend(&self, cx: &mut App) {
+        match self {
+            ShellPage::Containers(e) => e.update(cx, |p, cx| p.suspend(cx)),
+            ShellPage::Dyn(p) => p.suspend(cx),
+            _ => {}
+        }
+    }
+
+    /// A parked list page shown again (SHL-014).
+    fn resume(&self, cx: &mut App) {
+        match self {
+            ShellPage::Containers(e) => e.update(cx, |p, cx| p.resume(cx)),
+            ShellPage::Dyn(p) => p.resume(cx),
+            _ => {}
+        }
+    }
 }
 
 /// One sidebar entry: the main pages, or on Settings routes *Back* plus the sections
@@ -113,6 +141,10 @@ pub struct AppShell {
     /// The last non-Settings route: where Settings' *Back* item returns (SET-080).
     app_route: Route,
     page: ShellPage,
+    /// Which list page `page` is, if it is one (SHL-014).
+    page_list: Option<Page>,
+    /// List pages that left the screen, kept with their view state (SHL-014).
+    parked: HashMap<Page, ShellPage>,
     sidebar_collapsed: bool,
     regions: Regions,
     root_focus: FocusHandle,
@@ -223,6 +255,8 @@ impl AppShell {
             app_route: start.clone(),
             history: History::new(start),
             page: ShellPage::None,
+            page_list: None,
+            parked: HashMap::new(),
             sidebar_collapsed: ui.sidebar_collapsed,
             regions,
             root_focus,
@@ -444,6 +478,10 @@ impl AppShell {
             _ => None,
         }
     }
+    /// How many list pages are parked (SHL-014, tests).
+    pub fn parked_pages(&self) -> usize {
+        self.parked.len()
+    }
     pub fn overlay(&self) -> Overlay {
         if self.switcher.is_some() {
             Overlay::Switcher
@@ -514,6 +552,10 @@ impl AppShell {
                 engine_state: state.clone(),
             });
             let connected = matches!(state, Some(EngineState::Connected | EngineState::Degraded));
+            if !connected {
+                // No stale ids after a disconnect, wherever the user is (SHL-013, SHL-014).
+                self.parked.clear();
+            }
             if let Some(store) = &self.store {
                 store.update(cx, |s, cx| s.set_connected(connected, cx));
             }
@@ -572,6 +614,9 @@ impl AppShell {
         let had_engine = self.store.is_some();
         self.store = None;
         self.store_subs.clear();
+        // A list page belongs to its engine: none outlives a switch (SHL-014).
+        self.parked.clear();
+        self.page_list = None;
         if had_engine {
             self.history.engine_switched();
             self.app_route = self.app_route.for_engine_switch();
@@ -695,7 +740,8 @@ impl AppShell {
         self.active_status(cx).is_some_and(|s| s.state.is_usable())
     }
 
-    /// (Re)creates the page view for the current route.
+    /// (Re)creates the page view for the current route. A list page that leaves the screen is
+    /// parked and comes back as it was left (SHL-014).
     fn mount_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let route = self.history.current().clone();
         let needs_engine = !matches!(route, Route::Settings { .. });
@@ -704,11 +750,45 @@ impl AppShell {
         }
         self.sidebar_cursor = self.active_entry(cx);
         if needs_engine && (self.store.is_none() || !self.connected(cx)) {
+            // No stale ids after a disconnect (SHL-013): parked lists go too.
+            self.parked.clear();
+            self.page_list = None;
             self.page = ShellPage::None;
             return;
         }
+        let store_id = self.store.as_ref().map(|s| s.entity_id());
+        let target = route.list_page();
+        let same_list =
+            target.is_some() && self.page_list == target && self.page.store_id(cx) == store_id;
+        if !same_list {
+            if let Some(leaving) = self.page_list.take() {
+                let page = std::mem::replace(&mut self.page, ShellPage::None);
+                if page.store_id(cx) == store_id {
+                    page.suspend(cx);
+                    self.parked.insert(leaving, page);
+                }
+            }
+            let restored = target
+                .and_then(|p| self.parked.remove(&p))
+                .filter(|page| page.store_id(cx) == store_id);
+            match restored {
+                Some(page) => {
+                    page.resume(cx);
+                    self.page = page;
+                }
+                None => self.page = self.build_page(&route, window, cx),
+            }
+            self.page_list = target.filter(|_| !matches!(self.page, ShellPage::None));
+        }
+        if let Some(h) = self.page.primary_focus(cx) {
+            self.regions.set_default(Region::Content, h);
+        }
+    }
+
+    /// The page for `route`, reusing the current page when it can take the route in place.
+    fn build_page(&self, route: &Route, window: &mut Window, cx: &mut Context<Self>) -> ShellPage {
         // Keep the same page entity when the route didn't change kind (tab switches etc.).
-        self.page = match (&route, &self.page) {
+        match (route, &self.page) {
             // Same store: keep the page (search, selection, scroll survive reconnects).
             (Route::Containers, ShellPage::Containers(p))
                 if self
@@ -751,13 +831,13 @@ impl AppShell {
                 (Some(store), current) => {
                     let keep = match current {
                         ShellPage::Dyn(p) if p.store_id() == Some(store.entity_id()) => {
-                            p.accept_route(&route, window, cx).then(|| p.clone())
+                            p.accept_route(route, window, cx).then(|| p.clone())
                         }
                         _ => None,
                     };
                     ShellPage::Dyn(match keep {
                         Some(p) => p,
-                        None => pages::mount_resource_page(&route, store.clone(), window, cx),
+                        None => pages::mount_resource_page(route, store.clone(), window, cx),
                     })
                 }
                 (None, _) => ShellPage::None,
@@ -774,9 +854,6 @@ impl AppShell {
                 window,
                 cx,
             )),
-        };
-        if let Some(h) = self.page.primary_focus(cx) {
-            self.regions.set_default(Region::Content, h);
         }
     }
 
@@ -1780,8 +1857,13 @@ impl AppShell {
         .into_any_element()
     }
 
-    fn render_overlay(&mut self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
-        let panel = |child: gpui_kit::AnyElement, width: f32, cx: &App| {
+    fn render_overlay(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        let cap = overlay_cap(window);
+        let panel = move |child: gpui_kit::AnyElement, width: f32, cx: &App| {
             gpui_kit::deferred(
                 div()
                     .id("overlay-backdrop")
@@ -1789,7 +1871,7 @@ impl AppShell {
                     .inset_0()
                     .flex()
                     .justify_center()
-                    .pt(px(64.))
+                    .pt(px(OVERLAY_TOP))
                     .bg(cx.theme().overlay)
                     .on_mouse_down(MouseButton::Left, |_, window, cx| {
                         window.dispatch_action(Box::new(crate::actions::palette::Dismiss), cx)
@@ -1797,10 +1879,12 @@ impl AppShell {
                     .child(
                         div()
                             .id("overlay-panel")
+                            .debug_selector(|| "overlay-panel".into())
                             .key_context(ctx::PALETTE)
                             .occlude()
+                            .self_start()
                             .w(px(width))
-                            .max_h(px(560.))
+                            .max_h(cap)
                             .p_3()
                             .rounded(cx.theme().radius_lg)
                             .bg(cx.theme().popover)
@@ -1808,7 +1892,7 @@ impl AppShell {
                             .border_color(cx.theme().border)
                             .shadow_lg()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(child),
+                            .child(div().debug_selector(|| "overlay-body".into()).child(child)),
                     ),
             )
             .with_priority(2)
@@ -1827,7 +1911,8 @@ impl AppShell {
                     .is_some_and(|u| u.read(cx).ready_version().is_some()),
             };
             let shell = cx.entity().downgrade();
-            let el = palette::element(state, ctx, self.store.as_ref(), cx)
+            let list_cap = cap - px(PALETTE_CHROME_H) * rem_scale(window);
+            let el = palette::element(state, ctx, self.store.as_ref(), list_cap, cx)
                 // The item's action was dispatched; close (and restore focus unless the
                 // action moved it, e.g. navigation).
                 .on_confirm(move |_, window, cx| {
@@ -1844,6 +1929,8 @@ impl AppShell {
             return Some(panel(el, 560., cx));
         }
         if let Some(list) = &self.shortcuts {
+            let chrome = px(SHORTCUTS_CHROME_H) * rem_scale(window);
+            list.update(cx, |l, _| l.set_max_h(cap - chrome));
             let el = v_flex()
                 .gap_2()
                 .child(
@@ -1858,6 +1945,28 @@ impl AppShell {
         }
         None
     }
+}
+
+/// Distance of the palette and shortcut panels from the window top.
+const OVERLAY_TOP: f32 = 64.;
+/// Tallest the palette and shortcut panels get.
+const OVERLAY_MAX_H: f32 = 560.;
+/// What the palette's panel spends outside its list: padding, border, search field.
+const PALETTE_CHROME_H: f32 = 64.;
+/// What the shortcut panel spends outside its list: padding, border, title, filter, gaps.
+const SHORTCUTS_CHROME_H: f32 = 136.;
+
+/// The chrome heights above are measured at GPUI's default 16 px rem; the panel padding and
+/// text are rem-based, so they grow with the UI zoom.
+fn rem_scale(window: &Window) -> f32 {
+    window.rem_size().as_f32() / 16.0
+}
+
+/// The panel height cap: [`OVERLAY_MAX_H`], less in a short window so nothing is clipped.
+fn overlay_cap(window: &Window) -> gpui_kit::Pixels {
+    (window.viewport_size().height - px(OVERLAY_TOP + 16.))
+        .min(px(OVERLAY_MAX_H))
+        .max(px(200.))
 }
 
 impl Focusable for AppShell {
@@ -1882,7 +1991,7 @@ impl Render for AppShell {
         let sidebar = self.render_sidebar(window, cx);
         let content = self.render_content(cx);
         let status = self.render_status_bar(cx);
-        let overlay = self.render_overlay(cx);
+        let overlay = self.render_overlay(window, cx);
         // Palette confirm closes the palette (the item action was already dispatched).
         if let Some(state) = self.palette.clone()
             && !state.focus_handle(cx).contains_focused(window, cx)

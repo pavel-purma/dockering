@@ -25,7 +25,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 |---|---|---|
 | Engine connections & switching | [features/engines.md](features/engines.md) | implemented (2026-10-04 WSLC repair; cross-OS release gate open; 2026-10-05 status-bar change in progress) |
 | Containers list & grouping | [features/containers.md](features/containers.md) | implemented |
-| Container detail | [features/container-detail.md](features/container-detail.md) | implemented (2026-10-04 WSLC inspect parity; cross-OS release gate open) |
+| Container detail | [features/container-detail.md](features/container-detail.md) | implemented (2026-10-04 WSLC inspect parity; cross-OS release gate open; 2026-10-10 keyboard viewing of the tabs planned) |
 | Container logs | [features/container-logs.md](features/container-logs.md) | implemented |
 | Container terminal (exec) | [features/container-terminal.md](features/container-terminal.md) | implemented |
 | Container stats & charts | [features/container-stats.md](features/container-stats.md) | implemented |
@@ -33,7 +33,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Volumes | [features/volumes.md](features/volumes.md) | implemented |
 | Networks | [features/networks.md](features/networks.md) | implemented |
 | Settings | [features/settings.md](features/settings.md) | implemented |
-| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open) |
+| Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open; 2026-10-10 search hand-off, back navigation and detail-tab keys planned) |
 | Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; `/release` skill and SignPath signing flow built, signed channel not yet enabled) |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 

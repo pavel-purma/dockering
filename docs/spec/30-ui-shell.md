@@ -89,6 +89,7 @@ pub enum Route {
 - **SHL-011** Window state (size, position, sidebar collapsed, column widths, group expand state per engine) persists in `state.json`.
 - **SHL-012** No modal blocks the app while an operation runs. Dialogs close immediately, and progress continues in the row or a notification.
 - **SHL-013** Disconnected engine: list pages show a full-page `Alert` with the error, the hint, and *Retry* / *Switch engine*. Last known list data isn't shown, so the user can't act on stale ids. While **Degraded** (ping failing, reconnecting), data stays visible read-only with a banner and actions disabled. Open detail pages keep their logs and terminal scrollback visible, read-only.
+- **SHL-014** *(planned 2026-10-10)* List pages (Containers, Images, Volumes, Networks) keep their view state while another page is shown, and restore it when the user returns by any route (Back, `Alt+←`, `Backspace`, the mouse Back button, the breadcrumb, `Alt+↑`, the sidebar, `Mod+1…4`, the palette): the search text, status filter, sort, checkbox selection, the cursor row and the scroll position. A parked page does no background work: Containers' per-row stats subscriptions stop and resume. The state is dropped when the active engine changes and when the engine disconnects (SHL-013). Detail pages are not retained (CDT-081).
 
 ## 4. Visual language
 

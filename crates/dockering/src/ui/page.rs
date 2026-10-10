@@ -40,6 +40,17 @@ pub trait RoutedPage: PageView + Render + Sized + 'static {
         let _ = (route, window, cx);
         false
     }
+
+    /// The page leaves the screen but is kept for a later return (SHL-014): drop transient UI
+    /// and stop hidden work.
+    fn suspend(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        let _ = cx;
+    }
+
+    /// The parked page is shown again.
+    fn resume(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        let _ = cx;
+    }
 }
 
 trait DynOps {
@@ -47,6 +58,8 @@ trait DynOps {
     fn focus_search(&self, window: &mut Window, cx: &mut App);
     fn clear_search(&self, window: &mut Window, cx: &mut App) -> bool;
     fn accept_route(&self, route: &Route, window: &mut Window, cx: &mut App) -> bool;
+    fn suspend(&self, cx: &mut App);
+    fn resume(&self, cx: &mut App);
 }
 
 impl<V: RoutedPage> DynOps for Entity<V> {
@@ -67,6 +80,12 @@ impl<V: RoutedPage> DynOps for Entity<V> {
             }
             ok
         })
+    }
+    fn suspend(&self, cx: &mut App) {
+        self.update(cx, |p, cx| p.suspend(cx));
+    }
+    fn resume(&self, cx: &mut App) {
+        self.update(cx, |p, cx| p.resume(cx));
     }
 }
 
@@ -108,5 +127,11 @@ impl DynPage {
     }
     pub fn accept_route(&self, route: &Route, window: &mut Window, cx: &mut App) -> bool {
         self.ops.accept_route(route, window, cx)
+    }
+    pub fn suspend(&self, cx: &mut App) {
+        self.ops.suspend(cx)
+    }
+    pub fn resume(&self, cx: &mut App) {
+        self.ops.resume(cx)
     }
 }

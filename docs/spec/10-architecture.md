@@ -217,7 +217,7 @@ sessions → hub terminal actors, indexed by `TerminalRegistry` (TRM-008). Log b
 | `EngineListStore` | app | All configured and discovered engines with `EngineStatus`. Fed by `hub_events()`. |
 | `EngineStore` | per active engine | `Resource<Vec<ContainerSummary>>`, images, volumes, networks, `EngineInfo`, the event subscription |
 | `Navigator` | window | `Route` stack (back/forward), current route |
-| Page views | while mounted | View state (search text, filters, sort, selection, collapsed groups), plus a handle to `EngineStore` |
+| Page views | while mounted, and while parked (list pages, SHL-014) | View state (search text, filters, sort, selection, collapsed groups, cursor, scroll), plus a handle to `EngineStore`. A list page leaving the screen is parked by the shell and restored on return; parked pages are dropped on an engine switch or disconnect, and hold no subscriptions or hub tasks while parked. *(planned 2026-10-10)* |
 | `ContainerDetailState` | while detail page open | Inspect data, the logs view buffer, and *subscriptions* to hub stats/terminal (the data lives in the hub, see §3.3 Ownership) |
 
 ```rust

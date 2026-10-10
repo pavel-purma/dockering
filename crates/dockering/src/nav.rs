@@ -192,6 +192,18 @@ impl Route {
         )
     }
 
+    /// The page of a list route (Containers, Images, Volumes, Networks); `None` for details
+    /// and Settings. List pages are parked while another page shows (SHL-014).
+    pub fn list_page(&self) -> Option<Page> {
+        match self {
+            Route::Containers => Some(Page::Containers),
+            Route::Images => Some(Page::Images),
+            Route::Volumes => Some(Page::Volumes),
+            Route::Networks => Some(Page::Networks),
+            _ => None,
+        }
+    }
+
     /// The parent list of a detail route; list routes return themselves (spec 10 §4.3).
     pub fn parent_list(&self) -> Route {
         match self {

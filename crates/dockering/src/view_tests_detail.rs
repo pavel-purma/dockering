@@ -490,14 +490,14 @@ fn logs_view(page: &Entity<ContainerDetailPage>, cx: &mut TestAppContext) -> Ent
         .expect("logs tab entity")
 }
 
-fn push(h: &Harness, name: &str, stream: dk_core::LogStream, text: &str) {
+pub(crate) fn push(h: &Harness, name: &str, stream: dk_core::LogStream, text: &str) {
     h.engine.push_log(
         &id_of(name),
         dk_core::fake::fixtures::log_line(stream, text),
     );
 }
 
-fn wait_lines(h: &Harness, cx: &mut TestAppContext, logs: &Entity<LogsView>, n: usize) {
+pub(crate) fn wait_lines(h: &Harness, cx: &mut TestAppContext, logs: &Entity<LogsView>, n: usize) {
     h.wait_until(cx, "log lines", |_, cx| logs.read(cx).lines().len() >= n);
 }
 
@@ -511,7 +511,7 @@ fn texts(logs: &Entity<LogsView>, cx: &mut TestAppContext) -> Vec<String> {
     })
 }
 
-fn wait_log_stream(h: &Harness, cx: &mut TestAppContext) {
+pub(crate) fn wait_log_stream(h: &Harness, cx: &mut TestAppContext) {
     h.wait_until(cx, "log stream subscribed", |_, _| {
         h.engine.open_streams().1 > 0
     });
