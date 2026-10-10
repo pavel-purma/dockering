@@ -1,48 +1,37 @@
 #!/bin/bash
-# Throwaway feasibility probe: can Dockering be installed, started, screenshotted and driven on a hosted macOS runner?
-# Every section reports on its own: nothing here stops the run, and the script always exits 0.
+# Throwaway probe, round 2: the questions round 1 left open. Every step has its own hard timeout; the script always exits 0.
 set +e
 OUT="${RUNNER_TEMP:-/tmp}/probe-out"
 mkdir -p "$OUT/bin"
 exec > >(tee -a "$OUT/probe.log") 2>&1
-
 TAG="${PROBE_TAG:-v0.2.0}"
 case "$(uname -m)" in arm64) A=aarch64 ;; *) A=x86_64 ;; esac
 log() { printf '\n===== %s =====\n' "$*"; }
-tmo() { local s=$1; shift; perl -e 'alarm shift; exec @ARGV or exit 127' "$s" "$@"; }
+# run a command with a hard time limit; prints "[timeout after N s]" and returns 124 when it is killed
+tmo() {
+  local s=$1 pid watcher rc
+  shift
+  "$@" &
+  pid=$!
+  ( sleep "$s"; kill -9 "$pid" 2>/dev/null && echo "[timeout after ${s}s: $*]" ) &
+  watcher=$!
+  wait "$pid" 2>/dev/null
+  rc=$?
+  kill "$watcher" 2>/dev/null
+  wait "$watcher" 2>/dev/null
+  return $rc
+}
+APP=/Applications/Dockering.app
+BIN="$APP/Contents/MacOS/dockering"
+winlist() { "$OUT/bin/winlist" "$@" 2>/dev/null; }
+shot() { tmo 30 screencapture -x "$OUT/$1.png"; echo "screencapture $1 rc=$?"; }
 
 log "runner"
-sw_vers
-echo "arch: $(uname -m) -> package arch $A"
-echo "cpu: $(sysctl -n machdep.cpu.brand_string 2>&1) | ncpu $(sysctl -n hw.ncpu) | mem $(( $(sysctl -n hw.memsize) / 1048576 )) MB"
-echo "launchctl managername: $(launchctl managername 2>&1)"
-echo "id: $(id)"
-echo "console user: $(stat -f%Su /dev/console 2>&1)"
-ps -axo pid,user,comm | grep -E 'WindowServer|loginwindow|/Dock$|/Finder$|hosted-compute|Runner.Worker|Runner.Listener' | grep -v grep | head -n 12
-echo "bash: $(command -v bash) $(bash --version | head -n 1)"
-for t in swift swiftc gtimeout timeout perl python3 gh osascript screencapture sips hdiutil codesign spctl lipo otool vtool plutil ditto; do printf '  %-14s %s\n' "$t" "$(command -v $t || echo MISSING)"; done
+sw_vers | tr '\n' ' '; echo
+echo "arch $(uname -m)  bash $BASH_VERSION  user $(id -un)"
 
-log "displays and GPU (system_profiler)"
-tmo 90 system_profiler SPDisplaysDataType 2>&1 | head -n 40
-
-log "swift helpers: Metal devices, displays, window list"
+log "helpers: window list (CoreGraphics), compiled once"
 cd "$OUT/bin" || exit 0
-cat > gpu.swift <<'EOF'
-import Metal
-import CoreGraphics
-let all = MTLCopyAllDevices()
-print("MTLCopyAllDevices: \(all.map { $0.name })")
-if let d = MTLCreateSystemDefaultDevice() {
-  print("MTLCreateSystemDefaultDevice: \(d.name) lowPower=\(d.isLowPower) removable=\(d.isRemovable) unifiedMemory=\(d.hasUnifiedMemory)")
-} else {
-  print("MTLCreateSystemDefaultDevice: NONE")
-}
-var ids = [CGDirectDisplayID](repeating: 0, count: 8)
-var cnt: UInt32 = 0
-CGGetActiveDisplayList(8, &ids, &cnt)
-print("active displays: \(cnt), main id \(CGMainDisplayID())")
-for i in 0..<Int(cnt) { print("  display \(ids[i]): \(CGDisplayPixelsWide(ids[i]))x\(CGDisplayPixelsHigh(ids[i]))") }
-EOF
 cat > winlist.swift <<'EOF'
 import CoreGraphics
 import Foundation
@@ -62,32 +51,139 @@ for w in list {
 }
 exit(n > 0 ? 0 : 1)
 EOF
-cat > ax.applescript <<'EOF'
+tmo 240 swiftc -O winlist.swift -o winlist 2>&1 | tail -n 3
+ls -l winlist
+
+log "download, verify and install the published DMG ($TAG, $A)"
+mkdir -p "$OUT/dl" && cd "$OUT/dl" || exit 0
+tmo 120 gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Dockering-$A.dmg" --pattern SHA256SUMS --dir . 2>&1 | tail -n 2
+grep -E "^[0-9a-f]{64} [ *]Dockering-$A\.dmg\$" SHA256SUMS > one.sha256
+shasum -a 256 -c one.sha256
+MNT="$OUT/mnt"
+mkdir -p "$MNT"
+tmo 120 hdiutil attach "$OUT/dl/Dockering-$A.dmg" -nobrowse -readonly -noverify -mountpoint "$MNT" 2>&1 | tail -n 2
+rm -rf "$APP"
+ditto "$MNT/Dockering.app" "$APP"
+tmo 60 hdiutil detach "$MNT" -force 2>&1 | tail -n 1
+echo "installed: $(ls "$APP/Contents/MacOS")"
+
+log "signature state of the bundle as published (three views)"
+echo "--- codesign -dv"; codesign -dv --verbose=2 "$APP" 2>&1 | head -n 8
+echo "--- codesign --verify --deep --strict"; codesign --verify --deep --strict "$APP" 2>&1 | head -n 3; echo "rc=$?"
+echo "--- spctl"; spctl --assess --type execute --verbose=4 "$APP" 2>&1 | head -n 3
+echo "--- the binary alone"; codesign -dv "$BIN" 2>&1 | head -n 4; codesign --verify --strict "$BIN" 2>&1 | head -n 2
+
+log "A: launch the bundle through LaunchServices with no quarantine flag (open -n -a), --demo"
+rm -rf "${TMPDIR:-/tmp}"/dockering-demo-* 2>/dev/null
+tmo 30 open -n -a "$APP" --args --demo
+echo "open rc=$?"
+for i in $(seq 1 40); do winlist ockering | head -n 1 | grep -q . && break; sleep 0.5; done
+echo "window after about $((i / 2)) s:"; winlist ockering
+sleep 3
+shot A-open-plain
+pgrep -fl "Dockering.app/Contents/MacOS" | head -n 2
+echo "--- quit with Cmd+Q through System Events (hard limit 20 s)"
+tmo 20 osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "ockering") to true'
+sleep 1
+tmo 20 osascript -e 'tell application "System Events" to keystroke "q" using {command down}'
+echo "keystroke rc=$?"
+for i in $(seq 1 40); do pgrep -f "Dockering.app/Contents/MacOS" >/dev/null || break; sleep 0.25; done
+pgrep -f "Dockering.app/Contents/MacOS" >/dev/null && { echo "STILL RUNNING after Cmd+Q"; pkill -9 -f "Dockering.app/Contents/MacOS"; } || echo "app quit"
+
+log "B: a copy that carries the browser download flag (quarantine), the way a user gets it"
+rm -rf /tmp/q && mkdir -p /tmp/q
+ditto "$APP" /tmp/q/Dockering.app
+xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" /tmp/q/Dockering.app
+xattr -l /tmp/q/Dockering.app
+echo "--- spctl on the quarantined copy (hard limit 30 s)"
+tmo 30 spctl --assess --type execute --verbose=4 /tmp/q/Dockering.app 2>&1 | head -n 4
+echo "--- open it (hard limit 30 s); open itself returns at once"
+tmo 30 open -n -a /tmp/q/Dockering.app --args --demo
+echo "open rc=$?"
+for i in $(seq 1 24); do winlist ockering | head -n 1 | grep -q . && break; sleep 0.5; done
+echo "app window after about $((i / 2)) s:"; winlist ockering
+sleep 6
+echo "--- processes now"
+pgrep -fl "q/Dockering.app" | head -n 3
+ps -axo pid,comm | grep -i -E 'CoreServicesUIAgent|UserNotification|syspolicyd|XprotectService' | grep -v grep | head -n 6
+echo "--- windows of the Gatekeeper helpers"
+winlist CoreServicesUIAgent
+winlist UserNotificationCenter
+winlist SecurityAgent
+shot B-open-quarantined
+echo "--- clean up B (hard kill: the dialog, if any, may hold the app)"
+pkill -9 -f "q/Dockering.app" 2>/dev/null
+pkill -9 -f CoreServicesUIAgent 2>/dev/null
+sleep 1
+
+log "C: the same quarantined copy started as a plain process (what 'open' does not do)"
+rm -rf "${TMPDIR:-/tmp}"/dockering-demo-* 2>/dev/null
+( RUST_LOG=info "/tmp/q/Dockering.app/Contents/MacOS/dockering" --demo >"$OUT/C.out" 2>"$OUT/C.err" & echo $! >"$OUT/C.pid" )
+sleep 8
+CP=$(cat "$OUT/C.pid")
+kill -0 "$CP" 2>/dev/null && echo "process alive, window:" || echo "process exited"
+winlist ockering
+head -n 6 "$OUT/C.err"
+kill -9 "$CP" 2>/dev/null
+
+log "D: ad-hoc re-signing (what a release step could do) then Gatekeeper's view of the quarantined copy"
+rm -rf /tmp/r && mkdir -p /tmp/r
+ditto "$APP" /tmp/r/Dockering.app
+codesign --force --deep --sign - /tmp/r/Dockering.app 2>&1 | head -n 3
+echo "--- verify: "; codesign --verify --deep --strict --verbose=2 /tmp/r/Dockering.app 2>&1 | head -n 4
+xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" /tmp/r/Dockering.app
+tmo 30 spctl --assess --type execute --verbose=4 /tmp/r/Dockering.app 2>&1 | head -n 4
+tmo 30 open -n -a /tmp/r/Dockering.app --args --demo
+for i in $(seq 1 24); do winlist ockering | head -n 1 | grep -q . && break; sleep 0.5; done
+echo "resigned+quarantined window after about $((i / 2)) s:"; winlist ockering
+sleep 4
+shot D-resigned-quarantined
+pkill -9 -f "r/Dockering.app" 2>/dev/null
+pkill -9 -f CoreServicesUIAgent 2>/dev/null
+
+log "E: real mode (no --demo), first launch with a clean profile: window, log, state"
+rm -rf "$HOME/Library/Application Support/dev.dockering.Dockering" "$HOME/Library/Logs/dev.dockering.Dockering" 2>/dev/null
+tmo 30 open -n -a "$APP"
+for i in $(seq 1 40); do winlist ockering | head -n 1 | grep -q . && break; sleep 0.5; done
+echo "window after about $((i / 2)) s:"; winlist ockering
+sleep 5
+shot E-real-first-run
+echo "--- where it keeps files"
+find "$HOME/Library" -maxdepth 4 -path '*ockering*' 2>/dev/null | head -n 12
+find "$HOME/Library" -maxdepth 5 -name 'dockering*.log*' 2>/dev/null | head -n 3
+LOGF=$(find "$HOME/Library" -maxdepth 5 -name 'dockering*.log*' 2>/dev/null | head -n 1)
+[ -n "$LOGF" ] && head -n 8 "$LOGF" | cut -c1-200
+tmo 20 osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "ockering") to true'
+sleep 1
+tmo 20 osascript -e 'tell application "System Events" to keystroke "q" using {command down}'
+for i in $(seq 1 40); do pgrep -f "Dockering.app/Contents/MacOS" >/dev/null || break; sleep 0.25; done
+pgrep -f "Dockering.app/Contents/MacOS" >/dev/null && { echo "STILL RUNNING after Cmd+Q"; pkill -9 -f "Dockering.app/Contents/MacOS"; } || echo "app quit"
+find "$HOME/Library" -maxdepth 5 \( -name 'state.json' -o -name 'crash-*.txt' \) 2>/dev/null | head -n 4
+
+log "F: the accessibility read, with a hard limit, and how long it takes"
+rm -rf "${TMPDIR:-/tmp}"/dockering-demo-* 2>/dev/null
+tmo 30 open -n -a "$APP" --args --demo
+for i in $(seq 1 40); do winlist ockering | head -n 1 | grep -q . && break; sleep 0.5; done
+cat > "$OUT/bin/ax.applescript" <<'EOF'
 on run argv
   set procName to item 1 of argv
-  set maxRows to 300
   tell application "System Events"
     set ps to every process whose name contains procName
-    if (count of ps) is 0 then return "NO PROCESS matching " & procName
+    if (count of ps) is 0 then return "NO PROCESS"
     set p to item 1 of ps
-    set out to "process: " & (name of p) & " | windows=" & (count of windows of p) & linefeed
+    set out to "windows=" & (count of windows of p) & linefeed
     try
-      repeat with w in windows of p
-        set out to out & "window: " & (name of w) & " | " & (role of w) & linefeed
-      end repeat
+      set rowsList to every UI element of window 1 of p whose role is "AXRow"
+    on error
+      set rowsList to {}
     end try
+    set out to out & "direct rows of the window: " & (count of rowsList) & linefeed
     try
-      with timeout of 120 seconds
-        set els to entire contents of window 1 of p
-      end timeout
+      set els to entire contents of window 1 of p
       set out to out & "elements: " & (count of els) & linefeed
-      set i to 0
       repeat with e in els
-        set i to i + 1
-        if i > maxRows then exit repeat
         set r to ""
         set nm to ""
-        set ds to ""
         set sel to ""
         try
           set r to role of e
@@ -96,12 +192,9 @@ on run argv
           set nm to name of e
         end try
         try
-          set ds to description of e
+          set sel to (value of attribute "AXSelected" of e) as string
         end try
-        try
-          set sel to (selected of e) as string
-        end try
-        set out to out & r & " | " & nm & " | " & ds & " | sel=" & sel & linefeed
+        if r is "AXRow" and nm is not "missing value" and nm is not "" then set out to out & "row | " & nm & " | selected=" & sel & linefeed
       end repeat
     on error errMsg
       set out to out & "entire contents failed: " & errMsg & linefeed
@@ -110,159 +203,23 @@ on run argv
   return out
 end run
 EOF
-time (tmo 240 swiftc -O gpu.swift -o gpu 2>&1 | tail -n 5)
-time (tmo 240 swiftc -O winlist.swift -o winlist 2>&1 | tail -n 5)
-tmo 30 ./gpu
-
-log "screen capture of the empty desktop"
-tmo 30 screencapture -x "$OUT/00-desktop.png"
-echo "screencapture rc=$?"
-sips -g pixelWidth -g pixelHeight "$OUT/00-desktop.png" 2>&1 | tail -n 3
-ls -l "$OUT/00-desktop.png"
-
-log "download and verify the published DMG ($TAG, $A)"
-mkdir -p "$OUT/dl" && cd "$OUT/dl" || exit 0
-gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Dockering-$A.dmg" --pattern SHA256SUMS --dir . 2>&1 | tail -n 3
-ls -l
-grep -E "^[0-9a-f]{64} [ *]Dockering-$A\.dmg\$" SHA256SUMS > one.sha256
-cat one.sha256
-shasum -a 256 -c one.sha256
-echo "checksum rc=$?"
-gh attestation verify "Dockering-$A.dmg" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref "refs/tags/$TAG" --deny-self-hosted-runners 2>&1 | tail -n 4
-echo "attestation rc=${PIPESTATUS[0]}"
-
-log "install from the DMG into /Applications"
-MNT="$OUT/mnt"
-mkdir -p "$MNT"
-tmo 120 hdiutil attach "$OUT/dl/Dockering-$A.dmg" -nobrowse -readonly -noverify -mountpoint "$MNT" 2>&1 | tail -n 4
-echo "attach rc=${PIPESTATUS[0]}"
-ls -la "$MNT"
-APP_SRC=$(ls -d "$MNT"/*.app 2>/dev/null | head -n 1)
-echo "app in the dmg: $APP_SRC"
-rm -rf /Applications/Dockering.app
-ditto "$APP_SRC" /Applications/Dockering.app
-echo "ditto rc=$?"
-hdiutil detach "$MNT" -force 2>&1 | tail -n 2
-APP=/Applications/Dockering.app
-find "$APP" -maxdepth 3 | head -n 40
-du -sh "$APP"
-
-log "bundle inspection"
-plutil -p "$APP/Contents/Info.plist" | head -n 40
-EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist" 2>/dev/null)
-BIN="$APP/Contents/MacOS/$EXE"
-echo "executable: $BIN"
-file "$BIN"
-lipo -info "$BIN"
-vtool -show-build "$BIN" 2>&1 | head -n 10
-otool -L "$BIN" | head -n 40
-echo "--- codesign"
-codesign -dv --verbose=4 "$APP" 2>&1 | head -n 16
-codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | head -n 6
-echo "--- gatekeeper (spctl)"
-spctl --assess --type execute --verbose=4 "$APP" 2>&1 | head -n 6
-echo "--- xattrs"
-xattr -lr "$APP" 2>&1 | head -n 6
-echo "--- version"
-"$BIN" --version
-echo "version rc=$?"
-
-run_ax() { tmo 200 osascript "$OUT/bin/ax.applescript" ockering 2>&1; }
-
-log "launch 1: the bundle executable run directly, --demo"
-rm -rf "$HOME/Library/Application Support/dev.dockering.Dockering" "${TMPDIR:-/tmp}"/dockering-demo-* 2>/dev/null
-RUST_LOG=info "$BIN" --demo >"$OUT/app1.out" 2>"$OUT/app1.err" &
-APID=$!
-echo "pid $APID"
-W=""
-for i in $(seq 1 80); do
-  W=$("$OUT/bin/winlist" ockering 2>/dev/null | head -n 1)
-  [ -n "$W" ] && break
-  kill -0 $APID 2>/dev/null || { echo "the app exited early"; break; }
-  sleep 0.5
-done
-echo "window found after about $((i / 2)) s: $W"
-echo "--- all windows of the process:"
-"$OUT/bin/winlist" ockering
-if kill -0 $APID 2>/dev/null; then echo "app alive"; else wait $APID; echo "app exited, status $?"; fi
-sleep 4
-tmo 30 screencapture -x "$OUT/01-full.png"
-echo "full-screen capture rc=$?"
-WID=$(printf '%s' "$W" | cut -f1)
-if [ -n "$WID" ]; then
-  tmo 30 screencapture -x -o -l "$WID" "$OUT/01-window.png"
-  echo "window capture rc=$?"
-fi
-for f in "$OUT"/01-*.png; do [ -f "$f" ] && echo "$(basename "$f"): $(sips -g pixelWidth -g pixelHeight "$f" 2>&1 | tr '\n' ' ' | sed 's/  */ /g') $(stat -f%z "$f") bytes"; done
-echo "--- app stderr (first 25 lines)"
-head -n 25 "$OUT/app1.err"
-echo "--- log files"
-find "$HOME/Library" "${TMPDIR:-/tmp}" -maxdepth 5 -name 'dockering*.log*' 2>/dev/null | head -n 5
-
-log "accessibility tree through System Events (before any key)"
-run_ax | tee "$OUT/ax-1.txt" | head -n 70
-echo "ax rc=${PIPESTATUS[0]}"
-
-log "keyboard through System Events: bring to front, Cmd+2, Cmd+3, Cmd+4, Cmd+1"
-osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "ockering") to true' 2>&1
-echo "frontmost rc=$?"
-sleep 1
-for k in 2 3 4 1; do
-  osascript -e "tell application \"System Events\" to keystroke \"$k\" using {command down}" 2>&1
-  echo "keystroke Cmd+$k rc=$?"
+for n in 1 2 3; do
+  s=$(date +%s)
+  tmo 90 osascript "$OUT/bin/ax.applescript" ockering 2>&1 | head -n 12
+  echo "ax read $n took $(( $(date +%s) - s )) s"
   sleep 2
-  tmo 30 screencapture -x "$OUT/02-after-cmd-$k.png"
 done
-log "accessibility tree after the keys (the sidebar selection should be Containers again)"
-run_ax | tee "$OUT/ax-2.txt" | grep -i -E 'process:|window:|elements:|row|outline|tab|sel=true' | head -n 40
-
-log "quit with Cmd+Q"
-osascript -e 'tell application "System Events" to keystroke "q" using {command down}' 2>&1
-echo "keystroke rc=$?"
-for i in $(seq 1 40); do kill -0 $APID 2>/dev/null || break; sleep 0.25; done
-if kill -0 $APID 2>/dev/null; then echo "STILL RUNNING 10 s after Cmd+Q"; kill $APID; else wait $APID; echo "app exit status: $?"; fi
-echo "--- state files"
-find "${TMPDIR:-/tmp}" "$HOME/Library/Application Support" -maxdepth 5 \( -name 'state.json' -o -name 'crash-*.txt' \) 2>/dev/null | head -n 6
-cat "${TMPDIR:-/tmp}"/dockering-demo-*/data/state.json 2>/dev/null | head -c 300; echo
-
-log "launch 2: open -n -a (LaunchServices, like a double click), --demo"
-open -n -a "$APP" --args --demo
-echo "open rc=$?"
-W=""
-for i in $(seq 1 80); do
-  W=$("$OUT/bin/winlist" ockering 2>/dev/null | head -n 1)
-  [ -n "$W" ] && break
-  sleep 0.5
-done
-echo "window found after about $((i / 2)) s: $W"
-sleep 4
-tmo 30 screencapture -x "$OUT/10-open-full.png"
-lsappinfo list 2>&1 | grep -i -B1 -A5 dockering | head -n 14
-pgrep -fl 'Dockering.app/Contents/MacOS' | head -n 3
-osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "ockering") to true' 2>&1
+tmo 20 osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "ockering") to true'
 sleep 1
-osascript -e 'tell application "System Events" to keystroke "q" using {command down}' 2>&1
-for i in $(seq 1 40); do pgrep -f 'Dockering.app/Contents/MacOS' >/dev/null || break; sleep 0.25; done
-if pgrep -f 'Dockering.app/Contents/MacOS' >/dev/null; then echo "still running after Cmd+Q"; pkill -f 'Dockering.app/Contents/MacOS'; else echo "app quit"; fi
-
-log "launch 3: a copy marked as downloaded by a browser (quarantine), the way a user gets it"
-rm -rf /tmp/q && mkdir -p /tmp/q
-ditto "$APP" /tmp/q/Dockering.app
-xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" /tmp/q/Dockering.app
-xattr -l /tmp/q/Dockering.app
-spctl --assess --type execute --verbose=4 /tmp/q/Dockering.app 2>&1 | head -n 4
-open -n -a /tmp/q/Dockering.app --args --demo
-echo "open rc=$?"
-sleep 10
-echo "--- windows of the app:"
-"$OUT/bin/winlist" ockering
-echo "--- windows of any Gatekeeper helper:"
-"$OUT/bin/winlist" CoreServicesUIAgent
-"$OUT/bin/winlist" UserNotificationCenter
-tmo 30 screencapture -x "$OUT/20-quarantine-full.png"
-pgrep -fl 'q/Dockering.app' | head -n 3
-pkill -f '/tmp/q/Dockering.app' 2>/dev/null
+for k in 2 4 1; do
+  tmo 20 osascript -e "tell application \"System Events\" to keystroke \"$k\" using {command down}"
+  sleep 2
+  echo "after Cmd+$k:"
+  tmo 90 osascript "$OUT/bin/ax.applescript" ockering 2>&1 | grep -E '^row \| (Containers|Images|Volumes|Networks)'
+done
+tmo 20 osascript -e 'tell application "System Events" to keystroke "q" using {command down}'
+sleep 3
+pkill -9 -f "Dockering.app/Contents/MacOS" 2>/dev/null
 
 log "done"
-sleep 2
 exit 0
