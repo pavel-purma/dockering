@@ -1,0 +1,35 @@
+name: macOS probe
+# Throwaway feasibility probe (branch probe/macos-smoke): never merged. It only reads state and takes screenshots.
+on:
+  push:
+    branches: ["probe/**"]
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, macos-26]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROBE_TAG: v0.2.0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Probe
+        run: bash .github/probe/macos-probe.sh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: macos-probe-${{ matrix.os }}
+          path: ${{ runner.temp }}/probe-out/
+          retention-days: 3
+          if-no-files-found: warn
