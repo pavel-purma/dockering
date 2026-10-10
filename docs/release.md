@@ -141,6 +141,10 @@ keeps two artifacts on the run page for 14 days; `<slug>` is `ubuntu-24.04`, `ub
 | `contact-<slug>.png` | one labelled contact sheet; a single PNG, not zipped |
 | `smoke-<slug>` | everything the leg wrote: one folder per scenario with every screenshot (each with a platform caption), the logs and `results.txt` (a `PASS`, `FAIL` or `INFO` line per check), plus a copy of the contact sheet; `gh run download <run-id> -n smoke-<slug>` fetches it |
 
+`gh run download <run-id>` with neither `-n` nor `-p` stops with `zip: not a valid zip file`, because the contact sheets are
+uploaded unzipped. Use `-p 'smoke-*'` for the four evidence artifacts (each holds its own contact sheet), or open the
+run page to see a contact sheet.
+
 What each check means is in [the plan](plan/features/linux-install-smoke-test.md#62-what-a-leg-checks).
 
 **Reproduce a leg locally.** Needs Docker and a logged-in `gh`. `fetch.sh` downloads and verifies the packages as the

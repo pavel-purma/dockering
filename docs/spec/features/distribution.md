@@ -100,7 +100,7 @@ SignPath Foundation: [plan](../../plan/features/release-skill-and-signing.md), [
 
 ## 8. Linux install-and-launch smoke test (REL-070…077)
 
-**Status: in-progress (2026-10-09).** Built and verified in local Docker; the first run on a GitHub runner is pending. Plan: [linux-install-smoke-test](../../plan/features/linux-install-smoke-test.md), which also records the feasibility spike.
+**Status: in-progress (2026-10-10).** Built, verified in local Docker, and green in two GitHub runs (a pull request and a manual dispatch); the release trigger, the weekly schedule and the failure alert have not fired yet. Plan: [linux-install-smoke-test](../../plan/features/linux-install-smoke-test.md), which also records the feasibility spike.
 
 The release workflow builds and inspects files but starts nothing. `linux-smoke.yml` installs the *published* Linux x86_64 packages into clean distribution containers on a hosted runner, starts the app on a headless display, drives it from the keyboard, takes screenshots and quits it. Fedora and Arch have no native package, so their legs install the `.tar.gz` and the runtime libraries; every leg also runs the AppImage. Out of scope: GPU rendering, native rpm and Arch packages, aarch64 and a Docker-engine scenario (plan phase 2), and pixel-exact screenshot comparison (the default UI font differs per distribution).
 
@@ -154,7 +154,7 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 | UPD-009 / SET-090 | `set_090_updates_section_states`, `set_090_policy_disables_controls`, `set_090_manual_check_without_updater_reports_disabled`, `set_090_short_time` |
 | UPD-011 | `upd_011_stale_manual_check_dropped` |
 | UPD-012 | `upd_012_cleanup_keeps_only_pending`, `upd_012_*` |
-| REL-070…077 | *Implemented, verified locally; not yet run on a GitHub runner.* `scripts/linux-smoke/`, `linux-smoke.yml` and `scripts/tests/test_linux_smoke.py` (69 tests; the REL-071 gates, the REL-070 and REL-077 matrix and image order, and the container command line are asserted against a fake `gh` and a fake `docker`). Local Docker, published v0.2.0 packages: Ubuntu 24.04 and 26.04, Fedora 44 and Arch pass 24, 24, 13 and 21 checks per scenario with none failed, every screenshot captioned; the `selftest` controls (30) each fail exactly the check they break, and the withdrawn first 0.2.0 build fails the upgrade scenario (spike, plan §6.5). actionlint 1.7.12 with shellcheck 0.9.0 is clean. |
+| REL-070…077 | *Implemented; verified locally and in two GitHub runs (pull request and manual dispatch on the published v0.2.0, both green); the release trigger, the weekly schedule and the failure alert have not fired yet.* `scripts/linux-smoke/`, `linux-smoke.yml` and `scripts/tests/test_linux_smoke.py` (69 tests; the REL-071 gates, the REL-070 and REL-077 matrix and image order, and the container command line are asserted against a fake `gh` and a fake `docker`). Local Docker, published v0.2.0 packages: Ubuntu 24.04 and 26.04, Fedora 44 and Arch pass 24, 24, 13 and 21 checks per scenario with none failed, every screenshot captioned; the `selftest` controls (30) each fail exactly the check they break, and the withdrawn first 0.2.0 build fails the upgrade scenario (spike, plan §6.5). actionlint 1.7.12 with shellcheck 0.9.0 is clean. On the runners: the same check counts on every leg, 140 captioned screenshots plus four contact sheets, `libc_floor` as `INFO`, 30 of 30 self-test controls. |
 | KBD-076 | `kbd_076_update_actions_in_palette`, `a11y_every_action_bound_or_in_palette` |
 
 ## Known gaps
@@ -172,7 +172,7 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 - CI verifies native x64/ARM64 per-user and `/ALLUSERS` installer flows. Real-machine GUI
   installation, the all-users updater path through `runas`, macOS application launch,
   and WSL/WSLC integration remain unchecked in the [release checklist](../../plan/release-checklist.md).
-  The Linux launch is checked by the smoke test after publication (§8; first GitHub run pending).
+  The Linux launch is checked by the smoke test after publication (§8; it has run for a pull request and a manual dispatch, not yet for a release).
 - The `.deb` declares plain `libc6` although its binary needs `GLIBC_2.39`: on Ubuntu 22.04 it installs and then
   fails to start (plan finding F1; REL-073).
 - Without a usable Vulkan or GL driver the Linux app logs `failed to open the main window` and keeps running with no window,

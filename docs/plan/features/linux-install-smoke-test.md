@@ -1,7 +1,7 @@
 # Plan: Linux install-and-launch smoke test (Ubuntu, Fedora, Arch)
 
 - **Slug:** `linux-install-smoke-test`
-- **Status:** implemented and verified locally; first GitHub run pending (approved 2026-10-08, built 2026-10-09; the pull request run is task 2)
+- **Status:** in progress: built and green on GitHub in draft PR #37 (a pull-request run and a manual dispatch, 2026-10-10); the merge, then the first release and weekly runs, are pending (approved 2026-10-08, built 2026-10-09)
 - **Spec:** [Distribution §8](../../spec/features/distribution.md#8-linux-install-and-launch-smoke-test-rel-070077)
 - **Milestone:** after v0.2.0
 - **Requirement IDs:** REL-070…077 (new)
@@ -143,8 +143,27 @@ four legs in parallel, about 1 min 45 s to 3 min 10 s per leg (setup 26 to 115 s
 because of a slow apt mirror, so the job timeout is 30 minutes and package installs retry. A hosted `ubuntu-24.04`
 runner of a public repository has 4 vCPU, 16 GB RAM and 14 GB of disk (GitHub's runner reference) and Docker (the
 `integration-docker` job already uses it); with a container limited to 4 CPUs the Ubuntu leg took the same time
-(window after 0.3 s, first paint after 0.1 to 0.2 s, 18 of 18 checks, three runs). The workflow draft passes
-actionlint 1.7.12, with its embedded shellcheck, and its shell pieces were run separately; **it has not run on a GitHub runner.**
+(window after 0.3 s, first paint after 0.1 to 0.2 s, 18 of 18 checks, three runs). The workflow passes
+actionlint 1.7.12 with its embedded shellcheck, and has since run on GitHub (next paragraph).
+
+**On GitHub.** The pull-request run [38007068065](https://github.com/pavel-purma/dockering/actions/runs/38007068065) and a manual dispatch from the branch with `tag=v0.2.0`
+([38008453990](https://github.com/pavel-purma/dockering/actions/runs/38008453990)) ran on 2026-10-10. Both are green and both tested the published v0.2.0:
+
+| Job | PR run | Dispatch run |
+|---|---|---|
+| fetch and verify (checksums, three attestations) | 20 s | 22 s |
+| Ubuntu 24.04 · Ubuntu 26.04 | 2m15s · 2m15s | 2m24s · 2m29s |
+| Fedora · Arch Linux | 3m54s · 2m08s | 2m21s · 1m45s |
+| harness self-test | 12m45s | 13m05s |
+
+Every leg passed 24, 24, 13 and 21 checks per scenario with none failed, and `libc_floor` was `INFO`. The four
+evidence artifacts of the PR run hold 144 PNGs: 140 scenario screenshots, every one captioned, and the four contact
+sheets. Its self-test passed 30 of 30 controls (747 s inside the job). The repo's `CI` on the same commit is green too. Observed on the runners: each leg pulled its
+first-choice image (no Docker Hub fallback); the `Summary` step received real artifact URLs; and
+`gh run download <run-id>` without `-n` or `-p` fails with `zip: not a valid zip file`, because the contact sheets are
+unzipped artifacts. A manual dispatch with `--ref <branch>` worked after the pull-request run had started (it was not tried before).
+Not exercised: the `release: published` trigger, the weekly schedule and the `alert` job. The rendered job summary was
+not viewed (it needs a login); its markdown was reproduced locally from the real artifact.
 
 | # | Finding | Evidence | What the plan does |
 |---|---|---|---|
@@ -169,8 +188,8 @@ run as root inside the container, which is what CI containers do; a non-root var
 | # | Task | Owner | IDs | Verify |
 |---|---|---|---|---|
 | 1 | Scripts in `scripts/linux-smoke/`, `.github/workflows/linux-smoke.yml`; the `lint` job gains `shellcheck` (default severity, the runner's 0.9.0) and a Python syntax check. | release-engineer | REL-070…077 | **Done** locally: actionlint 1.7.12 with embedded shellcheck and the lint steps exit 0; four legs green (24, 24, 13 and 21 checks), screenshots read |
-| 2 | First runs on GitHub: the pull request run (the workflow's `pull_request` trigger and, once it exists on `main`, `workflow_dispatch` with `tag=v0.2.0`). Record the run, the time per leg and anything runner-specific. | release-engineer | REL-070, 072, 074 | **Pending**: green run linked here, `libc_floor` as `INFO` |
-| 3 | Negative controls as a job: `selftest` (pull requests and manual runs) runs 30 controls in one Ubuntu container, each failing exactly the named check (discarded keys, no accessibility tree, a hanging or early-exiting or windowless app, a wrong window class, a blank or never-settling screen, bad exit status, crash file, panic, log error, wrong version, broken desktop entry, missing icon or library, and the glibc floor below, at and above what the binary needs). | qa-engineer | REL-072…075 | **Done** locally: 30 passed, 0 failed in 770 s; the withdrawn build (F3) is covered by the spike only, its CI artifact expires 2027-01-03 |
+| 2 | First runs on GitHub: the pull request run and a manual dispatch with `tag=v0.2.0`. Record the run, the time per leg and anything runner-specific. | release-engineer | REL-070, 072, 074 | **Done** (2026-10-10, §6.5): both green, `libc_floor` as `INFO`. The release trigger, the weekly schedule and the alert remain unexercised |
+| 3 | Negative controls as a job: `selftest` (pull requests and manual runs) runs 30 controls in one Ubuntu container, each failing exactly the named check (discarded keys, no accessibility tree, a hanging or early-exiting or windowless app, a wrong window class, a blank or never-settling screen, bad exit status, crash file, panic, log error, wrong version, broken desktop entry, missing icon or library, and the glibc floor below, at and above what the binary needs). | qa-engineer | REL-072…075 | **Done**: 30 passed, 0 failed, locally (770 s) and on GitHub (747 s); the withdrawn build (F3) is covered by the spike only, its CI artifact expires 2027-01-03 |
 | 4 | Docs: `docs/release.md` (run the smoke test for a tag; read its evidence), the `/release` skill step 11 and `checklist-template.md` record the run, the Linux manual item is reworded. | release-engineer | REL-018, 076 | **Done**: skill and template diff reviewed |
 | 5 | Packaging follow-up: declare `libc6 (>= 2.39)` (derived from the build host) in `packaging/packager.toml`; set `SMOKE_LIBC_FLOOR` to fail in the same change. | release-engineer | REL-073 | the next release's `libc_floor` passes |
 | 6 | App follow-up, **its own plan**: when the main window cannot be opened, show or print the error and exit non-zero instead of idling invisibly (F2). | gpui-ui | new ID in that plan | the smoke test's `window` check and a view-level test |
@@ -195,7 +214,7 @@ run as root inside the container, which is what CI containers do; a non-root var
 
 | Risk | Mitigation / spike |
 |---|---|
-| Runner differences from the local Docker Desktop / WSL2 spike (apt mirrors, Docker version, AppArmor). | Task 2 before anything depends on it; 30-minute timeout; retries on package installs. |
+| Runner differences from the local Docker Desktop / WSL2 spike (apt mirrors, Docker version, AppArmor). | Task 2 is done: both GitHub runs were green with no runner-specific failure. The 30-minute leg timeout and the install retries stay as a guard. |
 | Rolling distros break the harness, not the app (sway, wtype, at-spi2-core, Mesa). | That is what the weekly run is for. Legs fail independently and say which step failed; the issue is opened once. |
 | UI strings in `atspi.py` drift from the app. | A release run uses the scripts at its tag. Dispatch and schedule use `main`'s, so a UI rename on `main` fails the weekly run until the next release: rename PRs update `atspi.py` in the same change. |
 | Needs `--demo` in release builds. | It is there today (`default = ["demo"]`); without it the `window` check fails with "no demo support". |
@@ -208,3 +227,4 @@ run as root inside the container, which is what CI containers do; a non-root var
 
 - 2026-10-08: Created from a feasibility spike run on 2026-10-07 and 2026-10-08. The prototype scripts, the workflow draft and a contact sheet were kept in `linux-install-smoke-test/`.
 - 2026-10-09: Implemented. Scripts, workflow, unit tests (69), the `selftest` job and docs are in the branch; the four legs and the 30 self-test controls pass in local Docker. Not yet run on a GitHub runner. The prototype folder is deleted: its scripts live on as `scripts/linux-smoke/`, and only `contact-sheet.png` stays here.
+- 2026-10-10: Opened as draft PR #37. A pull-request run and a manual dispatch (tag v0.2.0) passed on GitHub runners (§6.5). The release trigger, the weekly schedule and the alert job have not fired yet. Review pending.

@@ -34,7 +34,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Networks | [features/networks.md](features/networks.md) | implemented |
 | Settings | [features/settings.md](features/settings.md) | implemented |
 | Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open) |
-| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; `/release` skill and SignPath signing flow built, signed channel not yet enabled; Linux install-and-launch smoke test built, first GitHub run pending, REL-070…077) |
+| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; `/release` skill and SignPath signing flow built, signed channel not yet enabled; Linux install-and-launch smoke test built and green in pull-request and manual GitHub runs, REL-070…077) |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 
 Each implemented spec has a *Verification* table (requirement → tests) and a *Known gaps (v1)*
