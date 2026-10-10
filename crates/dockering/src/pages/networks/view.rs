@@ -219,19 +219,34 @@ impl NetworksPage {
         &mut self,
         _: &Entity<InputState>,
         event: &InputEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let InputEvent::Change = event {
-            let value = self.search.read(cx).value().to_string();
-            self.search_task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-                this.update(cx, |this, cx| {
-                    this.query = value;
-                    this.rebuild(cx);
-                })
-                .ok();
-            }));
+        match event {
+            InputEvent::Change => {
+                let value = self.search.read(cx).value().to_string();
+                self.search_task = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+                    this.update(cx, |this, cx| {
+                        this.query = value;
+                        this.rebuild(cx);
+                    })
+                    .ok();
+                }));
+            }
+            // KBD-094: apply the query now, then move into the table.
+            InputEvent::PressEnter {
+                secondary: false,
+                shift: false,
+            } => {
+                self.search_task = None;
+                self.query = self.search.read(cx).value().to_string();
+                self.rebuild(cx);
+                let keep = self.query.is_empty();
+                self.table
+                    .update(cx, |t, cx| t.enter_from_search(keep, window, cx));
+            }
+            _ => {}
         }
     }
 
@@ -500,7 +515,12 @@ impl PageView for NetworksPage {
     }
 }
 
-impl RoutedPage for NetworksPage {}
+impl RoutedPage for NetworksPage {
+    fn suspend(&mut self, cx: &mut Context<Self>) {
+        self.menu = None;
+        self.table.update(cx, |t, cx| t.suspend(cx));
+    }
+}
 
 impl Render for NetworksPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

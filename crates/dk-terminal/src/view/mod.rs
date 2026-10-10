@@ -425,12 +425,20 @@ impl TerminalView {
     }
 
     fn scroll_page_up(&mut self, _: &ScrollPageUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.model.scroll_page_up();
-        cx.notify();
+        self.scroll_page(true, cx);
     }
 
     fn scroll_page_down(&mut self, _: &ScrollPageDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.model.scroll_page_down();
+        self.scroll_page(false, cx);
+    }
+
+    /// Scrolls the scrollback by one page; nothing is sent to the shell.
+    pub fn scroll_page(&mut self, up: bool, cx: &mut Context<Self>) {
+        if up {
+            self.model.scroll_page_up();
+        } else {
+            self.model.scroll_page_down();
+        }
         cx.notify();
     }
 

@@ -27,6 +27,7 @@ use crate::keymap::ctx;
 use crate::nav::Route;
 use crate::strings as s;
 use crate::ui::dispatch;
+use crate::ui::menu::TrackBounds as _;
 use crate::ui::notify;
 use crate::ui::segmented::{Segment, Segmented};
 
@@ -130,7 +131,14 @@ pub fn tab_bar(
     let bar = segmented_tabs("detail-tab-bar", tabs, selected, move |ix, window, cx| {
         on_select(*ix, window, cx)
     });
-    tab_bar_frame("detail-tabs", ctx::DETAIL_TABS, focus, bar, cx).into_any_element()
+    tab_bar_frame(
+        "detail-tabs",
+        &format!("{} {}", ctx::DETAIL_HEADER, ctx::DETAIL_TABS),
+        focus,
+        bar,
+        cx,
+    )
+    .into_any_element()
 }
 
 /// Next enabled tab index after `current` in direction `dir` (wraps).
@@ -173,7 +181,7 @@ pub fn header(
             Button::new("detail-back")
                 .ghost()
                 .icon(IconName::ArrowLeft)
-                .tooltip_with_action(s::BACK, &Back, None)
+                .tooltip_with_action(s::BACK, &Back, Some(ctx::WORKSPACE))
                 .on_click(dispatch::on_click(focus, Box::new(Back))),
         )
         .child(
@@ -331,14 +339,54 @@ pub fn route_link(
 pub struct LinkList {
     pub focus: FocusHandle,
     pub cursor: usize,
+    /// Scrolls the cursor row into view after the next layout.
+    reveal: std::rc::Rc<std::cell::Cell<bool>>,
+    /// The page body's scroll handle, shared so the list can reveal its cursor row and
+    /// `PgUp` / `PgDn` from the tab bar can page the body (KBD-096).
+    body_scroll: gpui_kit::ScrollHandle,
+    /// Rows drawn last frame: an empty list takes no focus (KBD-095).
+    len: std::cell::Cell<usize>,
 }
+
+/// Rows `PgUp` / `PgDn` move a link list by.
+const LINK_PAGE_ROWS: usize = 10;
 
 impl LinkList {
     pub fn new(cx: &mut App) -> Self {
         Self {
             focus: cx.focus_handle().tab_stop(true),
             cursor: 0,
+            reveal: Default::default(),
+            body_scroll: gpui_kit::ScrollHandle::new(),
+            len: Default::default(),
         }
+    }
+
+    /// Whether the list drew no rows.
+    pub fn is_empty(&self) -> bool {
+        self.len.get() == 0
+    }
+
+    /// The scrolling body of the detail page (every tab uses it).
+    pub fn body_scroll(&self) -> &gpui_kit::ScrollHandle {
+        &self.body_scroll
+    }
+
+    /// The scrolling body element of a detail page, tracked by [`Self::body_scroll`].
+    pub fn body(&self, id: &'static str, body: AnyElement) -> AnyElement {
+        div()
+            .id(id)
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.body_scroll)
+            .child(body)
+            .into_any_element()
+    }
+
+    /// `PgUp` / `PgDn` from the tab bar (KBD-096).
+    pub fn scroll_page(&self, up: bool) {
+        crate::ui::scroll::scroll_page(&self.body_scroll, up);
     }
 
     /// Renders `rows` (each row: route + cells). `on_key` handles up/down/enter.
@@ -354,6 +402,7 @@ impl LinkList {
         get: fn(&mut V) -> &mut LinkList,
     ) -> AnyElement {
         let focused = self.focus.is_focused(window);
+        self.len.set(rows.len());
         if rows.is_empty() {
             return div()
                 .id(id)
@@ -371,6 +420,7 @@ impl LinkList {
         let cols = headers.len();
         v_flex()
             .id(id)
+            .key_context(ctx::DETAIL_HEADER)
             .track_focus(&self.focus)
             .rounded(cx.theme().radius)
             .on_key_down(
@@ -381,7 +431,16 @@ impl LinkList {
                     let list = get(this);
                     match e.keystroke.key.as_str() {
                         "down" => list.cursor = (list.cursor + 1).min(n - 1),
+                        // `↑` on the first row and `Esc` leave for the tab bar (KBD-097).
+                        "up" if list.cursor == 0 => {
+                            window.dispatch_action(Box::new(crate::actions::detail::FocusTabs), cx);
+                        }
                         "up" => list.cursor = list.cursor.saturating_sub(1),
+                        "escape" => {
+                            window.dispatch_action(Box::new(crate::actions::detail::FocusTabs), cx);
+                        }
+                        "pagedown" => list.cursor = (list.cursor + LINK_PAGE_ROWS).min(n - 1),
+                        "pageup" => list.cursor = list.cursor.saturating_sub(LINK_PAGE_ROWS),
                         "home" => list.cursor = 0,
                         "end" => list.cursor = n - 1,
                         "enter" => {
@@ -391,6 +450,7 @@ impl LinkList {
                         }
                         _ => return,
                     }
+                    list.reveal.set(true);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -407,6 +467,8 @@ impl LinkList {
                     .children(headers.iter().map(|h| div().flex_1().child(*h))),
             )
             .children(rows.into_iter().enumerate().map(|(ix, (_, cells))| {
+                let reveal = self.reveal.clone();
+                let scroll = self.body_scroll.clone();
                 h_flex()
                     .id(("link-row", ix))
                     .px_2()
@@ -414,6 +476,19 @@ impl LinkList {
                     .gap_2()
                     .items_center()
                     .when(focused && ix == cursor, |this| this.bg(cx.theme().accent))
+                    .when(ix == cursor, move |this| {
+                        // Keep the cursor row in view in the page body (KBD-044).
+                        this.on_bounds(move |bounds, window, _| {
+                            if reveal.replace(false) {
+                                crate::ui::scroll::scroll_into_view(
+                                    &scroll,
+                                    bounds.top(),
+                                    bounds.bottom(),
+                                );
+                                window.refresh();
+                            }
+                        })
+                    })
                     .children(
                         cells
                             .into_iter()
@@ -492,6 +567,26 @@ impl InspectView {
         cx.write_to_clipboard(ClipboardItem::new_string(self.json.to_string()));
         notify::info(window, cx, s::COPIED);
     }
+
+    /// Scrolls the editor by one viewport page from the tab bar (KBD-096).
+    pub fn scroll_page(&mut self, up: bool, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| {
+            let Some(line) = e.line_height() else { return };
+            let rows = e
+                .visible_row_range()
+                .map_or(10, |r| r.len())
+                .saturating_sub(1)
+                .max(1);
+            let delta = line * rows as f32;
+            let offset = e.scroll_offset();
+            let y = if up {
+                offset.y + delta
+            } else {
+                offset.y - delta
+            };
+            e.set_scroll_offset(gpui_kit::point(offset.x, y), cx);
+        });
+    }
 }
 
 impl Focusable for InspectView {
@@ -506,6 +601,7 @@ impl Render for InspectView {
         let this2 = this.clone();
         v_flex()
             .id("inspect-view")
+            .key_context(ctx::DETAIL_INSPECT)
             .size_full()
             .gap_2()
             .child(

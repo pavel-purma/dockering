@@ -19,8 +19,8 @@ use gpui_kit::component::table::{Table, TableBody, TableCell, TableHead, TableHe
 use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    Action, AnyElement, App, ClipboardItem, Context, FocusHandle, IntoElement, MouseButton, Pixels,
-    ScrollHandle, SharedString, Window, div, point, px, relative,
+    Action, AnyElement, App, ClipboardItem, Context, FocusHandle, IntoElement, MouseButton,
+    ScrollHandle, SharedString, Window, div, px, relative,
 };
 
 use crate::actions::rows;
@@ -254,6 +254,21 @@ impl RowsState {
         self.cursor_ix().and_then(|i| self.copies.get(i).cloned())
     }
 
+    /// Scrolls the panel by one viewport page (KBD-096).
+    pub fn scroll_page(&self, up: bool) {
+        crate::ui::scroll::scroll_page(&self.scroll, up);
+    }
+
+    /// The panel's vertical scroll offset (tests).
+    pub fn scroll_offset_y(&self) -> f32 {
+        self.scroll.offset().y.as_f32()
+    }
+
+    /// Whether the cursor is on the first row (`↑` there leaves the panel, KBD-097).
+    pub fn on_first_row(&self) -> bool {
+        self.cursor_ix().is_none_or(|i| i == 0)
+    }
+
     fn cursor_action(&self) -> Option<Box<dyn Action>> {
         self.cursor_ix()
             .and_then(|i| self.actions.get(i))
@@ -298,7 +313,15 @@ pub fn render<V: 'static>(
             cx.notify();
         }
     };
-    let up = mv(-1);
+    let up = move |v: &mut V, window: &mut Window, cx: &mut Context<V>| {
+        // `↑` on the first row leaves the panel for the tab bar (KBD-097).
+        if access(v).on_first_row() {
+            window.dispatch_action(Box::new(crate::actions::detail::FocusTabs), cx);
+        } else {
+            access(v).move_by(-1);
+            cx.notify();
+        }
+    };
     let down = mv(1);
     let pg_up = mv(-PAGE_ROWS);
     let pg_down = mv(PAGE_ROWS);
@@ -327,7 +350,7 @@ pub fn render<V: 'static>(
         .track_scroll(&state.scroll)
         .p_1()
         .rounded(cx.theme().radius)
-        .on_action(cx.listener(move |v, _: &rows::Up, _, cx| up(v, cx)))
+        .on_action(cx.listener(move |v, _: &rows::Up, window, cx| up(v, window, cx)))
         .on_action(cx.listener(move |v, _: &rows::Down, _, cx| down(v, cx)))
         .on_action(cx.listener(move |v, _: &rows::PageUp, _, cx| pg_up(v, cx)))
         .on_action(cx.listener(move |v, _: &rows::PageDown, _, cx| pg_down(v, cx)))
@@ -542,26 +565,9 @@ fn cell_element<V: 'static>(
                 if !reveal.replace(false) {
                     return;
                 }
-                scroll_into_view(&scroll, bounds.top(), bounds.bottom());
+                crate::ui::scroll::scroll_into_view(&scroll, bounds.top(), bounds.bottom());
                 window.refresh();
             })
         })
         .into_any_element()
-}
-
-fn scroll_into_view(scroll: &ScrollHandle, top: Pixels, bottom: Pixels) {
-    let view = scroll.bounds();
-    if view.size.height <= px(0.) {
-        return;
-    }
-    let offset = scroll.offset();
-    let margin = px(8.);
-    if top < view.top() {
-        scroll.set_offset(point(offset.x, offset.y + (view.top() - top) + margin));
-    } else if bottom > view.bottom() {
-        scroll.set_offset(point(
-            offset.x,
-            offset.y - (bottom - view.bottom()) - margin,
-        ));
-    }
 }

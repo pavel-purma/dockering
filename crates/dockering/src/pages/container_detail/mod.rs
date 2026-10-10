@@ -296,6 +296,146 @@ impl ContainerDetailPage {
         self.go_tab(a.tab, window, cx);
     }
 
+    /// The focus handle of the active tab's content, when it has one (KBD-095). Nothing while
+    /// the tab is loading, failed, or (terminal) has no session.
+    fn content_focus(&self, cx: &App) -> Option<FocusHandle> {
+        let st = self.state.as_ref()?.read(cx);
+        let loaded = st.details.data().is_some() || st.is_removed();
+        match self.tab {
+            ContainerTab::Overview
+            | ContainerTab::Mounts
+            | ContainerTab::Network
+            | ContainerTab::Inspect
+                if !loaded =>
+            {
+                None
+            }
+            ContainerTab::Overview => self.tabs.overview.as_ref().map(|t| t.focus_handle(cx)),
+            ContainerTab::Mounts => self.tabs.mounts.as_ref().map(|t| t.focus_handle(cx)),
+            ContainerTab::Network => self.tabs.network.as_ref().map(|t| t.focus_handle(cx)),
+            ContainerTab::Inspect => self.tabs.inspect.as_ref().map(|t| t.focus_handle(cx)),
+            ContainerTab::Logs => self
+                .tabs
+                .logs
+                .as_ref()
+                .map(|t| t.read(cx).list_focus().clone()),
+            ContainerTab::Stats => self
+                .tabs
+                .stats
+                .as_ref()
+                .map(|t| t.read(cx).window_focus().clone()),
+            ContainerTab::Terminal => self
+                .tabs
+                .terminal
+                .as_ref()
+                .filter(|t| t.read(cx).active_view().is_some())
+                .map(|t| t.focus_handle(cx)),
+        }
+    }
+
+    /// `↓` on the tab bar (KBD-095).
+    fn on_focus_content(
+        &mut self,
+        _: &detail::FocusContent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(h) = self.content_focus(cx) {
+            window.focus(&h, cx);
+            cx.notify();
+        }
+    }
+
+    /// `Esc` in the content, `Mod+Shift+F6` anywhere in a tab (KBD-097).
+    fn on_focus_tabs(
+        &mut self,
+        _: &detail::FocusTabs,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.tab_bar_focus, cx);
+        cx.notify();
+    }
+
+    /// `PgUp` / `PgDn` on the tab bar scroll the active tab's content (KBD-096).
+    fn scroll_content(&mut self, up: bool, cx: &mut Context<Self>) {
+        match self.tab {
+            ContainerTab::Overview => {
+                if let Some(t) = &self.tabs.overview {
+                    t.update(cx, |t, cx| {
+                        t.rows().scroll_page(up);
+                        cx.notify();
+                    });
+                }
+            }
+            ContainerTab::Mounts => {
+                if let Some(t) = &self.tabs.mounts {
+                    t.update(cx, |t, cx| {
+                        t.rows().scroll_page(up);
+                        cx.notify();
+                    });
+                }
+            }
+            ContainerTab::Network => {
+                if let Some(t) = &self.tabs.network {
+                    t.update(cx, |t, cx| {
+                        t.rows().scroll_page(up);
+                        cx.notify();
+                    });
+                }
+            }
+            ContainerTab::Logs => {
+                if let Some(t) = &self.tabs.logs {
+                    t.update(cx, |t, cx| t.scroll_page(up, cx));
+                }
+            }
+            ContainerTab::Stats => {
+                if let Some(t) = &self.tabs.stats {
+                    t.update(cx, |t, cx| {
+                        t.scroll_page(up);
+                        cx.notify();
+                    });
+                }
+            }
+            ContainerTab::Inspect => {
+                if let Some(t) = &self.tabs.inspect {
+                    t.read(cx)
+                        .view()
+                        .clone()
+                        .update(cx, |v, cx| v.scroll_page(up, cx));
+                }
+            }
+            ContainerTab::Terminal => {
+                let view = self
+                    .tabs
+                    .terminal
+                    .as_ref()
+                    .and_then(|t| t.read(cx).active_view().cloned());
+                if let Some(v) = view {
+                    v.update(cx, |v, cx| v.scroll_page(up, cx));
+                }
+            }
+        }
+    }
+
+    fn on_scroll_page_up(
+        &mut self,
+        _: &detail::ScrollPageUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_content(true, cx);
+    }
+
+    fn on_scroll_page_down(
+        &mut self,
+        _: &detail::ScrollPageDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_content(false, cx);
+    }
+
     /// `Mod+Shift+F6` from the terminal (KBD-061).
     fn on_leave_terminal(
         &mut self,
@@ -984,6 +1124,7 @@ impl Render for ContainerDetailPage {
         let body = self.render_body(cx);
         v_flex()
             .id("container-detail")
+            .key_context(ctx::DETAIL_PAGE)
             .size_full()
             .px_4()
             .pt_3()
@@ -992,6 +1133,10 @@ impl Render for ContainerDetailPage {
             .on_action(cx.listener(Self::on_prev_tab))
             .on_action(cx.listener(Self::on_select_tab))
             .on_action(cx.listener(Self::on_leave_terminal))
+            .on_action(cx.listener(Self::on_focus_content))
+            .on_action(cx.listener(Self::on_focus_tabs))
+            .on_action(cx.listener(Self::on_scroll_page_up))
+            .on_action(cx.listener(Self::on_scroll_page_down))
             .on_action(cx.listener(Self::on_start_stop))
             .on_action(cx.listener(Self::on_restart))
             .on_action(cx.listener(Self::on_pause))

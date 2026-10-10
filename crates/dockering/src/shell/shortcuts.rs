@@ -5,8 +5,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, Render, Subscription,
-    Window, div, px,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, Pixels, Render,
+    Subscription, Window, div, px,
 };
 
 use crate::keymap::{Group, Os, ReferenceRow, reference_rows};
@@ -16,6 +16,7 @@ pub struct ShortcutList {
     rows: Vec<ReferenceRow>,
     filter: Entity<InputState>,
     query: String,
+    max_h: Pixels,
     _sub: Subscription,
 }
 
@@ -32,8 +33,14 @@ impl ShortcutList {
             rows: reference_rows(Os::current()),
             filter,
             query: String::new(),
+            max_h: px(460.),
             _sub: sub,
         }
+    }
+
+    /// Caps the rows' height (the overlay shrinks it in short windows).
+    pub fn set_max_h(&mut self, max_h: Pixels) {
+        self.max_h = max_h;
     }
 
     pub fn rows(&self) -> &[ReferenceRow] {
@@ -87,7 +94,7 @@ impl Render for ShortcutList {
                 v_flex()
                     .id("shortcut-rows")
                     .gap_3()
-                    .max_h(px(460.))
+                    .max_h(self.max_h)
                     .overflow_y_scroll()
                     .children(groups.into_iter().map(|(g, rows)| {
                         v_flex()

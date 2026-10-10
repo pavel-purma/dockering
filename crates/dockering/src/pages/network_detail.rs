@@ -183,6 +183,69 @@ impl NetworkDetailPage {
         self.set_tab(TABS[next], window, cx);
     }
 
+    /// The focus target of the active tab's content, if it has one (KBD-095).
+    fn content_focus(&self, cx: &App) -> Option<FocusHandle> {
+        match self.tab {
+            NetworkTab::Containers if !self.containers.is_empty() => {
+                Some(self.containers.focus.clone())
+            }
+            NetworkTab::Inspect => Some(self.inspect.focus_handle(cx)),
+            _ => None,
+        }
+    }
+
+    /// `↓` on the tab bar (KBD-095).
+    fn on_focus_content(
+        &mut self,
+        _: &detail::FocusContent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(h) = self.content_focus(cx) {
+            window.focus(&h, cx);
+            cx.notify();
+        }
+    }
+
+    /// `Esc` in the content, `Mod+Shift+F6` anywhere in a tab (KBD-097).
+    fn on_focus_tabs(
+        &mut self,
+        _: &detail::FocusTabs,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.tabs_focus, cx);
+        cx.notify();
+    }
+
+    /// `PgUp` / `PgDn` on the tab bar (KBD-096).
+    fn scroll_content(&mut self, up: bool, cx: &mut Context<Self>) {
+        if self.tab == NetworkTab::Inspect {
+            self.inspect.update(cx, |v, cx| v.scroll_page(up, cx));
+        } else {
+            self.containers.scroll_page(up);
+        }
+        cx.notify();
+    }
+
+    fn on_scroll_page_up(
+        &mut self,
+        _: &detail::ScrollPageUp,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_content(true, cx);
+    }
+
+    fn on_scroll_page_down(
+        &mut self,
+        _: &detail::ScrollPageDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.scroll_content(false, cx);
+    }
+
     fn on_next_tab(&mut self, _: &detail::NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.step(true, window, cx);
     }
@@ -387,10 +450,15 @@ impl Render for NetworkDetailPage {
         };
         v_flex()
             .id("network-detail")
+            .key_context(crate::keymap::ctx::DETAIL_PAGE)
             .size_full()
             .p_4()
             .gap_3()
             .on_action(cx.listener(Self::on_next_tab))
+            .on_action(cx.listener(Self::on_focus_content))
+            .on_action(cx.listener(Self::on_focus_tabs))
+            .on_action(cx.listener(Self::on_scroll_page_up))
+            .on_action(cx.listener(Self::on_scroll_page_down))
             .on_action(cx.listener(Self::on_prev_tab))
             .on_action(cx.listener(Self::on_copy_id))
             .on_action(cx.listener(Self::on_delete))
@@ -448,13 +516,6 @@ impl Render for NetworkDetailPage {
                 },
                 cx,
             ))
-            .child(
-                div()
-                    .id("network-detail-body")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(body),
-            )
+            .child(self.containers.body("network-detail-body", body))
     }
 }

@@ -1,8 +1,8 @@
 # Feature: Container detail
 
-- **Status:** implemented (2026-10-04, including WSLC inspect parity CDT-030/040; cross-OS release validation remains open in the plan)
+- **Status:** implemented (2026-10-04, including WSLC inspect parity CDT-030/040; cross-OS release validation remains open in the plan); keyboard viewing of the tabs (CDT-082/083) planned 2026-10-10
 - **Requirement prefix:** CDT
-- **Plan:** baseline built in milestone M3; WSLC inspect repair: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates)
+- **Plan:** baseline built in milestone M3; WSLC inspect repair: [wslc-integration-repair](../../plan/features/wslc-integration-repair.md) (done; completion evidence/release gates); keyboard viewing: [keyboard-flow-polish](../../plan/features/keyboard-flow-polish.md) (draft)
 
 ## Layout
 
@@ -34,7 +34,8 @@
 | CDT-070 | **Stats**: see [container-stats.md](container-stats.md). |
 | CDT-080 | When the container is removed while open: banner (SHL), all tabs read-only, and actions disabled. |
 | CDT-081 | Tabs keep their state while switching between tabs on the same container: log scroll position, terminal session, stats buffer. Leaving the container detail tears them down, except terminals (see TRM-008). |
-| CDT-082 | Keyboard: tab switching, header actions, breadcrumb, links, and copying values per [keyboard.md](keyboard.md) KBD-040…044. Overview, Mounts, and Network are each one focusable rows panel (↑/↓ cursor, `Enter` follows a link, `Space` reveals a masked value, `Mod+C` copies). |
+| CDT-082 | Keyboard: tab switching, header actions, breadcrumb, links, and copying values per [keyboard.md](keyboard.md) KBD-040…044. Overview, Mounts, and Network are each one focusable rows panel (↑/↓ cursor, `Enter` follows a link, `Space` reveals a masked value, `Mod+C` copies). From the tab bar, `↓` enters the tab's content, `PgUp` / `PgDn` scroll it, `Esc` comes back, and `Backspace` goes back (KBD-095…098, CDT-083; planned 2026-10-10). |
+| CDT-083 | **Keyboard viewing of the tabs** *(planned 2026-10-10)*. With focus on the tab bar, `↓` focuses the active tab's content and `PgUp` / `PgDn` scroll it by one viewport page: Overview, Mounts, Network → the rows panel (cursor on the first row); Logs → the log lines (scrolling up pauses follow, LOG-003); Terminal → the active terminal, whose scrollback `PgUp` / `PgDn` scroll without sending anything to the shell; Stats → the time-window selector, and the charts column scrolls; Inspect → the read-only editor. `Esc`, `↑` on the first row, or `Mod+Shift+F6` returns to the tab bar (the terminal keeps `Esc` for the shell). A removed container (CDT-080) or a degraded engine keeps these keys working. |
 
 ## Verification (2026-10-02)
 
@@ -50,7 +51,7 @@
 | CDT-050…070 | See the logs, terminal, and stats specs |
 | CDT-080 | `cdt_080_removed_container_banner_and_read_only`, `cdt_080_removed_detected_from_list_refetch`, `trm_008_closed_on_container_removal` |
 | CDT-081 | `cdt_081_tab_state_survives_switching` |
-| CDT-082 | `kbd_042_alt_up_focuses_row_in_parent_list`, `kbd_044_rows_arrows_and_enter_follows_image_link`, `kbd_040_step_tab_skips_disabled` |
+| CDT-082, CDT-083 | `kbd_042_alt_up_focuses_row_in_parent_list`, `kbd_044_rows_arrows_and_enter_follows_image_link`, `kbd_040_step_tab_skips_disabled`; keyboard viewing: the `kbd_095_*`, `kbd_096_*`, `kbd_097_*` and `kbd_098_*` tests (see [keyboard.md](keyboard.md)) |
 
 Loading and error states: `cdt_states_loading_and_error_with_retry`.
 

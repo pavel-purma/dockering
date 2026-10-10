@@ -1,8 +1,8 @@
 # Feature: Keyboard navigation & shortcuts
 
-- **Status:** implemented (2026-10-02); verification items KBD-090 (release) and KBD-092 (partial) are open, see *Known gaps (v1)*
+- **Status:** implemented (2026-10-02); verification items KBD-090 (release) and KBD-092 (partial) are open, see *Known gaps (v1)*. Search hand-off, back navigation and detail-tab keys (KBD-094…098, plus changes to KBD-006/020/030/042/051/061) planned 2026-10-10
 - **Requirement prefix:** KBD
-- **Plan:** [docs/plan/features/keyboard-navigation.md](../../plan/features/keyboard-navigation.md)
+- **Plan:** [docs/plan/features/keyboard-navigation.md](../../plan/features/keyboard-navigation.md); 2026-10-10 changes: [keyboard-flow-polish](../../plan/features/keyboard-flow-polish.md) (draft)
 
 ## Goal
 
@@ -19,7 +19,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 | KBD-003 | **No focus rings.** Focused controls draw no ring or accent border (theme `focus_ring = false`, `ring` = the input border colour). Keyboard position stays visible through the controls' own state: the table cursor row, the sidebar cursor tint, the text caret, and open menus. (Revised 2026-10-02: shortcuts are the goal, not a focus-ring-driven keyboard-only UI.) |
 | KBD-004 | **Logical Tab order.** `Tab` / `Shift+Tab` cycle focus *within the current region* in visual order (left→right, top→bottom), using `tab_index` / `tab_stop`. Rows inside a table are **not** separate Tab stops: the table is one stop with arrow-key navigation inside it (roving focus). |
 | KBD-005 | **Regions (landmarks).** The window has four focus regions: *Title bar*, *Sidebar*, *Content*, and *Status bar*. The page header/toolbar and the detail tab bar belong to *Content* and are reached with `Tab` inside it. On Settings routes the *Sidebar* region holds the settings section nav (SET-080). `F6` / `Shift+F6` cycle between regions. Each region remembers its last-focused child. |
-| KBD-006 | **Escape semantics**, in priority order: close the open popup or menu → close the dialog → clear the search field when it's focused and non-empty → clear the multi-selection → return focus from the content to the page's primary list. `Esc` never navigates back (that's `Alt+←`). |
+| KBD-006 | **Escape semantics**, in priority order: close the open popup or menu → close the dialog → clear the search field when it's focused and non-empty → clear the multi-selection → return focus from the content to the page's primary control (the list; on a detail page, the tab bar, KBD-097). `Esc` never navigates back (that's `Alt+←`). *(extended 2026-10-10, planned)* |
 | KBD-007 | **No focus loss.** After an action, focus lands somewhere predictable. After deleting rows, focus goes to the next row (or the previous one at the end). After a dialog closes, focus returns to its invoker. After a navigation, focus goes to the new page's primary control (the list, or the first tab). A data refresh never moves focus or selection (extends SHL-004). |
 | KBD-008 | **Text-input safety.** Single-letter shortcuts (KBD-030) MUST NOT fire while focus is in a text input, the code editor, or the terminal. `Mod`-chords that the focused input handles itself (copy, paste, select all, undo) go to the input first. |
 | KBD-009 | **Platform conventions.** `Mod` = `Cmd` on macOS and `Ctrl` elsewhere. Back/forward is `Cmd+[` / `Cmd+]` on macOS and `Alt+←` / `Alt+→` elsewhere. Quit is `Cmd+Q` on macOS. On Windows/Linux, Quit is a command-palette entry with no default chord (KBD-018). Default bindings live in one table (below) and are defined in one module (`keymap.rs`). |
@@ -31,7 +31,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 |---|---|---|
 | KBD-017 | `Mod+Shift+L` | Toggle light/dark theme |
 | KBD-018 | macOS `Cmd+Q`, `Cmd+W`; `Cmd+H` / `Cmd+M` stay system | macOS: quit and close the window. Windows/Linux: `Alt+F4` closes the window (system), and *Quit Dockering* is a command-palette entry with no default chord, so it can't be hit by accident |
-| KBD-020 | `Mod+Shift+P` (also `Mod+P`) | **Command palette** (GPUI Kit `Command`). Fuzzy-search every action available in the current context, plus "Go to container/image/volume/network <name>" jump entries. Shows each entry's shortcut. `Enter` runs it, `Esc` closes. |
+| KBD-020 | `Mod+Shift+P` (also `Mod+P`) | **Command palette** (GPUI Kit `Command`). Fuzzy-search every action available in the current context, plus "Go to container/image/volume/network <name>" jump entries. Shows each entry's shortcut. `Enter` runs it, `Esc` closes. The panel is as tall as its content (search field, rows, padding) and never taller than the window allows: no empty band under the last row, also after filtering. The shortcut reference panel (KBD-022) follows the same rule. *(planned 2026-10-10)* |
 | KBD-021 | `Mod+K` | Engine switcher (ENG-101). Arrows select, `Enter` switches, and typing filters. |
 | KBD-022 | `Mod+/` and `F1` | **Keyboard shortcut reference**: a dialog listing all bindings grouped by context (Global, Lists, Detail, Logs, Terminal, Dialogs). Searchable. Shows only bindings valid on the current OS. |
 | KBD-023 | `Mod+1` … `Mod+4` | Go to Containers / Images / Volumes / Networks (from SHL-010) |
@@ -46,7 +46,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 
 | ID | Keys | Action |
 |---|---|---|
-| KBD-030 | **Single-letter row actions** (no modifier; table focus only; capability- and state-gated; the confirm rules SHL-002 still apply). Containers: `S` start/stop toggle, `R` restart, `P` pause/unpause, `L` logs, `T` terminal, `I` inspect, `O` open the first published port in the browser. Images: `U` run…, `G` pull… Volumes: `N` new volume… All lists: `C` copy id, `Del` / `Backspace` (macOS `Cmd+Backspace`) delete (with confirm). |
+| KBD-030 | **Single-letter row actions** (no modifier; table focus only; capability- and state-gated; the confirm rules SHL-002 still apply). Containers: `S` start/stop toggle, `R` restart, `P` pause/unpause, `L` logs, `T` terminal, `I` inspect, `O` open the first published port in the browser. Images: `U` run…, `G` pull… Volumes: `N` new volume… All lists: `C` copy id, `Del` (macOS `Cmd+Backspace`) delete (with confirm). `Backspace` is not a delete key on Windows/Linux because it goes back on detail pages (KBD-098); a held or doubled `Backspace` must never delete the row a list returns to. *(changed 2026-10-10, planned)* |
 | KBD-031 | `↑` / `↓`, `Home` / `End`, `PgUp` / `PgDn` | Move the row cursor (GPUI Kit `DataTable` built-ins). The cursor scrolls into view. |
 | KBD-032 | `Enter` | Open detail (CON-033). On a **group row**: open/close the group instead. |
 | KBD-033 | `←` / `→` on a group row | Collapse / expand the group (on a member row, `←` moves to the parent group row). `Mod+←` / `Mod+→` collapse / expand all groups. |
@@ -54,6 +54,7 @@ on macOS, written `Mod` below). Common row actions also have single-letter keys 
 | KBD-035 | `Shift+↑/↓` | Extend the selection. `Mod+A` selects all visible rows. `Esc` clears the selection (KBD-006). |
 | KBD-036 | `Shift+F10`, the `Menu` key | Open the row context menu (all row actions, with shortcuts shown), navigable with arrows/`Enter`/`Esc`. |
 | KBD-037 | `/` then type | **Quick find**: `/` opens an inline find field over the focused table. Typing jumps to the first row whose name contains the text, `Enter` / `↓` jump to the next match, and `Esc` closes it. Plain letters are never treated as type-ahead, because they're row actions (KBD-030). |
+| KBD-094 | `Enter` in the page search field | On Containers, Images, Volumes and Networks, plain `Enter` in the search field applies the query immediately (no wait for the 120 ms debounce) and focuses the table with the cursor on the first matching **item** row (Compose group headers are skipped); a second `Enter` opens it (KBD-032). With an empty query the cursor stays where it was. With no matches focus stays in the field. `Esc` still clears the field (KBD-006). *(planned 2026-10-10)* |
 | KBD-038 | Multi-selection semantics | When ≥ 2 rows are selected, `S` / `R` / `Del` (and the context menu) act on the **whole selection**, and the confirm dialog lists every item. With no multi-selection they act on the cursor row. `Mod+A` selects all *visible* rows; members of collapsed groups count as selected through their group. |
 | KBD-039 | `Mod+Shift+G` | Open the *Group by* selector. Filter chips (All / Running / Stopped …) are a focusable segmented control (arrows, `Enter`), and `Mod+Shift+F` focuses it. No `Alt+digit` bindings: they produce characters on macOS and some layouts. |
 
@@ -67,17 +68,21 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | ID | Keys | Action |
 |---|---|---|
 | KBD-040 | `Ctrl+Tab` / `Ctrl+Shift+Tab` (all OSes). `←` / `→` when the tab bar is focused. Direct jump: `Mod+Shift+P` → "Go to tab …" | Switch detail tabs (Overview, Logs, Terminal, Stats, Mounts, Network, Inspect). Disabled tabs are skipped. |
-| KBD-041 | Header actions | The same single letters as KBD-030 work when focus is on the detail header or a non-input tab body (S, R, P, T, L, I, C, Del; `U` run on image detail). |
-| KBD-042 | Breadcrumb | Reachable with `Tab`. `Alt+↑` goes to the parent list (focuses the row of this resource). |
+| KBD-041 | Header actions | The same single letters as KBD-030 work when focus is on the detail header, the tab bar, or a non-input tab body (S, R, P, T, L, I, C, Del; `U` run on image detail). |
+| KBD-042 | Breadcrumb | Reachable with `Tab`. `Alt+↑` goes to the parent list (focuses the row of this resource). The list comes back as it was left (SHL-014); if its search or status filter hides that row, they are cleared so the row can be shown. *(changed 2026-10-10, planned)* |
 | KBD-043 | Links (image, volume, network, port) | Reachable from the keyboard: header links are Tab stops, and links inside rows panels are followed from the row cursor (KBD-044). `Enter` follows the link. A port link opens the browser. |
 | KBD-044 | Description lists / tables in tabs | Focusable as one stop. Arrows move between rows, and `Mod+C` copies the focused value. |
+| KBD-095 | `↓` on the tab bar | Moves focus into the active tab's content: Overview, Mounts and Network → the rows panel with the cursor on its first row (or where it was); Logs → the log lines; Terminal → the active terminal (nothing while no session is open); Stats → the time-window selector; Inspect → the editor. Image, volume and network details: Used by / Containers → the link list, Inspect → the editor, other tabs → nothing. While the tab is loading or failed, `↓` does nothing. *(planned 2026-10-10)* |
+| KBD-096 | `PgUp` / `PgDn` on the tab bar | Scroll the active tab's content by one viewport page, with one line of overlap: the rows panel or page body, the log list (scrolling up pauses follow, LOG-003), the stats charts, the Inspect editor, and the terminal scrollback (nothing is sent to the shell). Inside the content the same keys scroll or move the cursor as before (KBD-051, KBD-044). *(planned 2026-10-10)* |
+| KBD-097 | Back to the tab bar | `Esc` in a tab's content (rows panel, log lines, stats selector, link list, Inspect editor when its search is closed), `↑` on the first row of a rows panel or link list, and `Mod+Shift+F6` (macOS `Cmd+Esc`) anywhere in a tab, terminal included, return focus to the tab bar. The terminal keeps `Esc` for the shell (KBD-060). *(planned 2026-10-10)* |
+| KBD-098 | `Backspace` | On any detail page, `Backspace` goes back in history exactly like `Alt+←` / `Cmd+[` and the mouse Back button (KBD-027). It's bound only where single-letter keys are (header, tab bar, non-input tab bodies), so it never fires in a text field (including the Logs search), the Inspect code editor or the terminal (KBD-008). *(planned 2026-10-10)* |
 
 ## Logs (LOG-*)
 
 | ID | Keys | Action |
 |---|---|---|
 | KBD-050 | `Mod+F`, then `Enter` / `Shift+Enter` (or `F3` / `Shift+F3`) | Search, next / previous match |
-| KBD-051 | `End` / `Mod+↓` | Jump to bottom and re-enable follow (LOG-003). `Home` / `Mod+↑` goes to the top, `PgUp` / `PgDn` scrolls. |
+| KBD-051 | `End` / `Mod+↓` | Jump to bottom and re-enable follow (LOG-003). `Home` / `Mod+↑` goes to the top, `PgUp` / `PgDn` scrolls one viewport page (was a fixed 400 px; changed 2026-10-10, planned). |
 | KBD-052 | `Alt+T` / `Alt+W` | Toggle timestamps / wrap |
 | KBD-053 | `Mod+Shift+K` | Clear the view. `Mod+S` saves to a file. `Mod+Shift+C` copies everything. |
 
@@ -86,7 +91,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | ID | Requirement |
 |---|---|
 | KBD-060 | The terminal captures **all** keys while focused (TRM-003), including `Tab`, `Esc`, and `F6`. |
-| KBD-061 | **Focus escape hatch**: `Mod+Shift+F6` moves focus out of the terminal to the detail tab bar. (`Ctrl+Shift+Esc` is avoided because Windows reserves it for Task Manager.) macOS alternative without `fn`: `Cmd+Esc`. This binding is reserved and documented in the terminal's empty-state hint and in the shortcut reference. From the terminal, only `Ctrl+Tab` / `Ctrl+Shift+Tab` switch detail tabs. `Alt+digit` is passed to the shell, since readline uses it. |
+| KBD-061 | **Focus escape hatch**: `Mod+Shift+F6` moves focus out of the terminal to the detail tab bar, and from any other tab's content too (KBD-097). (`Ctrl+Shift+Esc` is avoided because Windows reserves it for Task Manager.) macOS alternative without `fn`: `Cmd+Esc`. This binding is reserved and documented in the terminal's empty-state hint and in the shortcut reference. From the terminal, only `Ctrl+Tab` / `Ctrl+Shift+Tab` switch detail tabs. `Alt+digit` is passed to the shell, since readline uses it. `↓` on the tab bar enters the terminal (KBD-095). |
 | KBD-062 | On **macOS**, `Cmd`-chords are never sent to the PTY: all app Cmd shortcuts keep working, because shells don't use Cmd. On Windows/Linux only the listed app chords are intercepted. `Mod+Shift+T` new terminal sub-tab. `Mod+Shift+W` closes the sub-tab. `Ctrl+PgUp` / `Ctrl+PgDn` switch sub-tabs. The terminal key handler passes exactly these app chords (plus KBD-061 and `Ctrl+Tab`) to the app before encoding keys for the PTY. Everything else goes to the shell. |
 | KBD-063 | `Shift+PgUp` / `Shift+PgDn` scroll the scrollback. Copy and paste follow TRM-003. |
 
@@ -117,7 +122,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 
 | ID | Requirement |
 |---|---|
-| KBD-090 | **Keyboard-only E2E walkthrough** in the release checklist, on all three OSes, with the mouse disconnected. Switch engine → containers list → expand a group → open detail → each tab → open a terminal and escape it → logs search → start/stop → delete with confirm → images pull → volumes create → settings → shortcut reference. |
+| KBD-090 | **Keyboard-only E2E walkthrough** in the release checklist, on all three OSes, with the mouse disconnected. Switch engine → containers list → expand a group → search and press `Enter` into the table → open detail → `Backspace` back (the list is as it was left) → open detail again → each tab, entering it with `↓`, scrolling with `PgUp` / `PgDn`, returning with `Esc` → open a terminal and escape it → logs search → start/stop → delete with confirm → images pull → volumes create → settings → shortcut reference. |
 | KBD-091 | View tests (`TestAppContext`) simulate keystrokes for every KBD requirement that has behaviour: focus moves, actions dispatch, Escape semantics, focus restoration. |
 | KBD-092 | A **reachability test** walks the Tab order of each page in a test window and asserts that every rendered interactive element is reached (no traps, no orphans). |
 | KBD-093 | **Action coverage test**: every registered `Action` is either bound to a key or listed in the command palette (and is therefore keyboard-reachable). |
@@ -175,6 +180,13 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-090 | Release checklist ([release-checklist.md](../../plan/release-checklist.md) §2); not yet run on macOS/Linux or with a Czech layout |
 | KBD-091 | The view tests above |
 | KBD-092 | `a11y_tab_walk_reaches_all_interactive_settings` (Settings only) |
+| KBD-020 (panel height) | `kbd_020_palette_panel_hugs_its_content`, `kbd_022_reference_panel_hugs_its_content` |
+| KBD-094 | `kbd_094_enter_in_search_focuses_first_match`, `kbd_094_single_enter_does_not_open_detail`, `kbd_094_enter_skips_group_header`, `kbd_094_enter_without_matches_stays_in_the_field`, `kbd_094_enter_with_empty_query_keeps_the_cursor`, `kbd_094_shift_enter_does_not_hand_off`, `kbd_094_enter_hands_off_on_images_volumes_networks`, `kbd_094_enter_waits_for_background_build` |
+| KBD-095 | `kbd_095_down_enters_the_rows_tabs_and_esc_returns`, `kbd_095_down_enters_logs_stats_inspect_and_terminal`, `kbd_095_down_without_content_does_nothing`, `kbd_095_resource_detail_down_enters_used_by_and_esc_returns` |
+| KBD-096 | `kbd_096_page_keys_scroll_the_rows_panel_from_the_bar`, `kbd_096_page_up_on_the_bar_pauses_log_follow`, `kbd_096_terminal_page_keys_scroll_scrollback_not_the_shell`, `kbd_096_stats_and_inspect_scroll_from_the_bar` |
+| KBD-097 | `kbd_097_up_on_the_first_row_returns_to_the_bar`; `Esc` and `Mod+Shift+F6` in the KBD-095 tests |
+| KBD-098, KBD-030 (Backspace) | `kbd_098_backspace_goes_back_on_detail`, `kbd_098_backspace_is_inert_in_logs_search_and_inspect_editor`, `kbd_098_backspace_goes_to_the_terminal_not_back`, `kbd_098_backspace_goes_back_on_resource_details` |
+| KBD-042 (restored list) | `kbd_042_alt_up_clears_search_and_filter_hiding_the_row` |
 | KBD-093 | `a11y_every_action_bound_or_in_palette` |
 
 ## Known gaps (v1)

@@ -59,6 +59,8 @@ pub enum When {
     // ── container detail (wip/detail) ──
     /// The container detail page (any tab).
     ContainerDetail,
+    /// Any detail page: container, image, volume or network (KBD-095…097).
+    AnyDetail,
     /// A verified update is ready to install (KBD-076).
     UpdateReady,
 }
@@ -138,6 +140,25 @@ pub static COMMANDS: &[CommandSpec] = &[
     c!(s::CMD_PARENT_LIST, detail::ParentList, Navigation, Always),
     c!(s::CMD_NEXT_TAB, detail::NextTab, Navigation, Always),
     c!(s::CMD_PREV_TAB, detail::PrevTab, Navigation, Always),
+    c!(
+        s::CMD_FOCUS_CONTENT,
+        detail::FocusContent,
+        Navigation,
+        AnyDetail
+    ),
+    c!(s::CMD_FOCUS_TABS, detail::FocusTabs, Navigation, AnyDetail),
+    c!(
+        s::CMD_SCROLL_PAGE_UP,
+        detail::ScrollPageUp,
+        Navigation,
+        AnyDetail
+    ),
+    c!(
+        s::CMD_SCROLL_PAGE_DOWN,
+        detail::ScrollPageDown,
+        Navigation,
+        AnyDetail
+    ),
     c!(
         s::CMD_ENGINE_SWITCHER,
         EngineSwitcher,
@@ -574,6 +595,7 @@ fn resource_when(when: When, cx: &CommandContext) -> bool {
         }
         When::ResourcePages => matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)),
         When::ContainerDetail => page == Some(Page::Containers) && cx.on_detail,
+        When::AnyDetail => cx.on_detail,
         When::Always | When::Engine | When::ContainersPage | When::UpdateReady => false,
     }
 }
