@@ -1,0 +1,254 @@
+# Install-and-launch smoke test of the published Linux packages (REL-070…077).
+# Plan: docs/plan/features/linux-install-smoke-test.md. The logic lives in scripts/linux-smoke/.
+name: Linux smoke
+run-name: Linux smoke (${{ github.event.release.tag_name || inputs.tag || 'latest release' }})
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "41 5 * * 1" # Mondays 05:41 UTC: Fedora and Arch roll, so this catches distro drift
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to test (empty = the latest published release)
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/linux-smoke.yml"
+      - "scripts/linux-smoke/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-smoke-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    name: fetch and verify the packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: read
+    outputs:
+      tag: ${{ steps.fetch.outputs.tag }}
+      version: ${{ steps.fetch.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: fetch
+        name: Download and verify the Linux x86_64 packages (REL-071)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+        run: bash scripts/linux-smoke/fetch.sh "$REQUESTED_TAG" pkg >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: |
+            pkg/Dockering-x86_64.deb
+            pkg/Dockering-x86_64.AppImage
+            pkg/Dockering-x86_64.tar.gz
+            pkg/packages.sha256
+          retention-days: 3
+          overwrite: true # a re-run of the workflow uploads the same name again
+          if-no-files-found: error
+
+  smoke:
+    name: ${{ matrix.name }}
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # `package` is what the leg installs first (a .deb exists only for Ubuntu). `images` are tried in order:
+        # registry mirrors first, because anonymous Docker Hub pulls are limited per IP and runners share IPs.
+        include:
+          - name: Ubuntu 24.04
+            slug: ubuntu-24.04
+            package: deb
+            images: "mirror.gcr.io/library/ubuntu:24.04 docker.io/library/ubuntu:24.04"
+          - name: Ubuntu 26.04
+            slug: ubuntu-26.04
+            package: deb
+            images: "mirror.gcr.io/library/ubuntu:26.04 docker.io/library/ubuntu:26.04"
+          - name: Fedora
+            slug: fedora
+            package: tar
+            images: "quay.io/fedora/fedora:latest mirror.gcr.io/library/fedora:latest docker.io/library/fedora:latest"
+          - name: Arch Linux
+            slug: arch
+            package: tar
+            images: "ghcr.io/archlinux/archlinux:latest mirror.gcr.io/library/archlinux:latest docker.io/library/archlinux:latest"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: pkg
+      - name: Install and launch in a clean ${{ matrix.name }} container (REL-072…075)
+        env:
+          SLUG: ${{ matrix.slug }}
+          PACKAGE: ${{ matrix.package }}
+          IMAGES: ${{ matrix.images }}
+          VERSION: ${{ needs.fetch.outputs.version }}
+          SMOKE_LIBC_FLOOR: warn # plan task 5 removes this once a release ships the glibc floor (REL-073)
+        run: |
+          read -r -a images <<< "$IMAGES"
+          bash scripts/linux-smoke/leg.sh "$SLUG" "$PACKAGE" pkg out "$VERSION" "${images[@]}"
+      - name: Contact sheet as a viewable image
+        id: sheet
+        if: always() && hashFiles('out/contact-*.png') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: contact-${{ matrix.slug }}.png # with archive: false the file name wins; overwrite deletes by this name
+          path: out/contact-*.png
+          archive: false # a single file uploaded as is; the artifact is named after the file
+          retention-days: 14
+          overwrite: true
+      - name: Screenshots, logs and results
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-${{ matrix.slug }}
+          path: out/
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: warn
+      - name: Summary (REL-076)
+        if: always()
+        env:
+          LEG_NAME: ${{ matrix.name }}
+          TAG: ${{ needs.fetch.outputs.tag }}
+          SHEET_URL: ${{ steps.sheet.outputs.artifact-url }}
+          EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          {
+            echo "### $LEG_NAME: $TAG"
+            echo
+            if [[ -f out/image.txt ]]; then
+              echo "Image: \`$(sed -n 's/^image=//p' out/image.txt)\`  "
+              echo "Digest: \`$(sed -n 's/^digest=//p' out/image.txt)\`  "
+            else
+              echo "No image was pulled."
+            fi
+            for f in out/platform-*.txt; do
+              if [[ -f "$f" ]]; then echo "Platform: \`$(head -n 1 "$f")\`"; fi
+            done
+            echo
+            echo '| scenario | passed | failed |'
+            echo '|---|---|---|'
+            fails=""
+            if [[ -f out/leg.log ]]; then
+              while IFS= read -r line; do
+                fails+="setup: ${line:0:240}"$'\n'
+              done < <(grep '^SETUP FAILED' out/leg.log || true)
+            fi
+            for f in out/*/results.txt; do
+              [[ -f "$f" ]] || continue
+              scenario=$(basename "$(dirname "$f")")
+              echo "| $scenario | $(grep -c ' PASS ' "$f") | $(grep -c ' FAIL ' "$f") |"
+              while IFS= read -r line; do
+                fails+="$scenario: ${line:0:240}"$'\n'
+              done < <(grep ' FAIL ' "$f" || true)
+            done
+            if [[ -n "$fails" ]]; then
+              echo
+              echo "Failed checks:"
+              echo
+              echo '```'
+              printf '%s' "$fails" | tr -d '`'
+              echo '```'
+            fi
+            echo
+            links=""
+            if [[ -n "$SHEET_URL" ]]; then links="[Contact sheet]($SHEET_URL)"; fi
+            if [[ -n "$EVIDENCE_URL" ]]; then links="${links:+$links · }[All screenshots, logs and results]($EVIDENCE_URL)"; fi
+            echo "${links:-No evidence artifact was uploaded.}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  selftest:
+    name: harness self-test
+    # Proves that the checks of the legs fail on broken inputs (stub applications, discarded keys, a wrong version,
+    # damaged package files, a missing glibc floor), so that a green leg means something (plan task 3, REL-072…075).
+    # It tests the scripts in this checkout, not the release, so a release or weekly run skips it.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: pkg
+      - name: Break the inputs and demand the named failures (REL-072…075)
+        env:
+          VERSION: ${{ needs.fetch.outputs.version }}
+        run: bash scripts/linux-smoke/selftest.sh pkg out "$VERSION"
+      - name: Evidence of the controls
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selftest
+          path: out/
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: warn
+      - name: Summary
+        if: always()
+        env:
+          EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          {
+            echo "### Harness self-test"
+            echo
+            if [[ -f out/leg.log ]]; then
+              echo "$(grep -c -E '^[a-z0-9_/]+ +\| PASS \|' out/leg.log || true) controls behaved, $(grep -c -E '^[a-z0-9_/]+ +\| FAIL \|' out/leg.log || true) did not."
+              if grep -q -E '^SETUP FAILED|\| FAIL \|' out/leg.log; then
+                echo
+                echo '```'
+                grep -E '^SETUP FAILED|\| FAIL \|' out/leg.log | cut -c1-240 | tr -d '`'
+                echo '```'
+              fi
+            else
+              echo "The self-test did not start."
+            fi
+            echo
+            echo "${EVIDENCE_URL:+[Console output of every control]($EVIDENCE_URL)}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  alert:
+    name: open an issue on drift
+    needs: [fetch, smoke]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Open or update the tracking issue
+        run: |
+          title="Linux smoke test failing on the latest release"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          body="The weekly Linux smoke test failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

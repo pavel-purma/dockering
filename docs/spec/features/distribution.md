@@ -1,8 +1,8 @@
 # Feature: Distribution, releases & updates (Windows first)
 
 - **Status:** in-progress (2026-10-06; unsigned v0.1.0 and v0.2.0 published and verified on all six targets; the `/release` skill and the SignPath signing flow are built but not yet exercised by a signed run; macOS notarization, updater activation, winget, and release-bot activation deferred)
-- **Requirement prefixes:** REL (release, packaging, signing, winget, branding; REL-001…003 licensing stay in [spec 50](../50-build-and-release.md#licensing-rel-001)) · UPD (in-app updates)
-- **Plan:** [windows-distribution](../../plan/features/windows-distribution.md) · **ADR:** [0006](../../plan/adr/0006-windows-installer-and-updates.md)
+- **Requirement prefixes:** REL (release, packaging, signing, winget, branding, Linux smoke test; REL-001…003 licensing stay in [spec 50](../50-build-and-release.md#licensing-rel-001)) · UPD (in-app updates)
+- **Plan:** [windows-distribution](../../plan/features/windows-distribution.md) · [linux-install-smoke-test](../../plan/features/linux-install-smoke-test.md) (§8) · **ADR:** [0006](../../plan/adr/0006-windows-installer-and-updates.md)
 
 Dockering ships through **GitHub Releases** (the only storage for binaries), a branded **Inno Setup**
 installer on Windows, **winget**, and an opt-out **in-app updater** that reads a signed manifest
@@ -98,6 +98,23 @@ SignPath Foundation: [plan](../../plan/features/release-skill-and-signing.md), [
 | UPD-011 | **Threading.** Fetching, verifying, and downloading run on the hub runtime in crate `dk-update` (no GPUI). The UI uses `HubHandle::update_status() -> HubStream<UpdateStatus>`, `check_for_updates() -> HubCall<UpdateCheck>`, and `apply_update() -> HubCall<()>`. The `UpdateStore` entity owns their tasks (NFR-004) and ignores results of superseded checks (NFR-005). |
 | UPD-012 | **Files.** Downloads go to `<data-local>/updates/<version>/` (`%LocalAppData%`, never the roaming profile). Partial or stale downloads are removed at startup. State (`last_check`, `last_result`, `last_run_version`, `notified_version`, `pending_version`) lives in `state.json`. The *Check automatically* switch lives in `config.toml` `[updates] check`. |
 
+## 8. Linux install-and-launch smoke test (REL-070…077)
+
+**Status: in-progress (2026-10-10).** Built, verified in local Docker, and green in two GitHub runs (a pull request and a manual dispatch); the release trigger, the weekly schedule and the failure alert have not fired yet. Plan: [linux-install-smoke-test](../../plan/features/linux-install-smoke-test.md), which also records the feasibility spike.
+
+The release workflow builds and inspects files but starts nothing. `linux-smoke.yml` installs the *published* Linux x86_64 packages into clean distribution containers on a hosted runner, starts the app on a headless display, drives it from the keyboard, takes screenshots and quits it. Fedora and Arch have no native package, so their legs install the `.tar.gz` and the runtime libraries; every leg also runs the AppImage. Out of scope: GPU rendering, native rpm and Arch packages, aarch64 and a Docker-engine scenario (plan phase 2), and pixel-exact screenshot comparison (the default UI font differs per distribution).
+
+| ID | Requirement |
+|---|---|
+| REL-070 | **Workflow and matrix.** `.github/workflows/linux-smoke.yml` MUST run on `release: published`, weekly, `workflow_dispatch` (input `tag`, default the latest release) and on pull requests that change the workflow or `scripts/linux-smoke/`. Legs, each in its own clean container with fail-fast off: Ubuntu 24.04 and 26.04 (`.deb`), Fedora and Arch Linux (`.tar.gz`). Any failed leg MUST fail the run. Permissions are `contents: read` (plus `attestations: read` for verification), and no secret or token reaches a container. |
+| REL-071 | **The published bytes.** Before anything is installed, the `fetch` job MUST check that `SHA256SUMS` lists exactly the three x86_64 packages, that their checksums match, and that `gh attestation verify` passes for each, pinned to `release.yml`, the release tag ref and `--deny-self-hosted-runners`. Each leg re-checks the checksums of the files it receives. |
+| REL-072 | **Install like a user.** The `.deb` MUST be installed through apt with its declared dependencies only (no recommends). The Fedora and Arch legs install the `.tar.gz` and the named runtime libraries (plan §6.4). Every leg also runs the AppImage. The `.deb` and `.tar.gz` scenarios MUST check that `--version` equals the tag's version, `ldd` resolves every library, the licence files, desktop entry and icon exist, and `desktop-file-validate` passes; the AppImage scenario checks the version and the launch. The harness (display server, input, screenshots, accessibility tools, software Vulkan driver) is installed separately and MUST NOT stand in for a package dependency. |
+| REL-073 | **glibc floor.** The `.deb`'s `libc6` dependency MUST carry a version at least as high as the highest `GLIBC_x.y` the binary needs. The check warns until packaging declares it (plan task 5), then fails. |
+| REL-074 | **Launch and walk.** With `--demo`, on Xvfb and on headless sway: the window (class and `app_id` `dev.dockering.Dockering`) MUST appear within 40 s, paint and settle; `Mod+2`, `Mod+3`, `Mod+4`, `Mod+,` and `Mod+1` MUST select Images, Volumes, Networks, Settings and Containers, confirmed through the accessibility (AT-SPI) tree, with one retry for a key the display server dropped; every sidebar item MUST be activatable through the accessibility API; the app MUST quit with status 0 within 10 s and have saved `last_run_version`. |
+| REL-075 | **Upgrade and crash checks.** A real-mode launch on a profile whose `last_run_version` is older than the build MUST succeed. Every launch MUST leave no crash file and no panic, and no WARN or ERROR beyond a documented allowlist of headless noise. |
+| REL-076 | **Evidence.** Screenshots (first frame and every page), logs, `results.txt`, any crash file and a contact sheet MUST be uploaded as artifacts (kept 14 days). Each job summary lists the scenario counts and the image digest. |
+| REL-077 | **Images, drift and alert.** Images come from registries other than Docker Hub, whose anonymous pulls are rate-limited per IP address and shared by hosted runners. Fedora and Arch run on `latest` on purpose, so a rolling-distribution break shows up. A failed *scheduled* run MUST open or update a single tracking issue. |
+
 ## UI
 
 ```
@@ -137,6 +154,7 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 | UPD-009 / SET-090 | `set_090_updates_section_states`, `set_090_policy_disables_controls`, `set_090_manual_check_without_updater_reports_disabled`, `set_090_short_time` |
 | UPD-011 | `upd_011_stale_manual_check_dropped` |
 | UPD-012 | `upd_012_cleanup_keeps_only_pending`, `upd_012_*` |
+| REL-070…077 | *Implemented; verified locally and in two GitHub runs (pull request and manual dispatch on the published v0.2.0, both green); the release trigger, the weekly schedule and the failure alert have not fired yet.* `scripts/linux-smoke/`, `linux-smoke.yml` and `scripts/tests/test_linux_smoke.py` (69 tests; the REL-071 gates, the REL-070 and REL-077 matrix and image order, and the container command line are asserted against a fake `gh` and a fake `docker`). Local Docker, published v0.2.0 packages: Ubuntu 24.04 and 26.04, Fedora 44 and Arch pass 24, 24, 13 and 21 checks per scenario with none failed, every screenshot captioned; the `selftest` controls (30) each fail exactly the check they break, and the withdrawn first 0.2.0 build fails the upgrade scenario (spike, plan §6.5). actionlint 1.7.12 with shellcheck 0.9.0 is clean. On the runners: the same check counts on every leg, 140 captioned screenshots plus four contact sheets, `libc_floor` as `INFO`, 30 of 30 self-test controls. |
 | KBD-076 | `kbd_076_update_actions_in_palette`, `a11y_every_action_bound_or_in_palette` |
 
 ## Known gaps
@@ -152,8 +170,13 @@ entries without default chords. On macOS, *Check for Updates…* is also in the 
 - *Restart to update* doesn't list running terminal sessions or image pulls before quitting (the plan's risk table promised a confirmation). Follow-up.
 - Remote signing (SignPath or Azure) signs `dockering.exe` and the setup, but not the uninstaller Inno writes at install time. `SignedUninstaller` needs a local `SignTool` (`DOCKERING_INNO_SIGNTOOL`). Follow-up in S-9.
 - CI verifies native x64/ARM64 per-user and `/ALLUSERS` installer flows. Real-machine GUI
-  installation, the all-users updater path through `runas`, macOS/Linux application launch,
+  installation, the all-users updater path through `runas`, macOS application launch,
   and WSL/WSLC integration remain unchecked in the [release checklist](../../plan/release-checklist.md).
+  The Linux launch is checked by the smoke test after publication (§8; it has run for a pull request and a manual dispatch, not yet for a release).
+- The `.deb` declares plain `libc6` although its binary needs `GLIBC_2.39`: on Ubuntu 22.04 it installs and then
+  fails to start (plan finding F1; REL-073).
+- Without a usable Vulkan or GL driver the Linux app logs `failed to open the main window` and keeps running with no window,
+  and a second launch starts another such process (plan finding F2). Follow-up in its own plan.
 - `PUBLIC_KEYS` in `dk-update/src/keys.rs` is empty until the release keys are generated, so updates fail closed until then (REL-060 checklist).
 
 - macOS and Linux use notify-only updates when the updater is enabled; v0.1.0 has no updater.

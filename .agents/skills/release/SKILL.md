@@ -44,7 +44,7 @@ Releases are long (the checks and the build take about an hour). Find out what a
 | `Cargo.toml` version is higher than the last tag, merged, no tag | step 8 (tag) |
 | Tag, no release run or no draft | step 9 (build) |
 | Draft release | step 10 (verify) |
-| Published, README/checklist not updated | step 12 (record) |
+| Published, README/checklist not updated | step 11's `Linux smoke` run (find, wait, report), then step 12 (record) |
 
 Each step first checks whether it is already done. `cargo xtask release-plan` shows `last_tag`, `workspace_version` and the commits; `gh pr list`, `gh run list --workflow release.yml`, `gh release view` show the rest.
 
@@ -126,7 +126,7 @@ cargo xtask verify-manifest --assets target/release-review/vX.Y.Z      # signed 
 
 ### 11. Gate 2, before publishing
 
-Show: the `RESULT` line, the attestation count, the signer subject (signed), the launch check, exact-commit CI, the notes, and the **manual checks not performed** (real-machine install and upgrade, macOS and Linux launch, WSL/WSLC walkthroughs). Ask: publish / stop and keep the draft. Then:
+Show: the `RESULT` line, the attestation count, the signer subject (signed), the launch check, exact-commit CI, the notes, and the **manual checks not performed** (real-machine install and upgrade, macOS and Linux launch, WSL/WSLC walkthroughs). The Linux launch is covered by the `Linux smoke` test only after publication (clean containers, `--demo`, software rendering): say so, and that a real Linux machine and the Docker connection stay manual. Ask: publish / stop and keep the draft. Then:
 
 ```sh
 gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest    # signed: "Dockering X.Y.Z"
@@ -136,9 +136,17 @@ pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y
 
 Publishing starts the `winget` workflow; report its result (it is skipped while `WINGET_ENABLED` or `PUBLIC_RELEASES` is unset).
 
+Publishing also starts the `Linux smoke` workflow (REL-070). It installs the published x86_64 Linux packages in clean Ubuntu, Fedora and Arch containers, starts the app and keeps screenshots. Wait for it, then record it in step 12:
+
+- Find the run with `gh run list --workflow linux-smoke.yml --limit 3` (its title names the tag) and follow it with `gh run watch <run-id> --exit-status` (as in step 9, never block longer than the host's command timeout). If no run for this tag appears within a minute, dispatch one: `gh workflow run linux-smoke.yml -f tag=vX.Y.Z`.
+- Keep its link and result for step 12. To review the screenshots, download the evidence into its own directory (`gh run download <run-id> -p 'smoke-*' --dir target/smoke-review/vX.Y.Z`) and look at each leg's `contact-<slug>.png`. Tick "reviewed" only if you did.
+- A failing run falls under rule 2: the release is already public. Read the log (`gh run view <run-id> --log-failed`), report the failing check with the evidence, never edit, delete or re-upload the release, and stop to ask the maintainer.
+
+How to read the results: `docs/release.md`, "Linux smoke test".
+
 ### 12. Record
 
-A docs PR `chore/record-vX.Y.Z`, titled `docs(release): record vX.Y.Z [REL-010, REL-018]`: the README download text and links, the `docs/release.md` table row, the new `docs/plan/release-checklist.md` section from [checklist-template.md](checklist-template.md) (ticked only for what ran), the `CHANGELOG.md` heading date if the UTC publication date differs, and spec status lines that name the latest release or the signing state. Wait for green checks, merge, then `git worktree remove target/release-wt` and delete the local branches. Finish with a short report: version, links (PR, run, release), evidence, what is still manual.
+A docs PR `chore/record-vX.Y.Z`, titled `docs(release): record vX.Y.Z [REL-010, REL-018]`: the README download text and links, the `docs/release.md` table row, the new `docs/plan/release-checklist.md` section from [checklist-template.md](checklist-template.md) (ticked only for what ran, including the `Linux smoke` run of step 11: link, result, screenshots reviewed; after a resume, find the run with `gh run list --workflow linux-smoke.yml`), the `CHANGELOG.md` heading date if the UTC publication date differs, and spec status lines that name the latest release or the signing state. Wait for green checks, merge, then `git worktree remove target/release-wt` and delete the local branches. Finish with a short report: version, links (PR, run, release, Linux smoke run), evidence, what is still manual.
 
 ### Auto
 
