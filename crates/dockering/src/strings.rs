@@ -59,6 +59,7 @@ pub const FILTER_ENGINES: &str = "Filter engines…";
 pub const RESCAN: &str = "Rescan";
 pub const MANAGE_ENGINES: &str = "Manage engines…";
 pub const START_AND_CONNECT: &str = "Start & connect";
+pub const STARTING: &str = "Starting…";
 pub const NO_MATCHING_ENGINES: &str = "No matching engines";
 pub fn also_reachable_via(endpoints: &str) -> String {
     format!("Same daemon as {endpoints}")
@@ -269,6 +270,7 @@ pub fn go_to(kind: &str, name: &str) -> String {
 }
 
 // ── command labels (palette, menus) ─────────────────────────────────────────────────────
+pub const CMD_START_ENGINE: &str = "Start engine";
 pub const CMD_PALETTE: &str = "Command palette";
 pub const CMD_SHORTCUTS: &str = "Keyboard shortcuts";
 pub const CMD_ENGINE_SWITCHER: &str = "Switch engine…";

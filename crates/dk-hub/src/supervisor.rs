@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use dk_core::{
     Engine, EngineConfig, EngineError, EngineFactory, EngineId, EngineInfo, EngineKind,
-    EngineResult, EngineState, ProbeResult,
+    EngineResult, EngineState, ProbeResult, ResourceKind,
 };
 use futures::FutureExt;
 use std::panic::AssertUnwindSafe;
@@ -33,6 +33,8 @@ pub(crate) const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Background probe interval for non-active engines (ENG-020); WSLC every other tick (60 s).
 pub(crate) const PROBE_INTERVAL: Duration = Duration::from_secs(30);
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// ENG-140: read-only recheck of the active engine while it waits in a startable `Stopped` state.
+pub(crate) const STOPPED_RECHECK_INTERVAL: Duration = Duration::from_secs(10);
 /// Spec 20 §4.4: stop auto-reconnecting a WSL distro after this many failures.
 pub(crate) const WSL_MAX_FAILURES: u32 = 3;
 pub(crate) const BACKOFF_BASE: Duration = Duration::from_secs(1);
@@ -57,6 +59,21 @@ pub(crate) async fn connect_info(
     let engine = guarded(factory.connect(cfg)).await?;
     let info = guarded(engine.info()).await?;
     Ok((engine, info))
+}
+
+/// ENG-137: a missing session of a backend that offers a start action is `Stopped`, not a failure.
+fn is_startable_stop(
+    factory: &Arc<dyn EngineFactory>,
+    cfg: &EngineConfig,
+    e: &EngineError,
+) -> bool {
+    matches!(
+        e,
+        EngineError::NotFound {
+            kind: ResourceKind::Session,
+            ..
+        }
+    ) && factory.start_prompt(cfg).is_some()
 }
 
 async fn connect_with_timeout(
@@ -176,6 +193,12 @@ pub(crate) async fn autoselect(inner: &Arc<HubInner>) {
                 }
                 inner.set_state(&id, EngineState::Disconnected);
             }
+            Err(e) if is_startable_stop(&factory, &cfg, &e) => {
+                tracing::debug!(engine = %id, "auto-select candidate has no session; stopped");
+                if !inner.is_active(&id) {
+                    inner.set_state(&id, EngineState::Stopped);
+                }
+            }
             Err(e) => {
                 tracing::info!(engine = %id, error = %e, "auto-select candidate failed");
                 // Don't clobber a supervisor that took over meanwhile.
@@ -235,6 +258,49 @@ pub(crate) async fn supervise(
         };
         let factory = match factory {
             Some(f) if contactable && !(stopped && pre.is_none()) => f,
+            // Startable stopped engine (ENG-140): wait for the user, rechecking quietly.
+            Some(f) if contactable && cfg_has_prompt(&f, &cfg) => {
+                tokio::select! {
+                    _ = token.cancelled() => return,
+                    _ = retry.notified() => continue,
+                    _ = tokio::time::sleep(STOPPED_RECHECK_INTERVAL) => {}
+                }
+                let (live, state_now) = {
+                    let reg = lock(&inner.reg);
+                    (
+                        !token.is_cancelled() && reg.is_active(&id),
+                        reg.get(&id).map(|e| e.state.clone()),
+                    )
+                };
+                if !live {
+                    return;
+                }
+                match state_now {
+                    Some(EngineState::Stopped) => {}
+                    // A start is in flight: it wakes this supervisor when it finishes.
+                    Some(EngineState::Connecting) => {
+                        tokio::select! {
+                            _ = token.cancelled() => return,
+                            _ = retry.notified() => {}
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                }
+                if run_probe(&f, &cfg).await == ProbeResult::Reachable {
+                    let mut reg = lock(&inner.reg);
+                    if token.is_cancelled() || !reg.is_active(&id) {
+                        return;
+                    }
+                    if reg
+                        .get(&id)
+                        .is_some_and(|e| matches!(e.state, EngineState::Stopped))
+                    {
+                        reg.set_state(&id, EngineState::Disconnected);
+                    }
+                }
+                continue;
+            }
             // Disabled / unsupported / stopped distro (ENG-025/010/106): wait for the user.
             _ => {
                 tokio::select! {
@@ -259,6 +325,14 @@ pub(crate) async fn supervise(
             },
         };
         match res {
+            Err(e) if is_startable_stop(&factory, &cfg, &e) => {
+                tracing::debug!(engine = %id, "engine has no session; stopped");
+                let mut reg = lock(&inner.reg);
+                if token.is_cancelled() || !reg.is_active(&id) {
+                    return;
+                }
+                reg.set_state(&id, EngineState::Stopped);
+            }
             Err(e) => {
                 failures += 1;
                 had_failure = true;
@@ -476,6 +550,20 @@ async fn probe_loop(inner: Arc<HubInner>) {
     }
 }
 
+fn cfg_has_prompt(factory: &Arc<dyn EngineFactory>, cfg: &EngineConfig) -> bool {
+    factory.start_prompt(cfg).is_some()
+}
+
+/// `factory.probe()` with a timeout, panic-safe (NFR-030).
+async fn run_probe(factory: &Arc<dyn EngineFactory>, cfg: &EngineConfig) -> ProbeResult {
+    let fut = AssertUnwindSafe(factory.probe(cfg)).catch_unwind();
+    match tokio::time::timeout(PROBE_TIMEOUT, fut).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(p)) => ProbeResult::Unreachable(panic_error(&*p)),
+        Err(_) => ProbeResult::Unreachable(EngineError::Timeout(PROBE_TIMEOUT)),
+    }
+}
+
 /// One `factory.probe()` of a non-active engine; applies the result unless it became active.
 pub(crate) async fn probe_one(inner: &Arc<HubInner>, id: &EngineId) {
     let target = {
@@ -485,12 +573,7 @@ pub(crate) async fn probe_one(inner: &Arc<HubInner>, id: &EngineId) {
             .and_then(|e| Some((e.config.clone(), inner.factories.get(e.factory?)?.clone())))
     };
     let Some((cfg, factory)) = target else { return };
-    let fut = AssertUnwindSafe(factory.probe(&cfg)).catch_unwind();
-    let res = match tokio::time::timeout(PROBE_TIMEOUT, fut).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(p)) => ProbeResult::Unreachable(panic_error(&*p)),
-        Err(_) => ProbeResult::Unreachable(EngineError::Timeout(PROBE_TIMEOUT)),
-    };
+    let res = run_probe(&factory, &cfg).await;
     let mut reg = lock(&inner.reg);
     if reg.is_active(id)
         || reg
@@ -499,8 +582,18 @@ pub(crate) async fn probe_one(inner: &Arc<HubInner>, id: &EngineId) {
     {
         return;
     }
+    if reg
+        .get(id)
+        .is_some_and(|e| matches!(e.state, EngineState::Connecting))
+    {
+        return;
+    }
+    let startable_stopped = reg.get(id).is_some_and(|e| {
+        matches!(e.state, EngineState::Stopped) && cfg_has_prompt(&factory, &e.config)
+    });
     let state = match res {
         ProbeResult::Reachable => EngineState::Disconnected,
+        ProbeResult::Unreachable(_) | ProbeResult::Unknown if startable_stopped => return,
         ProbeResult::Unreachable(error) => EngineState::Failed {
             error,
             retry_in_ms: None,

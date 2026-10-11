@@ -147,8 +147,23 @@ impl WslcCliEngine {
                 UPDATE_HINT,
             ));
         }
+        engine.require_default_session().await?;
         engine.run(&["container", "list", "--quiet"], None).await?;
         Ok(engine)
+    }
+
+    /// ENG-137..141: any session-bound command creates the caller's default session, so the
+    /// unnamed default first runs the read-only `system session list`. Residual: another
+    /// session (e.g. an admin one) may exist while the caller's default does not.
+    async fn require_default_session(&self) -> EngineResult<()> {
+        if self.inner.session.is_some() {
+            return Ok(());
+        }
+        let out = self.run(&["system", "session", "list"], None).await?;
+        if parse::session_table(&out).is_empty() {
+            return Err(EngineError::not_found(ResourceKind::Session, "default"));
+        }
+        Ok(())
     }
 
     fn runner(&self) -> &Runner {
@@ -252,7 +267,7 @@ fn noun(kind: ResourceKind) -> &'static str {
 
 fn unreachable_with_update_hint(e: EngineError, reason: &str) -> EngineError {
     match e {
-        EngineError::Unreachable { .. } => e,
+        EngineError::Unreachable { .. } | EngineError::NotFound { .. } => e,
         other => EngineError::unreachable_with_hint(format!("{reason}: {other}"), UPDATE_HINT),
     }
 }
@@ -435,6 +450,7 @@ impl Engine for WslcCliEngine {
     }
 
     async fn ping(&self) -> EngineResult<()> {
+        self.require_default_session().await?;
         self.run(&["container", "list", "--quiet"], None)
             .await
             .map(|_| ())
@@ -447,7 +463,18 @@ impl Engine for WslcCliEngine {
             .await
         {
             Ok(o) => parse::system_info(&o).unwrap_or_default(),
-            Err(e) if e.is_unreachable() => return Err(e),
+            Err(e)
+                if e.is_unreachable()
+                    || matches!(
+                        e,
+                        EngineError::NotFound {
+                            kind: ResourceKind::Session,
+                            ..
+                        }
+                    ) =>
+            {
+                return Err(e);
+            }
             Err(_) => parse::SystemInfo::default(),
         };
         let containers = self.container_rows(true).await?;
@@ -853,6 +880,38 @@ impl Engine for WslcCliEngine {
 
     async fn prune_networks(&self) -> EngineResult<PruneReport> {
         self.prune("network", &[]).await
+    }
+}
+
+/// The one fixed argv that creates the caller's default session (ENG-138, spec 20 §5.8 S-4).
+#[cfg(any(windows, test))]
+pub(crate) const START_ARGV: [&str; 5] = ["container", "list", "--all", "--format", "json"];
+
+#[cfg(any(windows, test))]
+const START_HINT: &str =
+    "Run `wslc container list` in a terminal to see why the session didn't start.";
+
+/// Creates the caller's default session by running [`START_ARGV`] without `--session`.
+#[cfg(windows)]
+pub(crate) async fn start_default_session() -> EngineResult<()> {
+    let exe = wslc_exe()
+        .ok_or_else(|| EngineError::unreachable_with_hint("wslc.exe not found", UPDATE_HINT))?;
+    Runner::new(exe, None)
+        .run(&START_ARGV, DEFAULT_TIMEOUT, None)
+        .await
+        .map(|_| ())
+        .map_err(start_error)
+}
+
+#[cfg(any(windows, test))]
+fn start_error(e: EngineError) -> EngineError {
+    match e {
+        EngineError::Unreachable { hint: Some(_), .. } | EngineError::Cancelled => e,
+        EngineError::Unreachable { reason, hint: None } => {
+            EngineError::unreachable_with_hint(reason, START_HINT)
+        }
+        EngineError::Api { message, .. } => EngineError::unreachable_with_hint(message, START_HINT),
+        other => EngineError::unreachable_with_hint(other.to_string(), START_HINT),
     }
 }
 

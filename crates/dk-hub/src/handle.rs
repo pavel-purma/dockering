@@ -98,7 +98,7 @@ impl HubHandle {
         crate::hub::retry(self, id)
     }
     /// ENG-106: explicit user action only.
-    pub fn start_wsl_distro(&self, id: &EngineId) -> HubCall<()> {
+    pub fn start_engine(&self, id: &EngineId) -> HubCall<()> {
         crate::hub::start_engine(self, id)
     }
     /// Add-engine dialog schemas from all registered factories.

@@ -388,6 +388,14 @@ impl EngineState {
     }
 }
 
+/// What the UI shows for a stopped engine that can be started on request (ENG-139).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StartPrompt {
+    pub title: String,
+    pub body: String,
+    pub action_label: String,
+}
+
 /// Broadcast on `hub_events()` (ENG-023).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EngineStatus {
@@ -399,6 +407,9 @@ pub struct EngineStatus {
     /// Other endpoints reaching the same daemon (ENG-009 tooltip).
     #[serde(default)]
     pub also_reachable_via: Vec<String>,
+    /// Set while `state` is `Stopped` and the backend can start it (ENG-139).
+    #[serde(default)]
+    pub start_prompt: Option<StartPrompt>,
 }
 
 impl EngineStatus {

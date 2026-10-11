@@ -344,7 +344,7 @@ pub(super) fn on_engine_op(
         }
         EngineOpKind::Remove => remove(this, status, window, cx),
         EngineOpKind::StartAndConnect => {
-            let call = hub.start_wsl_distro(&id);
+            let call = hub.start_engine(&id);
             run_op(this, &id, s::START_AND_CONNECT, call, window, cx);
         }
         EngineOpKind::SetDefault if !can_be_default(&status) => {
@@ -574,7 +574,8 @@ fn engine_row(this: &SettingsPage, e: &EngineStatus, mark: DefaultMark, cx: &App
                     .small()
                     .outline()
                     .icon(IconName::Play)
-                    .label(s::START_AND_CONNECT)
+                    .label(crate::shell::engine_views::start_label(e))
+                    .debug_selector(|| "settings-start-label".into())
                     .on_click(dispatch_op(&nav, id, EngineOpKind::StartAndConnect)),
             )
         })

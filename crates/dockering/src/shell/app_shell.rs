@@ -151,6 +151,10 @@ pub struct AppShell {
     title_focus: FocusHandle,
     sidebar_focus: FocusHandle,
     content_focus: FocusHandle,
+    /// Focus target of the stopped-engine page's start button (ENG-141).
+    start_focus: FocusHandle,
+    /// The prompt of the engine whose start is in flight, so the page stays up as *Starting…*.
+    starting: Option<(EngineId, dk_core::StartPrompt)>,
     status_focus: FocusHandle,
     switcher_btn_focus: FocusHandle,
     overflow_focus: FocusHandle,
@@ -193,6 +197,7 @@ impl AppShell {
         let title_focus = cx.focus_handle();
         let sidebar_focus = cx.focus_handle().tab_stop(true);
         let content_focus = cx.focus_handle();
+        let start_focus = cx.focus_handle();
         let status_focus = cx.focus_handle().tab_stop(true);
         let switcher_btn_focus = cx.focus_handle().tab_stop(true);
         let overflow_focus = cx.focus_handle().tab_stop(true);
@@ -263,6 +268,8 @@ impl AppShell {
             title_focus,
             sidebar_focus,
             content_focus,
+            start_focus,
+            starting: None,
             status_focus,
             switcher_btn_focus,
             overflow_focus,
@@ -526,6 +533,9 @@ impl AppShell {
     pub fn sidebar_cursor(&self) -> usize {
         self.sidebar_cursor
     }
+    pub fn start_focus(&self) -> &FocusHandle {
+        &self.start_focus
+    }
     pub fn sidebar_focus(&self) -> &FocusHandle {
         &self.sidebar_focus
     }
@@ -560,8 +570,19 @@ impl AppShell {
                 store.update(cx, |s, cx| s.set_connected(connected, cx));
             }
             // Pages appear/disappear with connection state (SHL-013).
+            if !matches!(state, Some(EngineState::Connecting)) {
+                self.starting = None;
+            }
             let had_page = !matches!(self.page, ShellPage::None);
             self.mount_page(window, cx);
+            if self.start_page_shown(cx) {
+                let elsewhere = window.focused(cx).is_some_and(|f| {
+                    !self.content_focus.contains(&f, window) && f != self.root_focus
+                });
+                if !elsewhere {
+                    self.focus_page_pending.set(true);
+                }
+            }
             if !had_page && !matches!(self.page, ShellPage::None) {
                 // The page just appeared (first connect, reconnect): give it focus unless the
                 // user is elsewhere (KBD-007).
@@ -682,10 +703,24 @@ impl AppShell {
     }
 
     fn on_start_engine(&mut self, _: &StartEngine, window: &mut Window, cx: &mut Context<Self>) {
+        if self.starting.is_some()
+            || self
+                .engines
+                .read(cx)
+                .active()
+                .is_some_and(|s| matches!(s.state, EngineState::Connecting))
+        {
+            return;
+        }
         let Some(id) = self.engines.read(cx).active_id().cloned() else {
             return;
         };
-        let call = AppState::hub(cx).start_wsl_distro(&id);
+        if let Some(status) = self.engines.read(cx).active()
+            && let Some(p) = &status.start_prompt
+        {
+            self.starting = Some((id.clone(), p.clone()));
+        }
+        let call = AppState::hub(cx).start_engine(&id);
         self.hub_call(s::START_AND_CONNECT, call, window, cx);
     }
 
@@ -876,7 +911,17 @@ impl AppShell {
         if matches!(self.history.current(), Route::Settings { .. }) {
             return Some(self.sidebar_focus.clone());
         }
+        if matches!(self.page, ShellPage::None) && self.start_page_shown(cx) {
+            return Some(self.start_focus.clone());
+        }
         self.page.primary_focus(cx)
+    }
+
+    fn start_page_shown(&self, cx: &App) -> bool {
+        self.engines
+            .read(cx)
+            .active()
+            .is_some_and(|s| matches!(s.state, EngineState::Stopped) && s.start_prompt.is_some())
     }
 
     fn focus_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1290,7 +1335,7 @@ impl AppShell {
                     let id = EngineId::new(id.to_string());
                     this.close_overlays(window, cx);
                     let hub = AppState::hub(cx);
-                    let call = hub.start_wsl_distro(&id);
+                    let call = hub.start_engine(&id);
                     this.hub_call(s::START_AND_CONNECT, call, window, cx);
                 }
                 SwitcherEvent::Chosen(Choice::None) => {}
@@ -1808,8 +1853,19 @@ impl AppShell {
                     )
                     .into_any_element()
             }
-            EngineState::Connecting => crate::ui::skeleton_rows(8, 5),
-            _ => engine_views::disconnected_page(&status, &self.content_focus, cx),
+            EngineState::Connecting => match &self.starting {
+                Some((id, prompt)) if id == status.id() => engine_views::start_page(
+                    prompt,
+                    true,
+                    &self.content_focus,
+                    &self.start_focus,
+                    cx,
+                ),
+                _ => crate::ui::skeleton_rows(8, 5),
+            },
+            _ => {
+                engine_views::disconnected_page(&status, &self.content_focus, &self.start_focus, cx)
+            }
         }
     }
 

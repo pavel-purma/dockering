@@ -359,10 +359,8 @@ pub(crate) fn map_cli_error(
         return EngineError::unreachable_with_hint(msg, POLICY_HINT);
     }
     if sym == "WSLC_E_SESSION_NOT_FOUND" || lower.contains("session not found") {
-        return EngineError::unreachable_with_hint(
-            msg,
-            "The WSLC session doesn't exist; start one with `wslc` or pick another session",
-        );
+        let id = quoted(&msg).unwrap_or("default");
+        return EngineError::not_found(ResourceKind::Session, id);
     }
     if matches!(
         sym,
@@ -563,7 +561,10 @@ mod tests {
     #[test]
     fn s2_unreachable() {
         let e = map_cli_error(Some(1), fixture!("session_not_found"), None);
-        assert!(e.is_unreachable() && e.hint().is_some(), "{e:?}");
+        assert_eq!(
+            e,
+            EngineError::not_found(ResourceKind::Session, "nosuchsession")
+        );
         let e = map_cli_error(Some(1), fixture!("elevation_required"), None);
         assert!(e.is_unreachable(), "{e:?}");
         let e = map_cli_error(

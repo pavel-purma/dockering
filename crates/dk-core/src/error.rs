@@ -15,6 +15,9 @@ pub type EngineResult<T> = Result<T, EngineError>;
 /// [`EngineError::is_events_lost`].
 pub const EVENTS_LOST_MESSAGE: &str = "events lost";
 
+/// ENG-137: hint of a missing WSL containers session.
+pub const SESSION_NOT_FOUND_HINT: &str = "That WSL containers session doesn't exist. Check the session name in Settings \u{2192} Engines, or use the default session.";
+
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EngineError {
@@ -73,6 +76,10 @@ impl EngineError {
     pub fn hint(&self) -> Option<&str> {
         match self {
             Self::Unreachable { hint, .. } => hint.as_deref(),
+            Self::NotFound {
+                kind: ResourceKind::Session,
+                ..
+            } => Some(SESSION_NOT_FOUND_HINT),
             _ => None,
         }
     }
@@ -102,6 +109,17 @@ impl From<serde_json::Error> for EngineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eng_137_missing_session_has_a_hint_other_not_found_does_not() {
+        let e = EngineError::not_found(ResourceKind::Session, "x");
+        assert_eq!(e.hint(), Some(SESSION_NOT_FOUND_HINT));
+        assert!(!SESSION_NOT_FOUND_HINT.contains("COM"));
+        assert_eq!(
+            EngineError::not_found(ResourceKind::Container, "x").hint(),
+            None
+        );
+    }
 
     #[test]
     fn events_lost_is_recognised_exactly() {

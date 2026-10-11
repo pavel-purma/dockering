@@ -79,13 +79,12 @@ async fn eng_013_connect_default_and_named_session() {
 }
 
 #[tokio::test]
-async fn eng_013_connect_unknown_session_is_unreachable() {
+async fn eng_013_connect_unknown_session_is_not_found() {
     env();
     let err = WslcCliEngine::connect(EngineId::new("x"), Some("nosuch".into()), None, None)
         .await
         .expect_err("must fail");
-    assert!(err.is_unreachable(), "{err:?}");
-    assert!(err.hint().is_some());
+    assert_eq!(err, EngineError::not_found(ResourceKind::Session, "nosuch"));
     let err = WslcCliEngine::connect(EngineId::new("x"), Some("--format".into()), None, None)
         .await
         .expect_err("must fail");
