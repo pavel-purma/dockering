@@ -1,7 +1,7 @@
 # Plan: CI as the merge gate for pull requests
 
 - **Slug:** `ci-merge-gate`
-- **Status:** draft
+- **Status:** done (2026-10-11)
 - **Spec:** [Build & Release, Merge gate](../../spec/50-build-and-release.md#merge-gate-rel-080082)
 - **Milestone:** after the unsigned v0.1.0/v0.2.0 releases (release tooling)
 - **Requirement IDs:** REL-080, REL-081, REL-082 (new); REL-010 (clarified)
@@ -146,8 +146,12 @@ maintainer's go-ahead.
 | A workflow-level `paths` filter is added later, so a required check never reports. | `test_rel_082_*`. |
 | Open PRs (#37) change under their feet: the rule applies to them at once. | Their CI already runs on the merge ref; they need `main` green (task 1) and the gate job on their merge ref, which it is once PR 2 is on `main`. |
 | Textual overlap with #37 (`ci.yml`, spec 50, 60, `release.md`, release skill). | The edits sit in different hunks (end of `ci.yml`, after the `build` row, DoD item 3, rule 10, steps 2–3); rebase whichever merges second. |
-| Mid-flight, the release skill text is true only once task 5 is done. | Tasks 4 and 5 are done in one sitting, and the spec stays `planned` until 5. |
+| Mid-flight, the release skill text is true only once task 5 is done. | Tasks 4 and 5 were done in one sitting (PR #41, then the ruleset), so the text was true within minutes. |
 
 ## 10. Revision log
 
 - 2026-10-11: created
+- 2026-10-11: implemented and completed. PR #40 (format fix), PR #41 (`gate` job, test, docs), then the
+  `required_status_checks` rule on `Protect main` with the Admin pull-request bypass kept. Canary PR #42
+  (deliberate `cargo fmt` error) failed `CI gate` and `gh pr merge` was refused; closed unmerged. The bypass
+  button was not exercised. Spec rows moved from planned to implemented.

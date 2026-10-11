@@ -24,7 +24,7 @@ Docker.
 
 1. Requirement IDs are referenced in the PR description. The feature spec status is updated (`in-progress` → `implemented` when complete).
 2. Unit, parser, and view tests cover the new logic and all four UI states (loading, empty, error, data).
-3. `cargo fmt`, `clippy -D warnings`, and the NFR-001 grep pass. CI is green on all three OSes: the `CI gate` check, which `main` requires before a merge (REL-080, planned).
+3. `cargo fmt`, `clippy -D warnings`, and the NFR-001 grep pass. CI is green on all three OSes: the `CI gate` check, which `main` requires before a merge (REL-080).
 4. No blocking call on the UI thread. New long-lived tasks are stored on an entity.
 5. Capability gating is applied for any op that isn't universal.
 6. A screenshot (light and dark) is attached to the PR for UI changes.
