@@ -884,10 +884,10 @@ impl Engine for WslcCliEngine {
 }
 
 /// The one fixed argv that creates the caller's default session (ENG-138, spec 20 §5.8 S-4).
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 pub(crate) const START_ARGV: [&str; 5] = ["container", "list", "--all", "--format", "json"];
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 const START_HINT: &str =
     "Run `wslc container list` in a terminal to see why the session didn't start.";
 
@@ -903,7 +903,7 @@ pub(crate) async fn start_default_session() -> EngineResult<()> {
         .map_err(start_error)
 }
 
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 fn start_error(e: EngineError) -> EngineError {
     match e {
         EngineError::Unreachable { hint: Some(_), .. } | EngineError::Cancelled => e,
