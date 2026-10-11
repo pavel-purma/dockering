@@ -38,7 +38,8 @@ from whatever state it finds if a run is interrupted.
 | 4–5 | Local gate on a scratch worktree, bump, local release build | **Prepare** |
 | 6–7 | Gate 1, release PR, wait for every check, squash-merge | **Pull request** |
 | 8–9 | Annotated tag on the merge commit, watch `release.yml` (signed channel: approve the SignPath requests) | **Tag**, **Build** |
-| 10–11 | `scripts/verify-release.ps1`, Gate 2, publish, check the public URLs, wait for the [Linux smoke test](#linux-smoke-test) | **Verify the draft**, **Publish** |
+| 10 | `scripts/verify-release.ps1`, then the [draft gate](#draft-gate): the Linux and macOS smoke tests on the unpublished build | **Verify the draft** |
+| 11 | Gate 2, publish, check the public URLs, wait for the [Linux](#linux-smoke-test) and [macOS](#macos-smoke-test) smoke tests that publishing starts | **Publish** |
 | 12 | Record PR: README, release table, checklist | **Record** |
 
 `CHANGELOG.md` and `docs/spec/CHANGELOG.md` are written only here (REL-019): feature PRs never edit them.
@@ -89,6 +90,9 @@ from whatever state it finds if a run is interrupted.
    closes with exit code 0 and leaves no `crash-*.txt` next to `state.json`, repeats that for `--demo`, and restores
    the backed-up files. Crash reports and the log are in `%APPDATA%\dockering\Dockering\data` and
    `%LOCALAPPDATA%\dockering\Dockering\data\logs`. Run it only with Dockering closed.
+
+   That covers Windows only. **Run the [draft gate](#draft-gate)** for Linux and macOS: it installs and starts the
+   draft's packages on clean Ubuntu, Fedora and Arch containers and on hosted macOS 15 and 26 runners, before anyone can download them.
 7. **Publish** after approval, once the draft passes:
 
    ```sh
@@ -97,8 +101,9 @@ from whatever state it finds if a run is interrupted.
 
    Then `verify-release.ps1 ... -Published`: anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset
    URLs and the latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
-   `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset. It starts the [Linux smoke test](#linux-smoke-test) as well:
-   wait for it and record its run and result in the checklist.
+   `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset. It starts the [Linux](#linux-smoke-test) and
+   [macOS](#macos-smoke-test) smoke tests as well, now on the published files: wait for both and record their runs and
+   results in the checklist.
 8. **If a published build is broken,** take it down first (`gh release delete vX.Y.Z --yes`; the tag stays),
    fix `main` through a PR whose test fails without the fix, and ship the next patch version. Reusing the
    version is an exception that needs the maintainer's say-so, as for 0.2.0: check that no release
@@ -111,9 +116,9 @@ from whatever state it finds if a run is interrupted.
 ## Linux smoke test
 
 `release.yml` builds and inspects the Linux packages but does not run them. The `Linux smoke` workflow
-(`.github/workflows/linux-smoke.yml`; [REL-070…077](spec/features/distribution.md#8-linux-install-and-launch-smoke-test-rel-070077),
-[plan](plan/features/linux-install-smoke-test.md)) tests the **published** x86_64 `.deb`, `.tar.gz` and
-`.AppImage`. It downloads them, verifies their checksums and attestations, installs them in clean Ubuntu 24.04,
+(`.github/workflows/linux-smoke.yml`; [REL-070…077](spec/features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079),
+[plan](plan/features/linux-install-smoke-test.md)) tests the x86_64 `.deb`, `.tar.gz` and
+`.AppImage` of a **published** release, or of a draft through the [draft gate](#draft-gate). It downloads them, verifies their checksums and attestations, installs them in clean Ubuntu 24.04,
 Ubuntu 26.04, Fedora (latest) and Arch Linux (latest) containers, starts the app on Xvfb (X11) and on headless
 sway (Wayland), walks the pages with the keyboard, quits, and keeps screenshots. It also runs the AppImage and
 starts the app on a profile written by an older version.
@@ -182,6 +187,68 @@ or any real engine; that stays a manual checklist item. It renders in software (
 stay manual too. The published `.deb` declares plain `libc6` although the binary needs glibc 2.39
 ([finding F1](plan/features/linux-install-smoke-test.md#65-what-the-spike-showed), REL-073): until a release ships the
 fix, the `libc_floor` check shows `INFO` and does not fail the run.
+
+## Draft gate
+
+Publishing is the last step you can still stop. The published-release runs above can only report a broken build after
+people can download it, so the `/release` skill runs the same tests on the draft first, between steps 10 and 11
+(REL-079). Both workflows take the id of the tag's `release.yml` run as an input. The run's `release-review-<version>`
+artifact holds the same files the draft has, and `fetch.sh` gives them the checksum and attestation checks of a published
+release. The run must be a successful tag-push run of `release.yml`; a branch rehearsal or a failed run is refused.
+
+```sh
+run=$(gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId')
+gh workflow run linux-smoke.yml -f run="$run"
+gh workflow run macos-smoke.yml -f run="$run"
+gh run list --workflow linux-smoke.yml --limit 2     # the title reads "draft, run <id>"
+gh run list --workflow macos-smoke.yml --limit 2
+gh run watch <run-id> --exit-status
+```
+
+A draft-gate run skips the harness self-test, because that tests the scripts and not the release. A failure here is
+the point of the gate: **do not publish.** Read the failing check as described under each workflow, fix `main` through
+a PR and ship the next patch version (step 8 of [By hand](#by-hand-fallback)); never repair the tag. The release run's
+artifacts expire after GitHub's artifact retention period, so a draft left that long cannot be gated.
+
+## macOS smoke test
+
+The `macOS smoke` workflow (`.github/workflows/macos-smoke.yml`;
+[REL-078](spec/features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079),
+[plan §10](plan/features/linux-install-smoke-test.md#10-macos-rel-078-rel-079)) does for the `.dmg` what the Linux test does for
+the Linux packages. It downloads the `.dmg` of each architecture, verifies it as above, and on hosted macOS 15 (Apple
+silicon), macOS 15 (Intel) and macOS 26 (Apple silicon) runners it mounts the image, copies the app to `/Applications` and
+runs three scenarios: `demo` (`--demo`: window, paint, the five navigation chords, a pointer click, `Cmd+Q`), `upgrade` (a
+profile from an older version: no crash, and the "Updated to" notice shows) and `quarantine` (a copy marked as a browser
+download, opened the way Finder opens it, which must put up Gatekeeper's dialog and no window).
+
+It runs when a release is published, every Monday, on pull requests that change it or `fetch.sh`, by hand, and as part of the
+[draft gate](#draft-gate).
+
+```sh
+gh workflow run macos-smoke.yml -f tag=v0.2.0       # an empty tag means the latest published release
+gh run list --workflow macos-smoke.yml --limit 3
+gh run watch <run-id> --exit-status
+```
+
+**Results.** Each leg's job summary shows the platform and the pass and fail counts per scenario. Each leg keeps one artifact,
+`macos-smoke-<slug>` (`macos-15`, `macos-15-intel` or `macos-26`), for 14 days: a folder per scenario with every screenshot
+(each with a platform caption), the app log, `results.txt` and, for the `demo` scenario, `ax-<page>.txt`, which lists the
+named controls the accessibility tree showed on each page. Download it with
+`gh run download <run-id> -p 'macos-smoke-*' --dir target/smoke-review/vX.Y.Z`.
+
+**Reproduce it.** There is no local recipe, on purpose: `scripts/macos-smoke/run.sh` replaces `/Applications/Dockering.app`,
+deletes the Dockering profile and kills running copies, so it refuses to run outside GitHub Actions. Use a dispatch.
+(`SMOKE_ALLOW_LOCAL=1` lifts the refusal on a disposable Mac.)
+
+**Known state of the published macOS builds.** On Apple silicon the published `.app` carries a linker signature that does
+not cover its resources, so Gatekeeper calls a quarantined download "damaged" with no *Open Anyway*; the Intel build is
+unsigned and gets the ordinary prompt
+([finding F9](plan/features/linux-install-smoke-test.md#10-macos-rel-078-rel-079)). Until packaging is fixed, `bundle_seal` is
+reported as `INFO`, and the macOS advice under [Unsigned installation](#unsigned-installation) does not hold for Apple silicon.
+
+**When it fails.** As for Linux: a published build is not edited, deleted or re-uploaded; read the failing check and its
+screenshots, report them, and leave the decision to the maintainer. **Limits.** It starts the app with `--demo` or with
+no engine, on whatever GPU the runner reports, so a real Docker connection and a physical Mac stay manual checklist items.
 
 ## First-release verification
 

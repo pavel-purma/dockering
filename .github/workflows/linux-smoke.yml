@@ -1,7 +1,7 @@
-# Install-and-launch smoke test of the published Linux packages (REL-070…077).
+# Install-and-launch smoke test of the published Linux packages, or of a draft before it is published (REL-070…077, REL-079).
 # Plan: docs/plan/features/linux-install-smoke-test.md. The logic lives in scripts/linux-smoke/.
 name: Linux smoke
-run-name: Linux smoke (${{ github.event.release.tag_name || inputs.tag || 'latest release' }})
+run-name: Linux smoke (${{ github.event.release.tag_name || (inputs.run && format('draft, run {0}', inputs.run)) || inputs.tag || 'latest release' }})
 
 on:
   release:
@@ -14,6 +14,10 @@ on:
         description: Release tag to test (empty = the latest published release)
         required: false
         type: string
+      run:
+        description: Release workflow run id whose unpublished release-review bundle to test instead (the draft gate; wins over tag)
+        required: false
+        type: string
   pull_request:
     paths:
       - ".github/workflows/linux-smoke.yml"
@@ -23,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: linux-smoke-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  group: linux-smoke-${{ github.event.release.tag_name || inputs.run || inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -31,7 +35,9 @@ jobs:
     name: fetch and verify the packages
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # actions: read lets the draft gate (inputs.run) download the release run's artifact (REL-079)
     permissions:
+      actions: read
       contents: read
       attestations: read
     outputs:
@@ -45,8 +51,8 @@ jobs:
         name: Download and verify the Linux x86_64 packages (REL-071)
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.tag || 'latest' }}
-        run: bash scripts/linux-smoke/fetch.sh "$REQUESTED_TAG" pkg >> "$GITHUB_OUTPUT"
+          SOURCE: ${{ github.event.release.tag_name || (inputs.run && format('run:{0}', inputs.run)) || inputs.tag || 'latest' }}
+        run: bash scripts/linux-smoke/fetch.sh "$SOURCE" pkg >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: packages
@@ -180,8 +186,8 @@ jobs:
     name: harness self-test
     # Proves that the checks of the legs fail on broken inputs (stub applications, discarded keys, a wrong version,
     # damaged package files, a missing glibc floor), so that a green leg means something (plan task 3, REL-072…075).
-    # It tests the scripts in this checkout, not the release, so a release or weekly run skips it.
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # It tests the scripts in this checkout, not the release, so a release, weekly or draft-gate run skips it.
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run == '')
     needs: fetch
     runs-on: ubuntu-24.04
     timeout-minutes: 45

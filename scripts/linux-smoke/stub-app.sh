@@ -18,6 +18,11 @@
 #   panic       the real application, then a panic message on stderr                         -> no_crash
 #   logerror    the real application, then an ERROR line in its log                          -> log_clean
 #   badexit     the real application, but the process exits with status 3                   -> clean_quit
+#   deaf        ok, but it never answers the close request                                  -> clean_quit
+#   nolog       the real application, then its log is deleted                               -> log_start
+#   logwarn     the real application, then a WARN line that is not known noise              -> log_clean
+#   lognoise    the real application, then a WARN line that is known noise                  -> (nothing)
+#   lognoisetrap  the real application, then a WARN inside the portal span with another message -> log_clean
 set -u
 APP_ID=dev.dockering.Dockering
 REAL=/usr/bin/dockering
@@ -27,7 +32,7 @@ LOG="${SMOKE_OUT:-/tmp}/stub-display.log"
 
 if [ "${1:-}" = --version ]; then
   case "$MODE" in
-  crashfile | panic | logerror | badexit) exec "$REAL" --version ;;
+  crashfile | panic | logerror | badexit | nolog | logwarn | lognoise | lognoisetrap) exec "$REAL" --version ;;
   *)
     echo "dockering ${EXPECTED_VERSION:-0.0.0}"
     exit 0
@@ -58,6 +63,24 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 143' TERM
+
+demo=false
+for arg in "$@"; do [ "$arg" = --demo ] && demo=true; done
+stamp() { date -u +%Y-%m-%dT%H:%M:%S.000000Z; }
+# the startup lines a real launch writes, which run.sh's log checks read
+startlog() {
+  mkdir -p "$DATA/logs"
+  {
+    printf '%s  INFO dockering: starting version="%s" demo=%s\n' "$(stamp)" "${EXPECTED_VERSION:-0}" "$demo"
+    [ "$demo" = true ] && printf '%s  INFO dk_hub::supervisor: engine connected engine=demo\n' "$(stamp)"
+  } >"$DATA/logs/dockering.stub.log"
+}
+# append a line to the log of the real application
+logline() {
+  local log
+  log=$(find "$DATA/logs" -name 'dockering.*.log' 2>/dev/null | head -n 1)
+  [ -z "$log" ] || echo "$1" >>"$log"
+}
 
 # paint <right|wrong> <command...>: run a program that opens a window named Dockering; with "right" the window also carries
 # the application id as its WM_CLASS. A program that cannot open the display is started again: the X server drops a client
@@ -100,8 +123,9 @@ real() {
 }
 
 case "$MODE" in
-ok | wrongclass | blank | mortal)
+ok | wrongclass | blank | mortal | deaf)
   save=1
+  startlog
   if [ "$MODE" = blank ]; then
     "${IM[@]}" -size 1280x800 xc:white "$tmp/picture.png"
   else
@@ -113,6 +137,8 @@ ok | wrongclass | blank | mortal)
     # run.sh's second comparison frame (wait_stable) is the moment the first frame has been judged
     rm -f /tmp/_b.png
     await /tmp/_b.png 0
+  elif [ "$MODE" = deaf ]; then
+    await /nonexistent 0
   else
     await "${SMOKE_OUT:-/nonexistent}/90-quit-palette.png" 0.5
   fi
@@ -120,6 +146,7 @@ ok | wrongclass | blank | mortal)
   ;;
 flicker | strobe)
   save=1
+  startlog
   # a small window, while a loop repaints the whole screen behind it with a new colour, so that two frames 1 s apart differ
   # by the screen minus the window: 768,000 px for flicker, 1,014,000 px for strobe, the size at which
   # `compare -metric AE` prints exponent notation (1.014e+06) instead of a count
@@ -170,6 +197,26 @@ logerror)
 badexit)
   real "$@"
   exit 3
+  ;;
+nolog)
+  real "$@"
+  rm -rf "$DATA/logs"
+  exit "$rc"
+  ;;
+logwarn)
+  real "$@"
+  logline "$(stamp)  WARN dockering::stub: injected by the self-test"
+  exit "$rc"
+  ;;
+lognoise)
+  real "$@"
+  logline "$(stamp)  WARN gpui_linux::linux::platform: X11: error loading cursor icon, falling back on default icon 'left_ptr': injected by the self-test"
+  exit "$rc"
+  ;;
+lognoisetrap)
+  real "$@"
+  logline "$(stamp)  WARN {}{task_name=\"org.freedesktop.portal.Settings proxy caching\"}: zbus::proxy: injected by the self-test"
+  exit "$rc"
   ;;
 *)
   echo "stub-app.sh: unknown mode '$MODE'" >&2

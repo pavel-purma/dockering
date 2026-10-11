@@ -30,8 +30,9 @@ Released from `main` at `<short sha>` as workspace version `X.Y.Z`: <why this bu
 - [ ] Windows CI installer tests passed for x64 and ARM64, per user and `/ALLUSERS` (they do not start the application).
 - [ ] Launch check on this machine (profile written by `<previous version>`, then `--demo`): ran and passed, or not run (<why>).
 - [ ] Windows machine: install over the previous release, launch from the Start Menu, Docker connection, uninstall.
-- [ ] macOS machine: mount the DMG, copy and launch the app, Docker-compatible connection.
-- [ ] Real Linux machine (not a container): launch the app with the machine's GPU driver and connect to Docker. Install and launch in clean containers are covered by the Linux smoke run (see Publication), which uses `--demo` and software rendering.
+- [ ] macOS machine (a physical Mac): mount the DMG, copy and launch the app, Docker-compatible connection. Install, launch, the page walk, quit and Gatekeeper's dialog on a quarantined copy are covered by the macOS smoke runs, which use `--demo` and a hosted runner.
+- [ ] **Draft gate** (before publication, on the draft's own files): `Linux smoke` run ([run](<url>)) and `macOS smoke` run ([run](<url>)) for `vX.Y.Z`. Linux: all four legs passed (ubuntu-24.04, ubuntu-26.04, fedora, arch). macOS: all three legs passed (macos-15, macos-15-intel, macos-26). Screenshots reviewed. If a leg failed, the release was not published; leave this unticked and record the failed check under Open items.
+- [ ] Real Linux machine (not a container): launch the app with the machine's GPU driver and connect to Docker. Install and launch in clean containers are covered by the Linux smoke runs, which use `--demo` and software rendering.
 - [ ] Application sanity: containers, detail and logs, terminal, one lifecycle operation, images, volumes, networks, engine switching, Settings, keyboard navigation.
 - [ ] WSL and WSLC recorded separately: Run from Images, container ports and Inspect, terminal. Hosted CI does not verify these.
 
@@ -41,7 +42,8 @@ Released from `main` at `<short sha>` as workspace version `X.Y.Z`: <why this bu
 - [ ] The existing draft was published; no assets were replaced.
 - [ ] Published as `vX.Y.Z`, <stable/latest | pre-release>, `draft=false`, at `<UTC time>`.
 - [ ] `verify-release.ps1 -Published`: every version-pinned URL and the `latest` URLs return HTTP 200; the latest API returns `vX.Y.Z` with all files.
-- [ ] `Linux smoke` run for `vX.Y.Z` ([run](<url>)): all four legs passed (ubuntu-24.04, ubuntu-26.04, fedora, arch); their contact sheets (`contact-<slug>.png`) reviewed; `libc_floor` <INFO | passed>. If a leg failed or the run did not happen, leave this unticked and record the failed check and leg under Open items.
+- [ ] `Linux smoke` run for the published `vX.Y.Z` ([run](<url>)): all four legs passed (ubuntu-24.04, ubuntu-26.04, fedora, arch); their contact sheets (`contact-<slug>.png`) reviewed; `libc_floor` <INFO | passed>. If a leg failed or the run did not happen, leave this unticked and record the failed check and leg under Open items.
+- [ ] `macOS smoke` run for the published `vX.Y.Z` ([run](<url>)): all three legs passed (macos-15, macos-15-intel, macos-26); first-frame and page screenshots reviewed; `bundle_seal` <INFO | passed>. If a leg failed or the run did not happen, leave this unticked and record the failed check and leg under Open items.
 - [ ] README download text and the release table in `docs/release.md` point to X.Y.Z.
 - [ ] The `winget` run: <skipped | result> ([run](<url>)).
 

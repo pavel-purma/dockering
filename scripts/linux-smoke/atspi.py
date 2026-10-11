@@ -5,14 +5,15 @@ Plan: docs/plan/features/linux-install-smoke-test.md. GPUI publishes its accessi
 X11 and on Wayland, so the test asks the running app which page is selected and which named controls it
 shows, without pixel coordinates or fonts.
 
-  atspi.py tree                  the app is on the accessibility bus (waits up to 20 s)
+  atspi.py tree                  the app is on the accessibility bus (waits ATSPI_TIMEOUT, default 8 s)
   atspi.py page NAME             sidebar item NAME is selected and its page controls are present
   atspi.py settings              the Settings navigation is showing (General selected)
   atspi.py has ROLE NAME         a control with that role and accessible name exists (ROLE: entry, tab, button)
   atspi.py walk                  activate each sidebar item through the accessibility API and check its page
+  atspi.py notice                the post-update notice is on screen (its "What's new" button), UPD-008
 
 Needs a session bus with the AT-SPI bus enabled (run.sh starts both) and python3-gi with the Atspi
-typelib. Prints one `name PASS|FAIL detail` line per check, like run.sh, and exits 1 on a FAIL.
+typelib. Prints one `name PASS|FAIL detail` line per check, like run.sh, and exits 1 on a FAIL. A crash prints a FAIL.
 SMOKE_OUT + SMOKE_SHOT (a screenshot command such as "import -window root") make `walk` keep a
 screenshot per page. Only controls with an accessible name can be asserted: the rows and the icon
 buttons of the tables have none, so what a list contains is checked on the screenshot, not here.
@@ -36,10 +37,16 @@ ROLE = {"entry": R.ENTRY, "tab": R.PAGE_TAB, "button": R.PUSH_BUTTON, "item": R.
 
 # Named controls per page of the --demo profile; a rename in crates/dockering/src must be mirrored here.
 PAGES = {
-    "Containers": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Group by: Compose project"), (R.ENTRY, "Search…")],
-    "Images": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Pull"), (R.ENTRY, "Search…")],
-    "Volumes": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Create"), (R.ENTRY, "Search…")],
-    "Networks": [(R.ENTRY, "Search…")],
+    "Containers": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Group by: Compose project"), (R.ENTRY, "Search\u2026")],
+    "Images": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Pull"), (R.ENTRY, "Search\u2026")],
+    "Volumes": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Create"), (R.ENTRY, "Search\u2026")],
+    "Networks": [(R.ENTRY, "Search\u2026")],
+}
+# controls that belong to one page only: they must be absent from the pages that do not own them
+ONLY_ON = {
+    "Containers": [(R.PUSH_BUTTON, "Group by: Compose project"), (R.PAGE_TAB, "Running"), (R.PAGE_TAB, "Stopped")],
+    "Images": [(R.PUSH_BUTTON, "Pull"), (R.PAGE_TAB, "Dangling")],
+    "Volumes": [(R.PUSH_BUTTON, "Create")],
 }
 ORDER = ["Images", "Volumes", "Networks", "Containers"]
 failed = 0
@@ -116,9 +123,15 @@ def missing_controls(page):
     return [f"{Atspi.role_get_name(r)} {n!r}" for r, n in expected if n not in {x.get_name() for x in named(r)}]
 
 
+def foreign_controls(page):
+    own = set(ONLY_ON.get(page, []))
+    return [f"{Atspi.role_get_name(r)} {n!r}" for owner, items in ONLY_ON.items() if owner != page for r, n in items
+            if (r, n) not in own and n in {x.get_name() for x in named(r)}]
+
+
 def settled_missing(page):
-    wait_for(lambda: not missing_controls(page), 5)
-    return missing_controls(page)
+    wait_for(lambda: not missing_controls(page) and not foreign_controls(page), 5)
+    return missing_controls(page) + [f"{c} (belongs to another page)" for c in foreign_controls(page)]
 
 
 def shot(label):
@@ -150,15 +163,25 @@ def cmd_has(role, name):
     check(f"has_{role}", bool(ok), repr(name))
 
 
+def cmd_notice():
+    ok = wait_for(lambda: any(n.get_name() == "What's new" for n in named(R.PUSH_BUTTON)))
+    check("notice_whats_new", bool(ok), "What's new button shown" if ok else "no What's new button: the post-update notice did not appear")
+
+
 def cmd_walk():
     for page in ORDER:
-        item = sidebar_item(page)
-        acted = item.get_action_iface().do_action(0) if item is not None else False
-        ok = wait_for(lambda: page_is(page))
-        time.sleep(0.8)  # let the page paint before the screenshot
-        shot(page.lower())
-        missing = settled_missing(page)
-        check(f"click_{page}", bool(acted and ok) and not missing,
+        try:
+            item = sidebar_item(page)
+            actions = item.get_action_iface() if item is not None else None
+            acted = bool(actions and actions.do_action(0))
+            ok = wait_for(lambda: page_is(page))
+            time.sleep(0.8)  # let the page paint before the screenshot
+            shot(page.lower())
+            missing = settled_missing(page)
+        except Exception as error:
+            check(f"click_{page}", False, f"crashed: {type(error).__name__}: {str(error)[:100]}")
+            continue
+        check(f"click_{page}", acted and bool(ok) and not missing,
               "activated, selected, controls present" if acted and ok and not missing
               else f"action={acted} selected={bool(ok)} missing={missing}")
 
@@ -168,6 +191,14 @@ def main(argv):
         print(__doc__)
         return 2
     cmd, args = argv[0], argv[1:]
+    try:
+        run(cmd, args)
+    except Exception as error:
+        check(f"atspi_{cmd}", False, f"crashed: {type(error).__name__}: {str(error)[:120]}")
+    return 1 if failed else 0
+
+
+def run(cmd, args):
     if cmd == "tree":
         cmd_tree()
     elif cmd == "page":
@@ -178,10 +209,10 @@ def main(argv):
         cmd_has(args[0], " ".join(args[1:]))
     elif cmd == "walk":
         cmd_walk()
+    elif cmd == "notice":
+        cmd_notice()
     else:
-        print(__doc__)
-        return 2
-    return 1 if failed else 0
+        raise ValueError(f"unknown command {cmd!r}")
 
 
 if __name__ == "__main__":

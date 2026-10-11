@@ -1,4 +1,4 @@
-"""REL-070..077: the host side of the Linux smoke test, checked without Docker or a network.
+"""REL-070..079: the host side of the Linux smoke test and the shared download script, checked without Docker or a network.
 
 Run with python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'.
 
@@ -35,7 +35,7 @@ BASH = (
     if os.name == "nt"
     else shutil.which("bash")
 )
-SPEC_IDS = [f"REL-07{n}" for n in range(8)]
+SPEC_IDS = [f"REL-07{n}" for n in range(10)]
 
 
 def shell_path(path):
@@ -100,6 +100,38 @@ case "${1:-} ${2:-}" in
   for p in "${pats[@]}"; do
     if [ -f "$FAKE_ASSETS/$p" ]; then cp "$FAKE_ASSETS/$p" "$dir/$p"; fi
   done
+  ;;
+"run view")
+  printf '%s\t%s\t%s\t%s\t%s\n' "${FAKE_RUN_WORKFLOW:-111}" "${FAKE_RUN_EVENT:-push}" "${FAKE_RUN_CONCLUSION:-success}" "${FAKE_RUN_BRANCH:-v0.2.0}" "${FAKE_RUN_SHA:-2d25f6c108f2749f7a2225b4b968742516713d23}"
+  ;;
+"run download")
+  shift 3
+  dir=""
+  name=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    --name) name=$2; shift 2 ;;
+    *) shift ;;
+    esac
+  done
+  noise
+  if [ "${FAKE_BUNDLE_FAIL:-}" = 1 ] || [ "$name" != "release-review-${FAKE_BUNDLE_VERSION:-0.2.0}" ]; then
+    echo "no valid artifacts found to download" >&2
+    exit 1
+  fi
+  mkdir -p "$dir"
+  for f in "$FAKE_ASSETS"/*; do
+    b=${f##*/}
+    case ",${FAKE_BUNDLE_OMIT:-}," in *",$b,"*) continue ;; esac
+    cp "$f" "$dir/$b"
+  done
+  ;;
+"api repos/"*)
+  case "$2" in
+  */compare/*) printf '%s\n' "${FAKE_COMPARE_STATUS-behind}" ;;
+  *) printf '%s\n' "${FAKE_RELEASE_WORKFLOW:-111}" ;;
+  esac
   ;;
 "attestation verify")
   noise
@@ -168,6 +200,7 @@ class Sandbox:
             "GH_TOKEN",
             "GITHUB_TOKEN",
             "ARCH",
+            "PLATFORM",
             "SMOKE_LIBC_FLOOR",
             "SMOKE_PULL_DELAY",
             "SMOKE_NOKEYS",
@@ -210,7 +243,7 @@ class FakeRelease:
     def __init__(self, directory):
         self.dir = directory
         names = package_names() + package_names("aarch64")
-        names += ["Dockering-Setup-x64.exe", "Dockering-x86_64.dmg", "RELEASE_NOTES.md", "dockering-update.json"]
+        names += ["Dockering-Setup-x64.exe", "Dockering-x86_64.dmg", "Dockering-aarch64.dmg", "RELEASE_NOTES.md", "dockering-update.json"]
         self.files = {name: f"bytes of {name}\n".encode() for name in names}
         for name, data in self.files.items():
             (self.dir / name).write_bytes(data)
@@ -399,6 +432,101 @@ class FetchScriptTests(unittest.TestCase):
                 self.release.edit_sums(edit)
                 self.assertRejected(self.fetch(), "SHA256SUMS does not list exactly three x86_64 packages")
 
+    def test_rel_078_macos_fetches_the_dmg_of_the_architecture_and_nothing_else(self):
+        for arch in ("aarch64", "x86_64"):
+            with self.subTest(arch):
+                shutil.rmtree(self.dest, ignore_errors=True)
+                self.sb.log.unlink(missing_ok=True)
+                result = self.fetch(PLATFORM="macos", ARCH=arch)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "tag=v0.2.0\nversion=0.2.0\n")
+                self.assertEqual(
+                    sorted(path.name for path in self.dest.iterdir()),
+                    sorted([f"Dockering-{arch}.dmg", "SHA256SUMS", "packages.sha256"]),
+                )
+                self.assertEqual(read(self.dest / "packages.sha256").splitlines()[0][66:], f"Dockering-{arch}.dmg")
+                (call,) = self.gh_calls("release", "download")
+                patterns = {call[i + 1] for i, word in enumerate(call) if word == "--pattern"}
+                self.assertEqual(patterns, {f"Dockering-{arch}.dmg", "SHA256SUMS"})
+                (verify,) = self.gh_calls("attestation", "verify")
+                self.assertEqual(Path(verify[2]).name, f"Dockering-{arch}.dmg")
+                self.assertIn("--deny-self-hosted-runners", verify)
+                self.assertIn("refs/tags/v0.2.0", verify)
+
+    def test_rel_078_macos_needs_its_dmg_listed_exactly_once(self):
+        line = self.release.line("Dockering-aarch64.dmg")
+        for label, edit in {
+            "the dmg is not listed": lambda text: text.replace(line, ""),
+            "the dmg is listed twice": lambda text: text + line,
+        }.items():
+            with self.subTest(label):
+                self.release.edit_sums(edit)
+                self.assertRejected(self.fetch(PLATFORM="macos", ARCH="aarch64"), "SHA256SUMS does not list exactly one macOS aarch64 package")
+                self.assertEqual(self.gh_calls("attestation", "verify"), [])
+
+    def test_rel_078_macos_refuses_a_tampered_dmg_and_an_unknown_platform(self):
+        (self.assets / "Dockering-aarch64.dmg").write_bytes(b"tampered")
+        self.assertRejected(self.fetch(PLATFORM="macos", ARCH="aarch64"), "checksum mismatch")
+        self.assertEqual(self.gh_calls("attestation", "verify"), [])
+        self.assertRejected(self.fetch(PLATFORM="windows"), "PLATFORM must be linux or macos")
+
+    def test_rel_079_a_release_run_supplies_the_files_before_publication(self):
+        result = self.fetch("run:1234")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "tag=v0.2.0\nversion=0.2.0\n")
+        (download,) = self.gh_calls("run", "download")
+        self.assertEqual(download[2], "1234")
+        self.assertEqual(download[download.index("--name") + 1], "release-review-0.2.0")
+        self.assertEqual(self.gh_calls("release", "download"), [], "no published release is needed")
+        for name in package_names():
+            self.assertEqual((self.dest / name).read_bytes(), self.release.files[name])
+        self.assertFalse((self.dest / ".bundle").exists(), "the unpacked bundle is not left behind")
+        calls = self.gh_calls("attestation", "verify")
+        self.assertEqual(sorted(Path(call[2]).name for call in calls), sorted(package_names()))
+        for call in calls:
+            self.assertEqual(call[call.index("--source-ref") + 1], "refs/tags/v0.2.0")
+            self.assertEqual(call[call.index("--signer-workflow") + 1], "owner/name/.github/workflows/release.yml")
+
+    def test_rel_079_only_a_successful_tag_run_of_the_release_workflow_counts(self):
+        for label, env, message in [
+            ("a run of another workflow", {"FAKE_RUN_WORKFLOW": "222"}, "run 1234 is not a Release workflow run"),
+            ("a branch rehearsal", {"FAKE_RUN_EVENT": "workflow_dispatch", "FAKE_RUN_BRANCH": "main"}, "run 1234 was not started by a tag push (event workflow_dispatch)"),
+            ("a failed run", {"FAKE_RUN_CONCLUSION": "failure"}, "run 1234 did not succeed (failure)"),
+            ("a run of a branch", {"FAKE_RUN_BRANCH": "main"}, "unexpected release tag"),
+        ]:
+            with self.subTest(label):
+                self.sb.log.unlink(missing_ok=True)
+                self.assertRejected(self.fetch("run:1234", **env), message)
+                self.assertEqual(self.gh_calls("run", "download"), [], "nothing is downloaded from a run that does not count")
+                self.assertEqual(self.gh_calls("attestation", "verify"), [])
+
+    def test_rel_079_a_tag_on_a_side_branch_is_refused(self):
+        for status in ("identical", "behind"):
+            with self.subTest(status):
+                self.sb.log.unlink(missing_ok=True)
+                self.assertEqual(self.fetch("run:1234", FAKE_COMPARE_STATUS=status).returncode, 0)
+                (compare,) = [call for call in self.sb.calls() if call[:1] == ["api"] and "compare" in call[1]]
+                self.assertEqual(compare[1], "repos/owner/name/compare/main...2d25f6c108f2749f7a2225b4b968742516713d23")
+        for status in ("ahead", "diverged", ""):
+            with self.subTest(status):
+                self.sb.log.unlink(missing_ok=True)
+                self.assertRejected(self.fetch("run:1234", FAKE_COMPARE_STATUS=status), "the commit of run 1234 is not on main")
+                self.assertEqual(self.gh_calls("run", "download"), [], "nothing is downloaded from a commit outside main")
+        self.assertRejected(self.fetch("run:1234", FAKE_RUN_SHA="not-a-sha"), "run 1234 has no usable head commit")
+
+    def test_rel_079_a_missing_or_damaged_bundle_is_refused(self):
+        self.assertRejected(self.fetch("run:1234", FAKE_BUNDLE_FAIL="1"), "cannot download release-review-0.2.0 of run 1234")
+        self.assertRejected(self.fetch("run:1234", FAKE_BUNDLE_OMIT="Dockering-x86_64.tar.gz"), "release-review-0.2.0 has no file Dockering-x86_64.tar.gz")
+        (self.assets / "Dockering-x86_64.deb").write_bytes(b"tampered")
+        self.assertRejected(self.fetch("run:1234"), "checksum mismatch")
+        self.assertEqual(self.gh_calls("attestation", "verify"), [])
+
+    def test_rel_079_a_malformed_run_id_is_not_taken_for_a_tag(self):
+        for source in ("run:", "run:12a", "run:1 2", "run:-1"):
+            with self.subTest(source):
+                self.assertRejected(self.fetch(source), "unexpected release tag")
+        self.assertEqual(self.gh_calls("run", "view"), [])
+
     def test_rel_071_requires_each_package_exactly_once(self):
         deb = self.release.line("Dockering-x86_64.deb")
         app = self.release.line("Dockering-x86_64.AppImage")
@@ -517,6 +645,22 @@ class LegScriptTests(unittest.TestCase):
         result = self.leg()
         self.assertRefused(result, 1)
         self.assertIn("do not match packages.sha256", result.stderr)
+
+    def test_rel_071_a_shortened_or_damaged_checksum_list_does_not_run(self):
+        lines = (self.pkg / "packages.sha256").read_text(encoding="utf-8").splitlines(keepends=True)
+        deb = next(line for line in lines if line.rstrip().endswith("Dockering-x86_64.deb"))
+        for label, text, message in [
+            ("one entry only", lines[0], "does not list"),
+            ("two entries", "".join(lines[:2]), "does not list"),
+            ("an entry listed twice", "".join(lines) + deb, "exactly once"),
+            ("a malformed extra line", "".join(lines) + "not a checksum line\n", "must hold exactly three entries"),
+            ("an empty list", "", "does not list"),
+        ]:
+            with self.subTest(label):
+                (self.pkg / "packages.sha256").write_text(text, encoding="utf-8", newline="\n")
+                result = self.leg()
+                self.assertRefused(result, 1)
+                self.assertIn(message, result.stderr)
 
     def test_rel_071_a_leg_without_the_checksum_list_does_not_run(self):
         (self.pkg / "packages.sha256").unlink()
@@ -820,7 +964,7 @@ class WorkflowContractTests(ContractCase):
             return sorted(line.strip() for line in block(text, "permissions", indent).split("\n") if line.strip())
 
         self.assertEqual(granted(self.text, 0), ["contents: read"])
-        self.assertEqual(granted(self.jobs["fetch"], 4), ["attestations: read", "contents: read"])
+        self.assertEqual(granted(self.jobs["fetch"], 4), ["actions: read", "attestations: read", "contents: read"])
         self.assertEqual(granted(self.jobs["alert"], 4), ["contents: read", "issues: write"])
         self.assertEqual(self.text.count(": write"), 1, "the alert's issues: write is the only write permission")
         for name in self.jobs.keys() - {"fetch", "alert"}:
@@ -845,14 +989,30 @@ class WorkflowContractTests(ContractCase):
 
     def test_rel_071_the_fetch_job_verifies_before_the_legs_get_the_packages(self):
         fetch = self.jobs["fetch"]
-        self.assertHas('fetch.sh "$REQUESTED_TAG" pkg >> "$GITHUB_OUTPUT"', fetch, "job fetch")
-        self.assertHas("REQUESTED_TAG: ${{ github.event.release.tag_name || inputs.tag || 'latest' }}", fetch, "job fetch")
+        self.assertHas('fetch.sh "$SOURCE" pkg >> "$GITHUB_OUTPUT"', fetch, "job fetch")
+        self.assertHas(
+            "SOURCE: ${{ github.event.release.tag_name || (inputs.run && format('run:{0}', inputs.run)) || inputs.tag || 'latest' }}",
+            fetch,
+            "job fetch",
+        )
         for path in [*(f"pkg/{name}" for name in package_names()), "pkg/packages.sha256"]:
             self.assertHas(path, fetch, "the packages artifact of job fetch")
         self.assertFound(r"name: packages\b", fetch, "job fetch")
         smoke = self.jobs["smoke"]
         self.assertFound(r"actions/download-artifact@\S+\n\s+with:\n\s+name: packages\n\s+path: pkg", smoke, "job smoke")
         self.assertHas("scripts/linux-smoke/leg.sh", smoke, "job smoke")
+
+    def test_rel_079_a_dispatch_can_test_an_unpublished_release_run_and_then_skips_the_self_test(self):
+        on = block(self.text, "on")
+        inputs = block(on, "workflow_dispatch", 2)
+        self.assertFound(r"\n\s+run:\n(?:\s+.*\n)*?\s+required: false\n\s+type: string", inputs, "dispatch input run")
+        self.assertHas("inputs.run", self.text.split("\njobs:")[0], "run-name and concurrency")
+        self.assertFound(
+            r"if: github\.event_name == 'pull_request' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.run == ''\)",
+            self.jobs["selftest"],
+            "job selftest (it tests the scripts, not a release)",
+        )
+        self.assertHas("actions: read", self.jobs["fetch"], "job fetch (it reads the release run's artifact)")
 
     def test_rel_072_the_legs_pass_the_package_kind_of_the_matrix_to_the_leg_script(self):
         smoke = self.jobs["smoke"]
@@ -975,7 +1135,7 @@ class ScriptContractTests(ContractCase):
         self.assertEqual(sorted(arch - words(entry_arch)), [], "README names Arch packages no leg installs")
 
     def test_rel_073_a_missing_floor_fails_unless_the_workflow_says_warn(self):
-        self.assertFound(r'\[ "\$\{SMOKE_LIBC_FLOOR:-fail\}" = warn \] && st=INFO \|\| st=FAIL', self.run_sh, "run.sh")
+        self.assertFound(r'st=FAIL\n\s+\[ "\$\{SMOKE_LIBC_FLOOR:-fail\}" = warn \] && \[ -n "\$need" \] && \[ -z "\$floor" \] && st=INFO', self.run_sh, "run.sh")
         self.assertHas('dpkg --compare-versions "$floor" ge "$need"', self.run_sh, "run.sh")
         self.assertHas("objdump -T", self.run_sh, "run.sh")
         self.assertHas("-e SMOKE_LIBC_FLOOR", read(LEG), "leg.sh (the setting must reach the container)")
@@ -1080,7 +1240,8 @@ class ScriptContractTests(ContractCase):
     def test_rel_075_the_upgrade_scenario_launches_the_real_mode_on_an_older_profile(self):
         start = self.run_sh.index("upgrade)")
         upgrade = self.run_sh[start : self.run_sh.index(";;", start)]
-        self.assertHas('{"updates":{"last_run_version":"0.0.1"}}', upgrade, "the upgrade scenario")
+        self.assertHas('"last_run_version":"%s"', upgrade, "the upgrade scenario")
+        self.assertHas("${SMOKE_UPGRADE_FROM:-0.0.1}", upgrade, "the upgrade scenario")
         self.assertLacks("--demo", upgrade, "the upgrade scenario")
         self.assertHas("ARGS=()", self.run_sh, "run.sh")
 
@@ -1088,7 +1249,9 @@ class ScriptContractTests(ContractCase):
         self.assertFound(r"check no_crash PASS\b", self.run_sh, "run.sh")
         self.assertHas("panicked", self.run_sh, "run.sh")
         self.assertHas("crash-*.txt", self.run_sh, "run.sh")
-        self.assertFound(r"# known headless noise[^\n]*\n\s*bad=", self.run_sh, "run.sh")
+        self.assertFound(r"# known headless noise[^\n]*\nnoise=\(", self.run_sh, "run.sh")
+        self.assertFound(r'bad=\$\(grep -E . \(ERROR\|WARN\) . "\$OUT/dockering\.log"[^\n]*grep -v -E "\$noise_re"', self.run_sh, "run.sh")
+        self.assertFound(r"check log_start FAIL", self.run_sh, "run.sh")
         self.assertFound(r"check log_clean FAIL", self.run_sh, "run.sh")
 
     def test_rel_076_every_scenario_keeps_its_results_screenshots_and_logs(self):

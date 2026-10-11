@@ -18,9 +18,9 @@ export LANG=C.UTF-8 DEBIAN_FRONTEND=noninteractive
 t0=$(date +%s)
 at() { echo $(($(date +%s) - t0)); }
 die() { echo "SETUP FAILED: $*"; exit 3; }
-retry() { local n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 3 ] && return 1; sleep 5; done; }
+retry() { local n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 3 ] && return 1; sleep 15; done; }
 
-# runtime libraries first (the .deb's Depends, in each distro's names), then the harness tools
+# the package and its runtime libraries as the README lists them, then a gate, then the Vulkan driver and the harness tools
 case "$ID" in
 ubuntu)
   retry apt-get update -qq || die "apt-get update"
@@ -32,26 +32,45 @@ ubuntu)
     retry apt-get install -y -qq --no-install-recommends libvulkan1 libwayland-client0 libxkbcommon0 libxkbcommon-x11-0 \
       libx11-xcb1 libxcb1 libfontconfig1 libfreetype6 libzstd1 >/tmp/apt.log 2>&1 || { tail -n 20 /tmp/apt.log; die "apt runtime libraries"; }
   fi
+  ;;
+fedora)
+  retry dnf -y -q install vulkan-loader mesa-vulkan-drivers libwayland-client libxkbcommon libxkbcommon-x11 libX11-xcb \
+    libxcb fontconfig freetype libzstd tar gzip >/tmp/dnf.log 2>&1 || { tail -n 20 /tmp/dnf.log; die "dnf runtime libraries"; }
+  ;;
+arch)
+  retry pacman -Syu --noconfirm --needed vulkan-icd-loader vulkan-swrast wayland libxkbcommon libxkbcommon-x11 libxcb \
+    libx11 fontconfig freetype2 zstd >/tmp/pacman.log 2>&1 || { tail -n 20 /tmp/pacman.log; die "pacman runtime libraries"; }
+  ;;
+*) die "unsupported distro $ID" ;;
+esac
+
+BINARY=/usr/bin/dockering
+if [ "$KIND" = tar ]; then
+  rm -rf /opt/dk
+  mkdir -p /opt/dk
+  tar -xzf "$PKG_DIR/Dockering-$(uname -m).tar.gz" -C /opt/dk || die "unpacking the .tar.gz"
+  BINARY=$(echo /opt/dk/dockering-*/dockering)
+fi
+bash "$(dirname "$0")/ldd-gate.sh" "$BINARY" || die "the package leaves linked libraries unresolved"
+
+case "$ID" in
+ubuntu)
   retry apt-get install -y -qq --no-install-recommends mesa-vulkan-drivers >>/tmp/apt.log 2>&1 || die "apt mesa-vulkan-drivers"
   retry apt-get install -y -qq --no-install-recommends xvfb xauth xdotool imagemagick x11-utils sway grim wtype \
     dbus dbus-daemon at-spi2-core python3-gi gir1.2-atspi-2.0 libglib2.0-bin \
     vulkan-tools desktop-file-utils binutils fonts-dejavu-core procps ca-certificates >>/tmp/apt.log 2>&1 || { tail -n 20 /tmp/apt.log; die "apt harness"; }
   ;;
 fedora)
-  retry dnf -y -q install vulkan-loader mesa-vulkan-drivers libwayland-client libxkbcommon libxkbcommon-x11 libX11-xcb \
-    libxcb fontconfig freetype libzstd tar gzip >/tmp/dnf.log 2>&1 || { tail -n 20 /tmp/dnf.log; die "dnf runtime libraries"; }
   retry dnf -y -q install xorg-x11-server-Xvfb xorg-x11-xauth xdotool ImageMagick xdpyinfo xprop xwininfo xkbcomp \
     xkeyboard-config sway grim wtype dbus-daemon at-spi2-core python3-gobject gobject-introspection glib2 \
     vulkan-tools desktop-file-utils dejavu-sans-fonts dejavu-sans-mono-fonts procps-ng diffutils >>/tmp/dnf.log 2>&1 ||
     { tail -n 20 /tmp/dnf.log; die "dnf harness"; }
   ;;
 arch)
-  retry pacman -Syu --noconfirm --needed vulkan-icd-loader vulkan-swrast wayland libxkbcommon libxkbcommon-x11 libxcb \
-    libx11 fontconfig freetype2 zstd xorg-server-xvfb xorg-xauth xdotool imagemagick xorg-xdpyinfo xorg-xwininfo \
+  retry pacman -S --noconfirm --needed xorg-server-xvfb xorg-xauth xdotool imagemagick xorg-xdpyinfo xorg-xwininfo \
     xorg-xprop xorg-xkbcomp xkeyboard-config sway grim wtype dbus at-spi2-core python-gobject glib2 \
-    vulkan-tools desktop-file-utils ttf-dejavu procps-ng diffutils >/tmp/pacman.log 2>&1 || { tail -n 20 /tmp/pacman.log; die "pacman"; }
+    vulkan-tools desktop-file-utils ttf-dejavu procps-ng diffutils >>/tmp/pacman.log 2>&1 || { tail -n 20 /tmp/pacman.log; die "pacman harness"; }
   ;;
-*) die "unsupported distro $ID" ;;
 esac
 echo "== $PRETTY_NAME: setup done after $(at)s"
 # selftest.sh installs once and then runs its own scenarios; leg.sh never passes this variable on

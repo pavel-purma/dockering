@@ -4,7 +4,8 @@
 #   run.sh <deb|tar|appimage> <demo|upgrade> <x11|wayland> [label]
 # env:  EXPECTED_VERSION  required, for example 0.2.0
 #       PKG_DIR           where the packages are mounted (default /pkg)
-#       SMOKE_LIBC_FLOOR  warn: a missing .deb glibc floor is reported as INFO (default: FAIL)
+#       SMOKE_LIBC_FLOOR  warn: a plain libc6 dependency of the .deb is reported as INFO (default: FAIL)
+#       SMOKE_UPGRADE_FROM  version the upgrade profile was last run with (default 0.0.1)
 #       SMOKE_NOKEYS=1    self-test: key presses are discarded, so every keys_* check must FAIL
 #       SMOKE_NOKEYS=first  self-test: the first press of each chord is discarded, so each keys_* check needs its retry
 # Writes /out/<distro>-<kind>-<scenario>-<display>[-label]/ (results.txt, captioned screenshots, logs)
@@ -20,6 +21,7 @@ LABEL="${4:-}"
 PKG_DIR="${PKG_DIR:-/pkg}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 LEAD_MS=600 # Wayland: a fresh virtual keyboard needs time before the compositor routes its first key
+NAV_MIN_PX=1500 # a page switch changes at least this many pixels (the smallest seen is 9576); idle noise stays under 500
 
 # the distro's file, outside this repo
 # shellcheck source=/dev/null
@@ -35,6 +37,13 @@ RESULTS="$OUT/results.txt"
 : >"$RESULTS"
 check() { printf '%-22s %-5s %s\n' "$1" "$2" "${3:-}" | tee -a "$RESULTS"; } # name PASS|FAIL|INFO detail
 first() { local f; for f in "$@"; do [ -e "$f" ] && { printf '%s\n' "$f"; return 0; }; done; return 1; } # first existing path
+# known headless noise: no pointer on Xvfb, no cursor theme, no desktop portal on the session bus
+noise=(
+  ' ERROR gpui_linux::linux::x11::client: Found no xinput mouse pointers\.'
+  ' WARN gpui_linux::linux::platform: X11: error loading cursor icon'
+  ' WARN \{\}\{task_name="org\.freedesktop\.portal\.Settings proxy caching"\}: zbus::proxy: Failed to populate properties cache via GetAll: org\.freedesktop\.DBus\.Error\.[A-Za-z]+'
+)
+noise_re=$(IFS='|'; echo "${noise[*]}")
 
 # captions are added on exit, so the checks see raw frames; a frame that cannot be captioned stays as taken
 if command -v magick >/dev/null 2>&1; then IM=(magick); else IM=(convert); fi
@@ -86,11 +95,10 @@ else
   check version FAIL "'$ver', expected 'dockering $EXPECTED_VERSION'"
 fi
 if [ "$KIND" != appimage ]; then
-  unresolved=$(ldd "${BIN[0]}" 2>&1 | grep -c 'not found')
-  if [ "$unresolved" -eq 0 ]; then
+  if unresolved=$(bash "$HERE/ldd-gate.sh" "${BIN[0]}" 2>&1); then
     check libraries PASS "ldd resolves every library"
   else
-    check libraries FAIL "$unresolved unresolved"
+    check libraries FAIL "$(printf '%s' "$unresolved" | head -n 3 | tr -s ' \t\n' ' ' | cut -c1-160)"
   fi
   case "$KIND" in
   deb)
@@ -111,10 +119,10 @@ if [ "$KIND" != appimage ]; then
   else
     check install_files FAIL "missing: ${missing[*]}"
   fi
-  if desktop-file-validate "$desktop" >/dev/null 2>&1; then
+  if invalid=$(desktop-file-validate "$desktop" 2>&1); then
     check desktop_entry PASS "$(basename "$desktop")"
   else
-    check desktop_entry FAIL "$desktop"
+    check desktop_entry FAIL "$desktop: $(printf '%s' "$invalid" | head -n 1 | cut -c1-120)"
   fi
 fi
 if [ "$KIND" = deb ]; then
@@ -125,7 +133,8 @@ if [ "$KIND" = deb ]; then
   if [ -n "$need" ] && [ -n "$floor" ] && dpkg --compare-versions "$floor" ge "$need"; then
     check libc_floor PASS "$declared"
   else
-    [ "${SMOKE_LIBC_FLOOR:-fail}" = warn ] && st=INFO || st=FAIL
+    st=FAIL
+    [ "${SMOKE_LIBC_FLOOR:-fail}" = warn ] && [ -n "$need" ] && [ -z "$floor" ] && st=INFO
     check libc_floor "$st" "declares $declared, the binary needs glibc ${need:-?}"
   fi
 fi
@@ -137,7 +146,7 @@ demo) ARGS=(--demo) ;; # a populated FakeEngine: no container engine needed
 upgrade)
   # a profile from an older version: the first launch shows the "Updated to" notice (UPD-008)
   mkdir -p "$HOME/.local/share/dockering"
-  echo '{"updates":{"last_run_version":"0.0.1"}}' >"$HOME/.local/share/dockering/state.json"
+  printf '{"updates":{"last_run_version":"%s"}}\n' "${SMOKE_UPGRADE_FROM:-0.0.1}" >"$HOME/.local/share/dockering/state.json"
   ;;
 esac
 
@@ -149,9 +158,15 @@ gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
   --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled '<true>' >/dev/null 2>&1
 # one atspi.py subcommand into ATSPI_OUT; no output counts as a FAIL
 atspi_run() {
-  ATSPI_OUT=$(python3 -W ignore "$HERE/atspi.py" "$@" 2>"$OUT/atspi.err")
+  local status
+  ATSPI_OUT=$(timeout 120 python3 -W ignore "$HERE/atspi.py" "$@" 2>"$OUT/atspi.err")
+  status=$?
   if [ -z "$ATSPI_OUT" ]; then
-    ATSPI_OUT="atspi_$1 FAIL atspi.py printed nothing: $(tail -n 1 "$OUT/atspi.err" | cut -c1-120)"
+    ATSPI_OUT="atspi_$1 FAIL atspi.py printed nothing (exit $status): $(tail -n 1 "$OUT/atspi.err" | cut -c1-120)"
+    return 1
+  fi
+  if [ "$status" -ne 0 ] && ! grep -q ' FAIL ' <<<"$ATSPI_OUT"; then
+    ATSPI_OUT+=$'\n'"atspi_$1 FAIL atspi.py exited with status $status after its last result: $(tail -n 1 "$OUT/atspi.err" | cut -c1-100)"
     return 1
   fi
   ! grep -q ' FAIL ' <<<"$ATSPI_OUT"
@@ -187,6 +202,10 @@ else
   SWAYSOCK=$(first "$XDG_RUNTIME_DIR"/sway-ipc.*.sock)
   export WAYLAND_DISPLAY SWAYSOCK
   unset DISPLAY
+  if [ -z "$WAYLAND_DISPLAY" ] || ! kill -0 $DISP 2>/dev/null; then
+    check sway FAIL "sway did not start: $(head -c 200 "$OUT/sway.log")"
+    exit 1
+  fi
   key() { # xdotool-style chords (ctrl+shift+p) through wtype; one process per chord
     for chord in "$@"; do
       IFS='+' read -ra p <<<"$chord"
@@ -219,6 +238,7 @@ colours() { identify -format '%k' "$1" 2>/dev/null; }
 wait_stable() { # two frames 1 s apart that differ by fewer than 500 px (the demo's spinner moves ~70)
   local limit="${1:-30}" end ae
   end=$(($(date +%s) + limit))
+  rm -f /tmp/_a.png /tmp/_b.png
   shot /tmp/_a.png
   while [ "$(date +%s)" -lt "$end" ]; do
     sleep 1
@@ -238,8 +258,8 @@ stop_app() { # SIGTERM, then SIGKILL: an app stuck without a window must not han
 }
 collect_logs() {
   local f
-  LOG=$(find "$HOME" /tmp -maxdepth 6 -name 'dockering*.log*' 2>/dev/null | head -n 1)
-  [ -n "$LOG" ] && cp "$LOG" "$OUT/dockering.log"
+  : >"$OUT/dockering.log"
+  while IFS= read -r f; do cat "$f" >>"$OUT/dockering.log"; done < <(find "$HOME" /tmp -maxdepth 6 -name 'dockering*.log*' 2>/dev/null | sort)
   for f in "$HOME"/.local/share/dockering/crash-*.txt /tmp/dockering-demo-*/data/crash-*.txt; do
     [ -f "$f" ] && { cp "$f" "$OUT/"; crash="$f"; }
   done
@@ -268,7 +288,7 @@ if [ -z "$wid" ]; then
   fi
   tail -n 15 "$OUT/app.stderr"
   collect_logs
-  grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" 2>/dev/null | grep -v -E 'xinput mouse|cursor icon|system locale' | head -n 3 | cut -c1-200
+  grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" 2>/dev/null | grep -v -E "$noise_re" | head -n 3 | cut -c1-200
   kill $DISP 2>/dev/null
   echo "== $OUT: $(grep -c ' PASS ' "$RESULTS") passed, $(grep -c ' FAIL ' "$RESULTS") failed"
   exit 1
@@ -320,6 +340,7 @@ if [ "$SCENARIO" = demo ]; then
   record "$ATSPI_OUT"
   # each chord must land on its page (checked in the accessibility tree); one retry for a dropped key
   prev="$OUT/01-first-frame.png"
+  current=Containers
   n=1
   for entry in "ctrl+2 Images" "ctrl+3 Volumes" "ctrl+4 Networks" "ctrl+comma Settings" "ctrl+1 Containers"; do
     chord=${entry% *}
@@ -331,12 +352,31 @@ if [ "$SCENARIO" = demo ]; then
       nav_key "$chord"
       ATSPI_TIMEOUT=6 atspi_run "${args[@]}" && break
     done
+    arrived=1
+    grep -q ' FAIL ' <<<"$ATSPI_OUT" && arrived=0
     ATSPI_OUT=$(sed "1s/^[A-Za-z_]*/keys_$chord/" <<<"$ATSPI_OUT")
     [ "$attempt" -gt 1 ] && grep -q ' PASS ' <<<"$ATSPI_OUT" && ATSPI_OUT="$ATSPI_OUT (second try)"
     record "$ATSPI_OUT"
     wait_stable 10 >/dev/null
     shot "$f"
-    check "px_$chord" INFO "$(px_diff "$prev" "$f") px changed"
+    px=$(px_diff "$prev" "$f")
+    if [ "$arrived" -eq 1 ] && [ "$page" != "$current" ]; then
+      if [ "${px:-0}" -lt "$NAV_MIN_PX" ]; then
+        sleep 2
+        wait_stable 10 >/dev/null
+        shot "$f"
+        px=$(px_diff "$prev" "$f")
+      fi
+      cols=$(colours "$f")
+      if [ "${px:-0}" -ge "$NAV_MIN_PX" ] && [ "${cols:-0}" -gt 200 ]; then
+        check "render_$chord" PASS "$px px changed, $cols colours"
+      else
+        check "render_$chord" FAIL "the tree shows $page but the frame changed ${px:-0} px (need $NAV_MIN_PX) and has ${cols:-0} colours"
+      fi
+    else
+      check "px_$chord" INFO "${px:-?} px changed"
+    fi
+    [ "$arrived" -eq 0 ] || current=$page
     prev="$f"
   done
   # every sidebar item activated through the accessibility API (no keys, no coordinates)
@@ -344,28 +384,39 @@ if [ "$SCENARIO" = demo ]; then
   record "$ATSPI_OUT"
 fi
 
+# the stub application of the self-test is an AppImage without an accessibility tree
+if [ "$SCENARIO" = upgrade ] && [ "$KIND" != appimage ]; then
+  atspi_run notice
+  record "$ATSPI_OUT"
+fi
+
 # ---- quit ---------------------------------------------------------------------------------------
 step "quit"
-if [ "$DISPLAY_KIND" = x11 ]; then
-  key ctrl+shift+p
-  sleep 1.2
-  typ quit # the command palette's "Quit Dockering"
-  sleep 1.2
-  shot "$OUT/90-quit-palette.png"
-  key Return
-else
-  # what a titlebar click sends (xdg_toplevel close)
-  shot "$OUT/90-before-close.png"
-  swaymsg '[app_id="dev.dockering.Dockering"] kill' >/dev/null 2>&1
-fi
-for _ in $(seq 1 40); do kill -0 $APP 2>/dev/null || break; sleep 0.25; done
 if kill -0 $APP 2>/dev/null; then
-  check clean_quit FAIL "still running 10 s after the close request"
-  stop_app
+  if [ "$DISPLAY_KIND" = x11 ]; then
+    key ctrl+shift+p
+    sleep 1.2
+    typ quit # the command palette's "Quit Dockering"
+    sleep 1.2
+    shot "$OUT/90-quit-palette.png"
+    key Return
+  else
+    # what a titlebar click sends (xdg_toplevel close)
+    shot "$OUT/90-before-close.png"
+    swaymsg '[app_id="dev.dockering.Dockering"] kill' >/dev/null 2>&1
+  fi
+  for _ in $(seq 1 40); do kill -0 $APP 2>/dev/null || break; sleep 0.25; done
+  if kill -0 $APP 2>/dev/null; then
+    check clean_quit FAIL "still running 10 s after the close request"
+    stop_app
+  else
+    wait $APP
+    rc=$?
+    if [ $rc -eq 0 ]; then check clean_quit PASS "exit 0"; else check clean_quit FAIL "exit $rc"; fi
+  fi
 else
   wait $APP
-  rc=$?
-  if [ $rc -eq 0 ]; then check clean_quit PASS "exit 0"; else check clean_quit FAIL "exit $rc"; fi
+  check clean_quit FAIL "the app was gone before the close request (exit $?)"
 fi
 
 # ---- state, crash and log assertions ----------------------------------------------------------------
@@ -378,13 +429,33 @@ else
 fi
 collect_logs
 if [ -z "$crash" ] && ! grep -q 'panicked' "$OUT/app.stderr"; then check no_crash PASS; else check no_crash FAIL "${crash:-panic on stderr}"; fi
-# known headless noise: no pointer on Xvfb, no cursor theme, no locale, no desktop portal
-bad=$(grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" 2>/dev/null |
-  grep -v -E 'Found no xinput mouse pointers|error loading cursor icon|failed to get system locale|task_name="org\.freedesktop\.portal\.Settings proxy caching"' | head -n 5)
-if [ -z "$bad" ]; then check log_clean PASS; else
-  check log_clean FAIL "$(echo "$bad" | head -n 1 | cut -c1-160)"
-  echo "$bad" | cut -c1-200
+if grep -q 'starting version="[^"]*"' "$OUT/dockering.log" 2>/dev/null; then
+  check log_start PASS "$(grep -o 'starting version="[^"]*"' "$OUT/dockering.log" | head -n 1)"
+else
+  check log_start FAIL "no startup line in the log (missing or empty log?)"
 fi
+if [ "$SCENARIO" = demo ]; then
+  if grep -q 'engine connected engine=demo' "$OUT/dockering.log" 2>/dev/null; then
+    check demo_engine PASS "engine connected engine=demo"
+  else
+    check demo_engine FAIL "the demo engine never connected"
+  fi
+fi
+bad=$(grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" 2>/dev/null | grep -v -E "$noise_re" | head -n 5)
+if [ -z "$bad" ]; then check log_clean PASS; else
+  check log_clean FAIL "$(printf '%s\n' "$bad" | head -n 1 | cut -c1-160)"
+  printf '%s\n' "$bad" | cut -c1-200
+fi
+# a skipped or truncated block must not read as green: every scenario has to have reported these checks
+required="version window window_identity first_paint first_frame_stable alive clean_quit state_saved no_crash log_start log_clean"
+if [ "$SCENARIO" = demo ]; then
+  required="$required demo_engine atspi_tree page_Containers keys_ctrl+2 keys_ctrl+3 keys_ctrl+4 keys_ctrl+comma keys_ctrl+1 click_Images click_Volumes click_Networks click_Containers"
+elif [ "$KIND" != appimage ]; then
+  required="$required notice_whats_new"
+fi
+for name in $required; do
+  awk -v n="$name" '$1 == n && ($2 == "PASS" || $2 == "FAIL") { found = 1 } END { exit !found }' "$RESULTS" || check "$name" FAIL "no result was recorded for this check"
+done
 check platform INFO "$PRETTY_NAME; glibc $(ldd --version | head -n 1 | awk '{print $NF}'); $(grep -o -E 'Selected GPU adapter: .*' "$OUT/dockering.log" 2>/dev/null | tail -n 1 | cut -c1-90)"
 kill $DISP 2>/dev/null
 step "done"

@@ -101,6 +101,8 @@ also() {
 second_tries() { [ "$(grep -c 'second try' "$LAST_RESULTS")" -eq "$1" ]; }
 no_process() { ! pgrep -f "$1" >/dev/null; }
 reports() { grep -q "$1" "$LAST_RESULTS"; }
+# the FAIL line of <check> in the last results mentions <text>: the control broke the check for the reason it names
+because() { awk -v c="$1" -v t="$2" '$1 == c && $2 == "FAIL" && index($0, t) { found = 1 } END { exit !found }' "$LAST_RESULTS"; }
 
 # ---- the stub itself must be able to pass ---------------------------------------------------------------------
 # otherwise a control below could fail for a reason of the stub and prove nothing
@@ -112,6 +114,22 @@ control no_keys "keys_ctrl+2 keys_ctrl+3 keys_ctrl+4 keys_ctrl+comma" deb demo x
 control first_press_dropped "" deb demo x11 SMOKE_NOKEYS=first
 also first_press_dropped five_second_tries second_tries 5
 
+# ---- a crash of atspi.py after its first result must not read as green (the walk prints one line per page) ----
+mkdir -p "$STUBS/fake-python"
+cat >"$STUBS/fake-python/python3" <<'EOF'
+#!/bin/sh
+for a in "$@"; do
+  if [ "$a" = walk ]; then
+    echo "click_Images           PASS  activated, selected, controls present"
+    exit 1
+  fi
+done
+exec /usr/bin/python3 "$@"
+EOF
+chmod +x "$STUBS/fake-python/python3"
+control atspi_crash_after_first_result "atspi_walk click_Volumes click_Networks click_Containers" deb demo x11 "PATH=$STUBS/fake-python:$PATH"
+also atspi_crash_after_first_result says_exit_status because atspi_walk "exited with status 1"
+
 # ---- no accessibility tree: the page, key and click checks must not pass on a window alone ------------------
 control app_without_accessibility_tree \
   "atspi_tree page_Containers keys_ctrl+1 keys_ctrl+2 keys_ctrl+3 keys_ctrl+4 keys_ctrl+comma click_Images click_Volumes click_Networks click_Containers" \
@@ -120,13 +138,18 @@ control app_without_accessibility_tree \
 # ---- the launch: no window (REL-074; findings F2 and F3) ----------------------------------------------------------
 control app_hangs_without_window window appimage upgrade x11 "PKG_DIR=$(stub_pkg hang)" SMOKE_STUB=hang
 also app_hangs_without_window leaves_no_process no_process dockering-selftest-hang
+also app_hangs_without_window says_still_running because window "still running"
 control app_exits_before_window window appimage upgrade x11 "PKG_DIR=$(stub_pkg exit)" SMOKE_STUB=exit
+also app_exits_before_window says_status_101 because window "status 101"
+also app_exits_before_window keeps_the_crash_file test -f "/out/${ID}-appimage-upgrade-x11-ctl-app_exits_before_window/crash-0.txt"
 control wayland_app_exits_before_window window appimage upgrade wayland "PKG_DIR=$(stub_pkg exit)" SMOKE_STUB=exit
+also wayland_app_exits_before_window says_status_101 because window "status 101"
 control no_graphics_driver window deb upgrade x11 VK_ICD_FILENAMES=/nonexistent __EGL_VENDOR_LIBRARY_FILENAMES=/nonexistent
 mkdir -p "$STUBS/no-xvfb"
 printf '#!/bin/sh\nexit 1\n' >"$STUBS/no-xvfb/Xvfb"
 chmod +x "$STUBS/no-xvfb/Xvfb"
 control xvfb_does_not_start xvfb deb upgrade x11 "PATH=$STUBS/no-xvfb:$PATH"
+also xvfb_does_not_start says_xvfb_exited because xvfb "Xvfb exited"
 
 # ---- what the window looks like ------------------------------------------------------------------------------
 control wrong_window_class window_identity appimage upgrade x11 "PKG_DIR=$(stub_pkg wrongclass)" SMOKE_STUB=wrongclass
@@ -134,13 +157,23 @@ control blank_window first_paint appimage upgrade x11 "PKG_DIR=$(stub_pkg blank)
 control screen_never_settles first_frame_stable appimage upgrade x11 "PKG_DIR=$(stub_pkg flicker)" SMOKE_STUB=flicker
 # `compare -metric AE` prints 1.014e+06 for a count of this size: it must still read as thousands of changed pixels
 control screen_strobes_fully first_frame_stable appimage upgrade x11 "PKG_DIR=$(stub_pkg strobe)" SMOKE_STUB=strobe
-control app_dies_after_first_frame alive appimage upgrade x11 "PKG_DIR=$(stub_pkg mortal)" SMOKE_STUB=mortal
+control app_dies_after_first_frame "alive clean_quit" appimage upgrade x11 "PKG_DIR=$(stub_pkg mortal)" SMOKE_STUB=mortal
+also app_dies_after_first_frame says_gone_before_close because clean_quit "gone before the close request"
 
 # ---- the exit, the saved state, the crash and log assertions (REL-075) -----------------------------------------
 control exit_status_not_zero clean_quit appimage upgrade x11 "PKG_DIR=$(stub_pkg badexit)" SMOKE_STUB=badexit
+also exit_status_not_zero says_exit_3 because clean_quit "exit 3"
+control app_deaf_to_close_request clean_quit appimage upgrade x11 "PKG_DIR=$(stub_pkg deaf)" SMOKE_STUB=deaf
+also app_deaf_to_close_request says_still_running because clean_quit "still running"
+also app_deaf_to_close_request leaves_no_process no_process "Dockering.AppImage"
 control crash_file_left no_crash appimage upgrade x11 "PKG_DIR=$(stub_pkg crashfile)" SMOKE_STUB=crashfile
 control panic_on_stderr no_crash appimage upgrade x11 "PKG_DIR=$(stub_pkg panic)" SMOKE_STUB=panic
 control error_in_log log_clean appimage upgrade x11 "PKG_DIR=$(stub_pkg logerror)" SMOKE_STUB=logerror
+control warning_in_log log_clean appimage upgrade x11 "PKG_DIR=$(stub_pkg logwarn)" SMOKE_STUB=logwarn
+also warning_in_log names_the_warning because log_clean "injected by the self-test"
+control known_noise_is_ignored "" appimage upgrade x11 "PKG_DIR=$(stub_pkg lognoise)" SMOKE_STUB=lognoise
+control portal_span_hides_nothing log_clean appimage upgrade x11 "PKG_DIR=$(stub_pkg lognoisetrap)" SMOKE_STUB=lognoisetrap
+control log_missing log_start appimage upgrade x11 "PKG_DIR=$(stub_pkg nolog)" SMOKE_STUB=nolog
 control wrong_expected_version "state_saved version" deb upgrade x11 EXPECTED_VERSION=9.9.9
 
 # ---- package defects, made in the installed copy and undone afterwards (REL-072) ------------------------------------
@@ -171,6 +204,25 @@ if selected missing_library; then
   hide_library
   control missing_library "libraries version window" deb upgrade x11
   restore_library
+fi
+
+# ---- the gate entry.sh runs before the harness is installed: a missing library must stop the setup (REL-072) ---------
+KNOWN+="ldd_gate "
+if selected ldd_gate; then
+  hide_library
+  gate_out=$(bash "$HERE/ldd-gate.sh" /usr/bin/dockering 2>&1)
+  gate_rc=$?
+  restore_library
+  if [ "$gate_rc" -eq 1 ] && grep -q 'libxkbcommon-x11' <<<"$gate_out"; then
+    verdict ldd_gate/stops_on_a_missing_library 0 "exit 1, names libxkbcommon-x11"
+  else
+    verdict ldd_gate/stops_on_a_missing_library 1 "exit $gate_rc: $(head -c 120 <<<"$gate_out")"
+  fi
+  if bash "$HERE/ldd-gate.sh" /usr/bin/dockering >/dev/null 2>&1; then
+    verdict ldd_gate/passes_a_complete_install 0 "exit 0"
+  else
+    verdict ldd_gate/passes_a_complete_install 1 "failed on an intact install"
+  fi
 fi
 
 # ---- the glibc floor of the .deb decides between FAIL, INFO and a clean pass (REL-073) -------------------------------

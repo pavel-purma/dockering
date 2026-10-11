@@ -4,7 +4,8 @@
 #   leg.sh <slug> <deb|tar> <pkg-dir> <out-dir> <version> <image> [<image>...]
 # pkg-dir holds the packages and packages.sha256 (fetch.sh writes them); out-dir collects the evidence.
 # Each image is a fallback for the one before it: the first that pulls is used.
-# env:  SMOKE_LIBC_FLOOR  passed to the container (warn: a missing .deb glibc floor is INFO, not FAIL)
+# env:  ARCH              architecture of the packages in pkg-dir (default x86_64, as in fetch.sh)
+#       SMOKE_LIBC_FLOOR  passed to the container (warn: a plain libc6 dependency of the .deb is INFO, not FAIL)
 #       SMOKE_PULL_DELAY  seconds between pull attempts (default 10)
 #       SMOKE_ENTRY       script of this directory that runs inside the container (default entry.sh; selftest.sh
 #                         sets selftest-entry.sh)
@@ -37,8 +38,17 @@ pkg_dir=$(cd "$pkg" 2>/dev/null && pwd) || bad "no such directory: $pkg"
 mkdir -p "$out" || bad "cannot create $out"
 out_dir=$(cd "$out" && pwd) || bad "cannot enter $out"
 
-[ -f "$pkg_dir/packages.sha256" ] || { echo "leg.sh: $pkg_dir/packages.sha256 is missing" >&2; exit 1; }
-(cd "$pkg_dir" && sha256sum -c packages.sha256) || { echo "leg.sh: the packages do not match packages.sha256" >&2; exit 1; }
+list="$pkg_dir/packages.sha256"
+[ -f "$list" ] || { echo "leg.sh: $list is missing" >&2; exit 1; }
+arch=${ARCH:-x86_64}
+arch_re='^[A-Za-z0-9_]+$'
+[[ $arch =~ $arch_re ]] || bad "ARCH has unexpected characters"
+for name in "Dockering-$arch.deb" "Dockering-$arch.AppImage" "Dockering-$arch.tar.gz"; do
+  [ "$(awk -v f="$name" 'substr($0, 67) == f' "$list" | wc -l | tr -d ' ')" -eq 1 ] ||
+    { echo "leg.sh: $list does not list $name exactly once" >&2; exit 1; }
+done
+[ "$(grep -c '' "$list")" -eq 3 ] || { echo "leg.sh: $list must hold exactly three entries" >&2; exit 1; }
+(cd "$pkg_dir" && sha256sum -c --strict packages.sha256) || { echo "leg.sh: the packages do not match packages.sha256" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || { echo "leg.sh: docker is not installed" >&2; exit 1; }
 delay=${SMOKE_PULL_DELAY:-10}

@@ -2,9 +2,9 @@
 
 - **Slug:** `linux-install-smoke-test`
 - **Status:** in progress: built and green on GitHub in draft PR #37 (a pull-request run and a manual dispatch, 2026-10-10); the merge, then the first release and weekly runs, are pending (approved 2026-10-08, built 2026-10-09)
-- **Spec:** [Distribution §8](../../spec/features/distribution.md#8-linux-install-and-launch-smoke-test-rel-070077)
+- **Spec:** [Distribution §8](../../spec/features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079)
 - **Milestone:** after v0.2.0
-- **Requirement IDs:** REL-070…077 (new)
+- **Requirement IDs:** REL-070…077 (new); REL-078 and REL-079 added 2026-10-11 (§10)
 - **Created:** 2026-10-08
 
 ## 1. Goal
@@ -26,8 +26,8 @@ legs: Ubuntu 24.04, Ubuntu 26.04, Fedora (latest), Arch Linux; X11 and Wayland; 
 through the pages; a launch on a profile written by an older version; evidence and a drift alert.
 
 **Out:** GPU rendering (hosted runners have no GPU; Mesa's software Vulkan driver is used); native `.rpm` or Arch
-packages (none are shipped, see question 1); Docker engine scenarios and aarch64 (phase 2); Windows and macOS
-launch checks; changing the app (the findings in §6.5 are follow-ups). The in-process view tests
+packages (none are shipped, see question 1); Docker engine scenarios and aarch64 (phase 2); Windows launch checks
+(macOS is §10); changing the app (the findings in §6.5 are follow-ups). The in-process view tests
 (`gpui::TestAppContext` + `FakeEngine`) stay the place for UI logic: this test runs the *shipped* binary on real
 distributions with a real display server.
 
@@ -198,6 +198,10 @@ run as root inside the container, which is what CI containers do; a non-root var
 | 9 | Phase 2c: `engine` scenario against the runner's Docker (verified once by hand). The assertion is chosen then: log line, accessibility row count, or OCR. | qa-engineer | REL-074 | the app lists the labelled container |
 | 10 | README: a Linux install section with the per-distro runtime packages the legs use (§6.4). | release-engineer | REL-015 | **Done**: the dnf, pacman and apt commands were run in clean containers; links resolve |
 | 11 | Review. | reviewer | all | pending |
+| 12 | macOS (§10): `macos-smoke.yml`, `scripts/macos-smoke/`, `fetch.sh` with `PLATFORM=macos`. | release-engineer | REL-078 | **Built**; not run on GitHub yet, so every check name and role in `run.sh` that was not seen in a probe is unproven |
+| 13 | macOS first runs: a pull-request run and a dispatch with `tag=v0.2.0`; read the screenshots; record the runs here. Then a self-test job for `run.sh` (discarded keys, wrong version, no notice) as for Linux task 3. | release-engineer | REL-078 | green runs, recorded |
+| 14 | Draft gate for both workflows: dispatch input `run`, `fetch.sh run:<id>`; the `/release` skill runs it between steps 10 and 11. | release-engineer | REL-079 | **Built**: the real `gh` fetched the three Linux packages and a `.dmg` from release run 37393414312 and verified their attestations; not yet run through a workflow |
+| 15 | Packaging follow-up (finding F9): make the macOS bundle's signature consistent, then drop `SMOKE_BUNDLE_SEAL: warn`. | release-engineer | REL-078 | the next release's `bundle_seal` passes |
 
 ## 8. Test plan
 
@@ -209,6 +213,8 @@ run as root inside the container, which is what CI containers do; a non-root var
 | REL-074 | CI | green legs; negative controls of task 3 (`SMOKE_NOKEYS=1`, stub apps) |
 | REL-075 | CI | the published build passes the upgrade profile; the withdrawn build fails it (spike); log allowlist reviewed per release |
 | REL-076, 077 | CI | artifacts and summary on the first run; the alert step run once by hand with a throwaway title |
+| REL-078 | CI | `fetch.sh` with `PLATFORM=macos` against the fake `gh` (one `.dmg`, exactly one `SHA256SUMS` line, tampering refused) and against the real release; `run.sh` under bash 3.2 (`bash -n`) and shellcheck 0.9.0; the three legs on GitHub (task 13) |
+| REL-079 | CI | `fetch.sh run:<id>` against the fake `gh` (only a successful tag run of `release.yml`; a damaged or missing bundle refused) and against the real run 37393414312; a workflow contract test for the `run` input |
 
 ## 9. Risks & spikes
 
@@ -223,8 +229,43 @@ run as root inside the container, which is what CI containers do; a non-root var
 | Docker Hub limits and mirror lag. | Registry mirrors (REL-077); digests recorded in each job summary. |
 | A tag cut before the workflow exists never triggers it. | Dispatch with the tag; the weekly run; automatic from the next release. |
 
-## 10. Revision log
+## 10. macOS (REL-078, REL-079)
+
+**Status: built, not run on GitHub.** Same idea as the Linux test, different mechanics. `macos-smoke.yml` runs three legs on hosted
+runners (macOS 15 Apple silicon, macOS 15 Intel, macOS 26 Apple silicon). Each installs the published `.dmg` of its architecture
+the way a user does, then runs `scripts/macos-smoke/run.sh` for three scenarios: `demo`, `upgrade` and `quarantine`. The download
+and verification are `fetch.sh` with `PLATFORM=macos`, so the checksum and attestation gates are the Linux ones.
+
+| Piece | Linux | macOS |
+|---|---|---|
+| Display | Xvfb or headless sway in a container | the runner's own desktop session, no container |
+| Keys and clicks | `xdotool`, `wtype` | System Events through `osascript` |
+| Content | AT-SPI through `python3-gi` | System Events' accessibility tree (roles `AXRow`, `AXButton`) |
+| Screenshots | `import`, `grim` | `screencapture`; `swiftc` builds one helper (`smoketool`) for window lists, pixel counts and captions, because the runner has no ImageMagick |
+| Quit | palette entry or compositor close | `Cmd+Q` |
+
+**What three probe rounds showed** (branch `probe/macos-smoke`, never merged; runs 38048195771, 38059982797 and 38083094001, 2026-10-10):
+
+| # | Finding | Evidence | What the plan does |
+|---|---|---|---|
+| F9 | **The published `.app` is "damaged" on Apple silicon, not merely unnotarized.** The linker's ad-hoc signature is kept, but the bundle has no sealed resources: `codesign --verify --deep --strict` and `spctl` say `code has no resources but signature indicates they must be present`. Gatekeeper's dialog for a quarantined copy then reads "Dockering is damaged and can't be opened. You should move it to the Trash" with **no Open Anyway**. The Intel build is unsigned and gets the ordinary "Apple could not verify" dialog. | Probe round 2: `B-open-quarantined.png` on macos-15 (arm64) and macos-15-intel, and the `codesign` and `spctl` output in each `probe.log`. Re-signing ad hoc (`codesign --force --deep --sign -`) turned the arm64 dialog into the ordinary one (`D-resigned-quarantined.png`). | `bundle_seal` is a warning for now. Task 15 fixes the packaging (ad-hoc sign the whole bundle after assembling it) and flips the check. The README and `docs/release.md` say macOS may need approval in Privacy and Security; for an Apple-silicon download that is not true today, which the maintainer should know before it reaches users. |
+| F10 | **Quit, keys and pointer work through System Events.** `Cmd+,` opened Settings (rows `Back to Containers`, `General`, `Engines`, ...), `Cmd+1` returned, a pointer click at a row's reported position selected it, and `Cmd+Q` exits with status 0 in `--demo` and in real mode. The post-update notice shows as an `AXButton` named `What's new` on all three images. | Round 3: `S-ax.txt`, `K-ax.txt`, `K-after-click.png` and the three `probe.log` files. | `run.sh` asserts exactly these. `Cmd+2`, `Cmd+4` and `Cmd+1` selected Images, Networks and Containers in round 2 on all three images (the app was started with `open -n -a`); `Cmd+3` was never pressed. Round 3 started the binary directly and quit it with `Cmd+Q` (exit 0 on all three), where round 2's real-mode `Cmd+Q` through `open -n -a` left the process running on all three: the cause was not isolated, and `run.sh` uses the round-3 way. |
+| F11 | **The accessibility tree exposes the sidebar rows and a few named buttons, not yet the page controls.** Rows have role `AXRow` and an `AXSelected` value; the toolbar buttons have names; the search field and the filter tabs were not in the dumps, because the probe ran without an engine. | `U-ax-1.txt`. | The page check asserts the selected row only. The controls on each page are written to `ax-<page>.txt` in the evidence so the first runs show what is there and a later change can assert it. |
+| F12 | **`System Events` calls are slow, and the first one can be very slow.** In round 3 a full dump took 1 to 3 s. In round 2 the reads took 4 to 6 s on macOS 26, 14 to 17 s each on the Intel image, and the very first read on macOS 15 took 90 s. `entire contents` with a `whose` filter took minutes and was dropped. | probe logs | Every external call in `run.sh` has a hard limit (`tmo`), page waits are deadlines of 30 to 45 s and not retry counts, and each scenario is its own workflow step with its own timeout. A first version of it kept `$(...)` and `\| tail` waiting for the whole limit; that reproduces in Git Bash and is fixed and tested there and under bash 3.2. |
+
+**Why the quarantine scenario asserts a dialog.** It copies the app, sets `com.apple.quarantine` the way Safari does, and opens
+the copy through LaunchServices. On the current builds Gatekeeper puts up a dialog and no window opens. When signing and
+notarization arrive that flips, and the scenario fails with a message that says so: it is a tripwire for that change, not a
+property of the product.
+
+**Not verified.** The workflow has not run. `run.sh` was checked with `bash -n` under bash 3.2 and with shellcheck 0.9.0;
+`smoketool.swift` was not compiled (no Swift toolchain on the development machine). It extends the helper the probe compiled with
+a `caption` command, and that command is untested. The page, click, notice and quit logic follows probe output, and the rest is
+expected to need a fix or two on its first run (task 13). A review before the first run found and fixed these defects in `run.sh`, among others (a profile path with a space that emptied the log, a colour check that counted the Dock, retry counts that could total 25 minutes, a self-test switch that could not fail the last chord, a `codesign` timeout read as a pass, a dialog wait shorter than the observed appearance, a guard that a self-hosted runner would pass); each is a line in the diff, not a finding of the product.
+
+## 11. Revision log
 
 - 2026-10-08: Created from a feasibility spike run on 2026-10-07 and 2026-10-08. The prototype scripts, the workflow draft and a contact sheet were kept in `linux-install-smoke-test/`.
 - 2026-10-09: Implemented. Scripts, workflow, unit tests (69), the `selftest` job and docs are in the branch; the four legs and the 30 self-test controls pass in local Docker. Not yet run on a GitHub runner. The prototype folder is deleted: its scripts live on as `scripts/linux-smoke/`, and only `contact-sheet.png` stays here.
 - 2026-10-10: Opened as draft PR #37. A pull-request run and a manual dispatch (tag v0.2.0) passed on GitHub runners (§6.5). The release trigger, the weekly schedule and the alert job have not fired yet. Review pending.
+- 2026-10-11: Added macOS (§10, REL-078) and the draft gate (REL-079; it replaces task 7) after three probe rounds on hosted macOS runners. The macOS workflow is built and has not run. A review of the first macOS draft found and fixed: a timeout helper that kept `| tail` waiting for its full limit (reproduced in Git Bash and bash 3.2), a scenario that would have replaced a developer's `/Applications/Dockering.app` and deleted their profile if run locally (it now refuses outside GitHub Actions), a Gatekeeper check that asserted "rejected" where the observed state is "damaged" (finding F9), and page checks that asserted control roles nobody had seen on a Mac.
