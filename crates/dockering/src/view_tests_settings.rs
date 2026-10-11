@@ -180,7 +180,11 @@ fn set_input(
     .unwrap();
     h.draw(cx);
     h.press(cx, "secondary-a");
-    h.type_text(cx, &text);
+    if text.is_empty() {
+        h.press(cx, "backspace");
+    } else {
+        h.type_text(cx, &text);
+    }
     h.draw(cx);
 }
 
@@ -408,51 +412,137 @@ fn set_001_start_page_and_confirm_stopped_persist(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn set_020_group_by_default_affects_containers_page(cx: &mut TestAppContext) {
+    use dk_core::grouping::{DEFAULT_GROUP_LABEL_KEY, GroupBy};
+    let h = start(cx, Setup::default());
+    let containers = h.wait_containers(cx);
+    let page = open(&h, cx, SettingsSection::Containers);
+    let choose = |cx: &mut TestAppContext, ix: usize| {
+        h.update(cx, |_, window, cx| {
+            page.update(cx, |p, cx| p.set_choice(Key::GroupBy, ix, window, cx))
+        })
+    };
+    let group_keys = |cx: &mut TestAppContext| -> Vec<String> {
+        cx.read(|cx| {
+            containers
+                .read(cx)
+                .table()
+                .read(cx)
+                .model(cx)
+                .rows()
+                .iter()
+                .filter(|r| r.is_group())
+                .map(|r| r.key.to_string())
+                .collect()
+        })
+    };
+    // Four choices; Combined is the default and is what the page shows.
+    let options = cx.read(|cx| {
+        page.read(cx)
+            .select(Key::GroupBy)
+            .map(|s| s.read(cx).selected_index(cx))
+    });
+    assert_eq!(options, Some(Some(gpui_kit::component::IndexPath::new(0))));
+    assert_eq!(crate::pages::settings::controls::GROUP_BYS.len(), 4);
+    assert_eq!(hub_config(&h).containers.group_by, GroupBy::Combined);
+    assert_eq!(
+        cx.read(|cx| containers.read(cx).group_by()),
+        GroupBy::Combined
+    );
+    let combined = group_keys(cx);
+    assert!(
+        combined.contains(&"compose:myshop".to_owned()),
+        "{combined:?}"
+    );
+    assert!(
+        combined.contains(&format!("label:{DEFAULT_GROUP_LABEL_KEY}=webshop")),
+        "{combined:?}"
+    );
+    // Compose project: no label groups.
+    choose(cx, 1);
+    assert_eq!(hub_config(&h).containers.group_by, GroupBy::Compose);
+    h.wait_until(cx, "compose only", |_, cx| {
+        let t = containers.read(cx).table().read(cx);
+        !t.model(cx)
+            .rows()
+            .iter()
+            .any(|r| r.key.starts_with("label:"))
+    });
+    // None: the page is flat.
+    choose(cx, 2);
+    assert_eq!(hub_config(&h).containers.group_by, GroupBy::None);
+    h.wait_until(cx, "flat rows", |_, cx| {
+        let t = containers.read(cx).table().read(cx);
+        t.model(cx).rows().iter().all(|r| !r.is_group())
+    });
+    // Label: groups by the configured key only; Compose projects are not groups.
+    choose(cx, 3);
+    assert_eq!(hub_config(&h).containers.group_by, GroupBy::Label);
+    h.wait_until(cx, "label groups", |_, cx| {
+        let t = containers.read(cx).table().read(cx);
+        let m = t.model(cx);
+        m.row_by_key(&format!("label:{DEFAULT_GROUP_LABEL_KEY}=webshop"))
+            .is_some()
+            && m.row_by_key("compose:myshop").is_none()
+    });
+    let key = cx
+        .read(|cx| page.read(cx).input(Key::LabelKey).cloned())
+        .unwrap();
+    set_input(&h, cx, &key, "app");
+    assert_eq!(hub_config(&h).containers.group_label_key, "app");
+    h.wait_until(cx, "regrouped by app", |_, cx| {
+        let t = containers.read(cx).table().read(cx);
+        t.model(cx).row_by_key("label:app=billing").is_some()
+    });
+    // Back to Combined with the new key: projects first, `app` groups for the rest.
+    choose(cx, 0);
+    h.wait_until(cx, "combined with app", |_, cx| {
+        let t = containers.read(cx).table().read(cx);
+        let m = t.model(cx);
+        m.row_by_key("compose:myshop").is_some() && m.row_by_key("label:app=billing").is_some()
+    });
+    h.shutdown();
+}
+
+/// CON-014, SET-020: the key field is always shown, prefilled with the standard key, and an
+/// empty value is rejected inline while the saved key stays.
+#[gpui_kit::test]
+fn set_020_label_key_prefilled_and_required(cx: &mut TestAppContext) {
+    use dk_core::grouping::DEFAULT_GROUP_LABEL_KEY;
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
     let page = open(&h, cx, SettingsSection::Containers);
-    // Label grouping without a key: inline error, nothing saved.
-    h.update(cx, |_, window, cx| {
-        page.update(cx, |p, cx| p.set_choice(Key::GroupBy, 2, window, cx))
-    });
-    assert_eq!(
-        cx.read(|cx| page.read(cx).error(Key::LabelKey).cloned()),
-        Some(s::SET_LABEL_KEY_REQUIRED.into())
-    );
-    assert_eq!(
-        hub_config(&h).containers.group_by,
-        dk_core::grouping::GroupBy::Compose
-    );
-    // Typing the key saves label grouping.
     let input = cx
         .read(|cx| page.read(cx).input(Key::LabelKey).cloned())
-        .unwrap();
-    set_input(&h, cx, &input, "app");
+        .expect("the key field exists whatever the mode");
     assert_eq!(
-        hub_config(&h).containers.group_by,
-        dk_core::grouping::GroupBy::Label("app".into())
+        cx.read(|cx| input.read(cx).value().to_string()),
+        DEFAULT_GROUP_LABEL_KEY
     );
     assert!(cx.read(|cx| page.read(cx).error(Key::LabelKey).is_none()));
-    // None: the containers page opens flat.
-    h.update(cx, |_, window, cx| {
-        page.update(cx, |p, cx| p.set_choice(Key::GroupBy, 1, window, cx))
-    });
-    h.press(cx, "secondary-1");
-    let containers = h.wait_containers(cx);
+    // Empty and whitespace-only values are rejected; the saved key is unchanged.
+    for text in ["", "   "] {
+        set_input(&h, cx, &input, text);
+        assert_eq!(
+            cx.read(|cx| page.read(cx).error(Key::LabelKey).cloned()),
+            Some(s::SET_LABEL_KEY_REQUIRED.into()),
+            "{text:?}"
+        );
+        assert_eq!(
+            hub_config(&h).containers.group_label_key,
+            DEFAULT_GROUP_LABEL_KEY
+        );
+        assert_eq!(
+            cx.read(|cx| AppState::config(cx).containers.group_label_key.clone()),
+            DEFAULT_GROUP_LABEL_KEY
+        );
+    }
+    // A valid key clears the error and is saved (trimmed).
+    set_input(&h, cx, &input, " com.example.stack ");
+    assert!(cx.read(|cx| page.read(cx).error(Key::LabelKey).is_none()));
     assert_eq!(
-        cx.read(|cx| containers.read(cx).group_by().clone()),
-        dk_core::grouping::GroupBy::None
+        hub_config(&h).containers.group_label_key,
+        "com.example.stack"
     );
-    h.wait_until(cx, "flat rows", |_, cx| {
-        containers
-            .read(cx)
-            .table()
-            .read(cx)
-            .model(cx)
-            .rows()
-            .iter()
-            .all(|r| !r.is_group())
-    });
     h.shutdown();
 }
 
@@ -1148,7 +1238,11 @@ fn set_070_keyboard_section_lists_bindings(cx: &mut TestAppContext) {
 
 // ── KBD-092: Tab reaches every control of each section, in order, without traps ──────
 
-fn tab_walk(h: &Harness, cx: &mut TestAppContext, _page: &Entity<SettingsPage>) -> usize {
+fn tab_walk(
+    h: &Harness,
+    cx: &mut TestAppContext,
+    _page: &Entity<SettingsPage>,
+) -> Vec<gpui_kit::FocusHandle> {
     let nav = sidebar(h, cx);
     h.focus(cx, &nav);
     let mut seen = Vec::new();
@@ -1159,14 +1253,14 @@ fn tab_walk(h: &Harness, cx: &mut TestAppContext, _page: &Entity<SettingsPage>) 
             .unwrap();
         let Some(f) = f else { break };
         if f == nav {
-            return seen.len();
+            return seen;
         }
         if seen.contains(&f) {
             panic!("KBD-092: Tab cycled without returning to the section nav");
         }
         seen.push(f);
     }
-    seen.len()
+    seen
 }
 
 #[gpui_kit::test]
@@ -1176,15 +1270,26 @@ fn a11y_tab_walk_reaches_all_interactive_settings(cx: &mut TestAppContext) {
     let page = open(&h, cx, SettingsSection::General);
     // General: theme, start page, 2 switches (+ the shell's other regions: Tab cycles the
     // whole window, so the walk returns to the nav after visiting them).
-    let general = tab_walk(&h, cx, &page);
+    let general = tab_walk(&h, cx, &page).len();
     assert!(general >= 4, "{general}");
     let page = open(&h, cx, SettingsSection::Containers);
     let containers = tab_walk(&h, cx, &page);
     // group by, label key, switch, polling (number input: + / − aren't tab stops).
-    assert!(containers >= 4, "{containers}");
+    assert!(containers.len() >= 4, "{}", containers.len());
+    let key = cx.read(|cx| {
+        page.read(cx)
+            .input(Key::LabelKey)
+            .unwrap()
+            .read(cx)
+            .focus_handle(cx)
+    });
+    assert!(
+        containers.contains(&key),
+        "KBD-072: the label key field isn't a tab stop"
+    );
     let page = open(&h, cx, SettingsSection::Engines);
     h.draw(cx);
-    let engines = tab_walk(&h, cx, &page);
+    let engines = tab_walk(&h, cx, &page).len();
     // 2 discovery switches, Rescan, Add, then per engine: name, enabled, test, set as
     // default, hide.
     assert!(engines >= 4 + 2 * 5, "{engines}");

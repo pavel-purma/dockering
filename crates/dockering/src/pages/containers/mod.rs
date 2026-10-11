@@ -7,4 +7,4 @@ mod row;
 mod view;
 
 pub use model::{GroupInfo, StatusFilter};
-pub use view::ContainersPage;
+pub use view::{BACKGROUND_THRESHOLD, ContainersPage};

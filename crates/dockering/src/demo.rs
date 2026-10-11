@@ -5,10 +5,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dk_core::fake::{FakeEngine, FakeFactory, fixtures};
-use dk_core::grouping::{COMPOSE_DEPENDS_ON_LABEL, COMPOSE_ONEOFF_LABEL};
+use dk_core::grouping::{COMPOSE_DEPENDS_ON_LABEL, COMPOSE_ONEOFF_LABEL, DEFAULT_GROUP_LABEL_KEY};
 use dk_core::{ContainerState, EngineFactory, PortMapping, Proto};
 
-/// Containers for the demo engine: two Compose projects, a label-grouped pair, and singles.
+/// Containers for the demo engine: two Compose projects, groups made by the
+/// `app.kubernetes.io/part-of` label (one container is in a Compose project too, and the
+/// project wins), a container with a custom `app` label, and singles.
 pub fn containers() -> Vec<dk_core::ContainerSummary> {
     use ContainerState::*;
     let mut web = fixtures::compose_container("myshop", "web", Running);
@@ -75,8 +77,24 @@ pub fn containers() -> Vec<dk_core::ContainerSummary> {
     let mut labelled = fixtures::container("billing-svc", Running);
     labelled.labels = BTreeMap::from([("app".into(), "billing".into())]);
 
+    let part_of = |name: &str, state: ContainerState, image: &str, app: &str| {
+        let mut c = fixtures::container(name, state);
+        c.image = image.into();
+        c.labels.insert(DEFAULT_GROUP_LABEL_KEY.into(), app.into());
+        c
+    };
+    let storefront = part_of("storefront", Running, "node:22-alpine", "webshop");
+    let checkout = part_of("checkout-api", Running, "myshop/api:latest", "webshop");
+    let etl = part_of("etl-worker", Exited, "python:3.12-slim", "analytics");
+    // Carries both a Compose project and the label: the project wins in Combined.
+    let mut loki = fixtures::compose_container("monitoring", "loki", Running);
+    loki.image = "grafana/loki:3.1".into();
+    loki.labels
+        .insert(DEFAULT_GROUP_LABEL_KEY.into(), "analytics".into());
+
     let mut all = vec![
-        web, api, db, migrate, grafana, prom, redis, scratch, paused, restarting, created, labelled,
+        web, api, db, migrate, grafana, prom, loki, redis, scratch, paused, restarting, created,
+        labelled, storefront, checkout, etl,
     ];
     link_resources(&mut all);
     all
@@ -143,6 +161,7 @@ pub fn engine() -> Arc<FakeEngine> {
         image("redis:7", 117_000_000),
         image("myshop/api:latest", 245_000_000),
         image("grafana/grafana:11", 471_000_000),
+        image("grafana/loki:3.1", 96_000_000),
         image("prom/prometheus:v2.53", 279_000_000),
         image("alpine:3.20", 7_800_000),
         image("python:3.12-slim", 130_000_000),

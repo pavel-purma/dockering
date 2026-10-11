@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use dk_core::grouping::GroupBy;
+use dk_core::grouping::{DEFAULT_GROUP_LABEL_KEY, GroupBy};
 use dk_core::{EngineConfig, EngineId};
 use serde::{Deserialize, Serialize};
 
@@ -107,9 +107,11 @@ pub struct EngineSettings {
 
 /// SET-020
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "StoredContainerSettings")]
 pub struct ContainerSettings {
     pub group_by: GroupBy,
+    /// Label key used by *Combined* and *Label* (CON-014). Never empty after loading.
+    pub group_label_key: String,
     pub show_cpu_mem_columns: bool,
     /// Polling interval fallback in seconds (spec 10 §4.2).
     pub polling_interval_s: u32,
@@ -120,10 +122,70 @@ pub struct ContainerSettings {
 impl Default for ContainerSettings {
     fn default() -> Self {
         Self {
-            group_by: GroupBy::Compose,
+            group_by: GroupBy::Combined,
+            group_label_key: DEFAULT_GROUP_LABEL_KEY.to_owned(),
             show_cpu_mem_columns: false,
             polling_interval_s: 5,
             interleave_ungrouped: false,
+        }
+    }
+}
+
+/// On-disk shape of `[containers]`, tolerant of files written before `group_label_key`, when
+/// the *Label* mode carried its key inside `[containers.group_by]` (`type = "label"`, `key`).
+#[derive(Deserialize)]
+#[serde(default)]
+struct StoredContainerSettings {
+    group_by: StoredGroupBy,
+    group_label_key: Option<String>,
+    show_cpu_mem_columns: bool,
+    polling_interval_s: u32,
+    interleave_ungrouped: bool,
+}
+
+#[derive(Deserialize)]
+struct StoredGroupBy {
+    #[serde(flatten)]
+    by: GroupBy,
+    key: Option<String>,
+}
+
+impl Default for StoredContainerSettings {
+    fn default() -> Self {
+        let d = ContainerSettings::default();
+        Self {
+            group_by: StoredGroupBy {
+                by: d.group_by,
+                key: None,
+            },
+            group_label_key: None,
+            show_cpu_mem_columns: d.show_cpu_mem_columns,
+            polling_interval_s: d.polling_interval_s,
+            interleave_ungrouped: d.interleave_ungrouped,
+        }
+    }
+}
+
+fn non_empty_key(key: Option<&str>) -> Option<&str> {
+    key.map(str::trim).filter(|key| !key.is_empty())
+}
+
+impl From<StoredContainerSettings> for ContainerSettings {
+    fn from(s: StoredContainerSettings) -> Self {
+        let legacy_key = match s.group_by.by {
+            GroupBy::Label => non_empty_key(s.group_by.key.as_deref()),
+            _ => None,
+        };
+        let group_label_key = non_empty_key(s.group_label_key.as_deref())
+            .or(legacy_key)
+            .unwrap_or(DEFAULT_GROUP_LABEL_KEY)
+            .to_owned();
+        Self {
+            group_by: s.group_by.by,
+            group_label_key,
+            show_cpu_mem_columns: s.show_cpu_mem_columns,
+            polling_interval_s: s.polling_interval_s,
+            interleave_ungrouped: s.interleave_ungrouped,
         }
     }
 }
@@ -427,6 +489,152 @@ default = \"a\"
             "this is = = not toml ["
         );
         assert!(paths.data_dir.join("state.json.bak").exists());
+    }
+
+    fn load_containers(toml: &str) -> ContainerSettings {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        std::fs::write(paths.config_file(), toml).unwrap();
+        load(&paths).0.containers
+    }
+
+    #[test]
+    fn con_014_default_is_combined_with_part_of_key() {
+        let d = ContainerSettings::default();
+        assert_eq!(d.group_by, GroupBy::Combined);
+        assert_eq!(d.group_label_key, "app.kubernetes.io/part-of");
+        assert_eq!(d.group_label_key, DEFAULT_GROUP_LABEL_KEY);
+        assert_eq!(load_containers("[general]\ntheme = \"dark\"\n"), d);
+        assert_eq!(
+            load_containers("[containers]\npolling_interval_s = 9\n").group_by,
+            d.group_by
+        );
+    }
+
+    #[test]
+    fn con_014_group_by_roundtrips_in_the_new_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+        for by in [
+            GroupBy::Combined,
+            GroupBy::Compose,
+            GroupBy::None,
+            GroupBy::Label,
+        ] {
+            let mut c = Config::default();
+            c.containers.group_by = by;
+            c.containers.group_label_key = "com.example.stack".into();
+            save_config(&paths, &c).unwrap();
+            let text = std::fs::read_to_string(paths.config_file()).unwrap();
+            assert!(
+                text.contains("group_label_key = \"com.example.stack\""),
+                "{text}"
+            );
+            assert_eq!(load(&paths).0, c, "{by:?}");
+        }
+    }
+
+    #[test]
+    fn con_014_legacy_label_group_by_migrates() {
+        let legacy = "version = 1
+
+[containers]
+show_cpu_mem_columns = true
+polling_interval_s = 7
+interleave_ungrouped = true
+
+[containers.group_by]
+type = \"label\"
+key = \"app\"
+
+[logs]
+initial_tail = 200
+";
+        let c = load_containers(legacy);
+        assert_eq!(c.group_by, GroupBy::Label);
+        assert_eq!(c.group_label_key, "app");
+        assert!(c.show_cpu_mem_columns && c.interleave_ungrouped);
+        assert_eq!(c.polling_interval_s, 7);
+
+        // A legacy label without a usable key keeps the default key.
+        let blank = "[containers.group_by]\ntype = \"label\"\nkey = \"  \"\n";
+        let c = load_containers(blank);
+        assert_eq!(
+            (c.group_by, c.group_label_key.as_str()),
+            (GroupBy::Label, DEFAULT_GROUP_LABEL_KEY)
+        );
+        let missing = "[containers.group_by]\ntype = \"label\"\n";
+        let c = load_containers(missing);
+        assert_eq!(
+            (c.group_by, c.group_label_key.as_str()),
+            (GroupBy::Label, DEFAULT_GROUP_LABEL_KEY)
+        );
+
+        // The migrated file is written back in the new shape.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        std::fs::write(paths.config_file(), legacy).unwrap();
+        let (migrated, _) = load(&paths);
+        save_config(&paths, &migrated).unwrap();
+        let text = std::fs::read_to_string(paths.config_file()).unwrap();
+        assert!(text.contains("group_label_key = \"app\""), "{text}");
+        let table: toml::Table = text.parse().unwrap();
+        let group_by = table["containers"]["group_by"].as_table().unwrap();
+        assert_eq!(group_by.len(), 1, "{text}");
+        assert_eq!(group_by["type"].as_str(), Some("label"));
+        assert_eq!(load(&paths).0, migrated);
+    }
+
+    #[test]
+    fn con_014_legacy_compose_and_none_load_unchanged() {
+        for (kind, by) in [("compose", GroupBy::Compose), ("none", GroupBy::None)] {
+            let c = load_containers(&format!("[containers.group_by]\ntype = \"{kind}\"\n"));
+            assert_eq!(c.group_by, by);
+            assert_eq!(c.group_label_key, DEFAULT_GROUP_LABEL_KEY);
+        }
+        let c = load_containers("[containers.group_by]\ntype = \"combined\"\n");
+        assert_eq!(c.group_by, GroupBy::Combined);
+    }
+
+    #[test]
+    fn con_014_stale_legacy_key_never_overrides_the_new_key() {
+        let c = load_containers(
+            "[containers]\ngroup_label_key = \"stack\"\n[containers.group_by]\ntype = \"label\"\nkey = \"app\"\n",
+        );
+        assert_eq!(
+            (c.group_by, c.group_label_key.as_str()),
+            (GroupBy::Label, "stack")
+        );
+        let c = load_containers("[containers.group_by]\ntype = \"compose\"\nkey = \"app\"\n");
+        assert_eq!(c.group_label_key, DEFAULT_GROUP_LABEL_KEY);
+    }
+
+    #[test]
+    fn con_014_empty_label_key_normalised() {
+        for key in ["", "   ", "\\t"] {
+            let c = load_containers(&format!("[containers]\ngroup_label_key = \"{key}\"\n"));
+            assert_eq!(c.group_label_key, DEFAULT_GROUP_LABEL_KEY, "{key:?}");
+        }
+        let c = load_containers("[containers]\ngroup_label_key = \"  com.example.stack \"\n");
+        assert_eq!(c.group_label_key, "com.example.stack");
+    }
+
+    #[test]
+    fn con_014_corrupt_group_by_is_backed_up_and_defaulted() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::in_dir(dir.path());
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        let bad = "[containers.group_by]\ntype = \"sideways\"\n";
+        std::fs::write(paths.config_file(), bad).unwrap();
+        let (c, _) = load(&paths);
+        assert_eq!(c, Config::default());
+        assert!(!paths.config_file().exists());
+        assert_eq!(
+            std::fs::read_to_string(paths.config_dir.join("config.toml.bak")).unwrap(),
+            bad
+        );
     }
 
     #[test]

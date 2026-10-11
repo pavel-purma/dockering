@@ -7,9 +7,9 @@ use std::rc::Rc;
 use dk_core::PortMapping;
 use dk_core::format::{format_port, format_relative, short_id};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, ElementId, IntoElement, SharedString, Styled, canvas, div, px};
+use gpui_kit::{App, ElementId, Hsla, IntoElement, SharedString, Styled, canvas, div, px};
 use time::OffsetDateTime;
 
 use crate::actions::{CopyText, OpenUrl};
@@ -188,6 +188,46 @@ impl OverflowSet {
             )
             .child(h_flex().flex_none().h_full().items_center().child(content))
     }
+}
+
+/// An outline trigger drawn as a field: a recessed `caption` addon, then `value` and a caret.
+pub fn labelled_trigger(
+    id: impl Into<ElementId>,
+    caption: impl Into<SharedString>,
+    value: impl IntoElement,
+    cx: &App,
+) -> Button {
+    let t = cx.theme();
+    let addon_bg = if t.is_dark() {
+        Hsla::black().opacity(0.25)
+    } else {
+        Hsla::black().opacity(0.04)
+    };
+    Button::new(id).small().outline().px_0().child(
+        h_flex()
+            .h_full()
+            .items_center()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .h_full()
+                    .px_2p5()
+                    .rounded_l(t.radius - px(1.))
+                    .border_r_1()
+                    .border_color(t.input)
+                    .bg(addon_bg)
+                    .text_color(t.muted_foreground)
+                    .child(caption.into()),
+            )
+            .child(
+                h_flex().items_center().gap_2().px_2().child(value).child(
+                    Icon::new(IconName::ChevronDown)
+                        .small()
+                        .text_color(t.muted_foreground),
+                ),
+            ),
+    )
 }
 
 /// A focusable wrapper around a GPUI Kit `Button`, so the caller owns

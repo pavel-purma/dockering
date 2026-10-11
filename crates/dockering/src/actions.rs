@@ -169,7 +169,7 @@ pub mod list {
         pub filter: SharedString,
     }
 
-    /// Group-by mode (CON-010): `compose`, `none`, or `label:<key>`.
+    /// Group-by mode (CON-010): `combined`, `compose`, `none`, or `label`.
     #[derive(Clone, PartialEq, Debug, Action)]
     #[action(namespace = list, no_json)]
     pub struct SetGroupBy {

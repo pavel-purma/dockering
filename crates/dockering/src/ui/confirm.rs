@@ -175,6 +175,7 @@ impl Render for ConfirmView {
             .when_some(spec.note.clone(), |this, note| {
                 this.child(
                     div()
+                        .debug_selector(|| "confirm-note".into())
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(note),
