@@ -234,3 +234,23 @@ jobs:
           path: upload/
           retention-days: 14
           if-no-files-found: error
+
+  # The one check the Protect main ruleset requires for this workflow (REL-080, REL-081). A skipped
+  # required check counts as passing, so this runs `always()` and fails on anything but success.
+  # Add every new job above to `needs`; scripts/tests/test_ci_gate.py fails if one is missing.
+  gate:
+    name: CI gate
+    if: always()
+    needs: [lint, test, integration-docker, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every CI job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs: $RESULTS"
+          read -r -a results <<< "$RESULTS"
+          [ "${#results[@]}" -gt 0 ] || { echo "::error::no CI job results"; exit 1; }
+          for result in "${results[@]}"; do
+            [ "$result" = success ] || { echo "::error::a CI job finished as '$result'"; exit 1; }
+          done
