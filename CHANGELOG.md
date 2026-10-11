@@ -9,6 +9,29 @@ Both changelogs are written only at release time, by the `/release` skill in the
 (REL-011, REL-019): feature pull requests don't edit them. Edit the wording in the release PR
 before merging it.
 
+## [0.3.0] - 2026-10-11
+
+Downloads are unsigned, as in 0.2.0. Automatic updates and winget remain deferred.
+
+### Added
+
+- Containers can be grouped in a new *Combined* mode, now the default: containers of a Compose
+  project are grouped by project, and the others by a label. Settings has a *Group label key*
+  (default `app.kubernetes.io/part-of`) that *Combined* and *Label* grouping both use; an
+  existing label grouping keeps working and carries over its key.
+- Keyboard: `Enter` in the search field of Containers, Images, Volumes and Networks applies the
+  query at once and moves to the first matching row.
+- Keyboard: on a detail page, `Down` on the tab bar moves into the tab's content, `PgUp` and
+  `PgDn` scroll it by a page, `Esc` or `Up` on the first row returns to the tab bar, and
+  `Backspace` goes back.
+- WSLC: when the default WSL containers session doesn't exist, the engine shows a calm *stopped*
+  page with a **Start WSL containers** button, and a *Start engine* command in the command
+  palette, instead of a red connection failure that kept retrying.
+
+### Changed
+
+- `PgUp` and `PgDn` in the container logs scroll by one viewport page instead of a fixed distance.
+
 ## [0.2.0] - 2026-10-06
 
 Downloads are unsigned, as in 0.1.0. Automatic updates and winget remain deferred.
