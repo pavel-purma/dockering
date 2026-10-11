@@ -14,7 +14,7 @@ use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, Sizable, h_f
 use gpui_kit::prelude::*;
 use gpui_kit::{Anchor, AnyElement, App, IntoElement, SharedString, div, px};
 
-use super::model::{GroupInfo, sort_keys};
+use super::model::{self, GroupInfo, sort_keys};
 use crate::actions::{OnRow, OpenUrl, RowCommand};
 use crate::assets::Lucide;
 use crate::pages::resources::chrome::{name_cell, row_menu_button};
@@ -368,7 +368,7 @@ impl ListDelegate for ContainersDelegate {
                 group, expanded, ..
             } => match column.key {
                 col::NAME => {
-                    let tooltip = group.group.working_dir.clone();
+                    let header = model::group_header(&group.group);
                     h_flex()
                         .id(("group-name", row_ix))
                         .gap_1p5()
@@ -394,10 +394,12 @@ impl ListDelegate for ContainersDelegate {
                                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .child(group.group.label.clone()),
                         )
-                        .when(group.group.is_compose, |this| {
-                            this.child(Tag::secondary().small().child(s::COMPOSE_TAG))
-                        })
-                        .when_some(tooltip, |this, dir| {
+                        .child(
+                            div()
+                                .debug_selector(move || format!("group-tag-{}", header.tag))
+                                .child(Tag::secondary().small().child(header.tag)),
+                        )
+                        .when_some(header.tooltip, |this, dir| {
                             this.tooltip(move |window, cx| {
                                 gpui_kit::component::tooltip::Tooltip::new(dir.clone())
                                     .build(window, cx)

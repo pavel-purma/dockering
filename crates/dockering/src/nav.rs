@@ -317,23 +317,24 @@ impl History {
     }
 }
 
-/// Group-by mode as a `SetGroupBy` string (`compose`, `none`, `label:<key>`).
-pub fn group_by_to_mode(g: &GroupBy) -> String {
+/// Group-by mode as a `SetGroupBy` string (`combined`, `compose`, `none`, `label`).
+pub fn group_by_to_mode(g: GroupBy) -> &'static str {
     match g {
-        GroupBy::Compose => "compose".into(),
-        GroupBy::None => "none".into(),
-        GroupBy::Label(k) => format!("label:{k}"),
+        GroupBy::Combined => "combined",
+        GroupBy::Compose => "compose",
+        GroupBy::None => "none",
+        GroupBy::Label => "label",
     }
 }
 
+/// Tolerant parse: the legacy `label:<key>` is `Label`; unknown strings are `Combined`.
 pub fn group_by_from_mode(mode: &str) -> GroupBy {
     match mode {
-        "none" => GroupBy::None,
         "compose" => GroupBy::Compose,
-        m => match m.strip_prefix("label:") {
-            Some(k) if !k.trim().is_empty() => GroupBy::Label(k.trim().to_owned()),
-            _ => GroupBy::Compose,
-        },
+        "none" => GroupBy::None,
+        "label" => GroupBy::Label,
+        m if m.starts_with("label:") => GroupBy::Label,
+        _ => GroupBy::Combined,
     }
 }
 
@@ -389,12 +390,15 @@ mod tests {
     #[test]
     fn group_by_modes_roundtrip() {
         for g in [
+            GroupBy::Combined,
             GroupBy::Compose,
             GroupBy::None,
-            GroupBy::Label("app".into()),
+            GroupBy::Label,
         ] {
-            assert_eq!(group_by_from_mode(&group_by_to_mode(&g)), g);
+            assert_eq!(group_by_from_mode(group_by_to_mode(g)), g);
         }
-        assert_eq!(group_by_from_mode("label: "), GroupBy::Compose);
+        assert_eq!(group_by_from_mode("label:app"), GroupBy::Label);
+        assert_eq!(group_by_from_mode("label:"), GroupBy::Label);
+        assert_eq!(group_by_from_mode("bogus"), GroupBy::Combined);
     }
 }

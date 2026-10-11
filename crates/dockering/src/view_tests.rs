@@ -489,7 +489,7 @@ fn shl_005_header_checkbox_selects_all(cx: &mut TestAppContext) {
         .expect("select-all checkbox rendered");
     visual.simulate_click(header.center(), Default::default());
     cx.run_until_parked();
-    assert_eq!(selected(cx), 12, "every container");
+    assert_eq!(selected(cx), 16, "every container");
     h.draw(cx);
     let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
     visual.simulate_click(header.center(), Default::default());
@@ -1038,8 +1038,8 @@ fn kbd_039_group_by_none_flattens(cx: &mut TestAppContext) {
     let page = h.wait_containers(cx);
     h.focus_table(cx);
     h.press(cx, "secondary-shift-g");
-    // Pick "None" from the menu (second item).
-    h.press(cx, "down down enter");
+    // Pick "None" from the menu (third item, after Combined and Compose project).
+    h.press(cx, "down down down enter");
     h.wait_until(cx, "flat list", |_, cx| {
         page.read(cx)
             .table()
@@ -1050,9 +1050,299 @@ fn kbd_039_group_by_none_flattens(cx: &mut TestAppContext) {
             .all(|r| !r.is_group())
     });
     assert_eq!(
-        cx.read(|cx| page.read(cx).group_by().clone()),
+        cx.read(|cx| page.read(cx).group_by()),
         dk_core::grouping::GroupBy::None
     );
+    h.shutdown();
+}
+
+const PART_OF: &str = dk_core::grouping::DEFAULT_GROUP_LABEL_KEY;
+
+fn row_keys(
+    cx: &mut TestAppContext,
+    page: &gpui_kit::Entity<crate::pages::containers::ContainersPage>,
+) -> Vec<String> {
+    cx.read(|cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .rows()
+            .iter()
+            .map(|r| r.key.to_string())
+            .collect()
+    })
+}
+
+fn hub_group_by(h: &crate::testing::Harness) -> dk_core::grouping::GroupBy {
+    h.hub.config().get().containers.group_by
+}
+
+/// Opens the group-by menu and picks the `n`-th item with the keyboard (1 = first).
+fn pick_group_by(h: &crate::testing::Harness, cx: &mut TestAppContext, n: usize) {
+    h.press(cx, "secondary-shift-g");
+    h.press(cx, &vec!["down"; n].join(" "));
+    h.press(cx, "enter");
+}
+
+#[gpui_kit::test]
+fn con_010_combined_default_groups_label_fallback(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    assert_eq!(
+        cx.read(|cx| page.read(cx).group_by()),
+        dk_core::grouping::GroupBy::Combined
+    );
+    let keys = row_keys(cx, &page);
+    for group in [
+        "compose:myshop",
+        "compose:monitoring",
+        &format!("label:{PART_OF}=webshop"),
+        &format!("label:{PART_OF}=analytics"),
+    ] {
+        assert!(keys.contains(&group.to_owned()), "{group} in {keys:?}");
+    }
+    let members = |cx: &mut TestAppContext, group: &str| -> Vec<String> {
+        cx.read(|cx| {
+            page.read(cx)
+                .table()
+                .read(cx)
+                .model(cx)
+                .row_by_key(group)
+                .and_then(|r| {
+                    r.group()
+                        .map(|g| g.members.iter().map(|c| c.name.clone()).collect())
+                })
+                .unwrap_or_default()
+        })
+    };
+    // A container with a Compose project and the label stays in its project.
+    assert!(members(cx, "compose:monitoring").contains(&"monitoring-loki-1".to_owned()));
+    assert_eq!(
+        members(cx, &format!("label:{PART_OF}=analytics")),
+        ["etl-worker"]
+    );
+    // Neither a project nor the label (another key doesn't count): ungrouped, after the groups.
+    let top: Vec<(bool, String)> = cx.read(|cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .rows()
+            .iter()
+            .filter(|r| r.depth == 0)
+            .map(|r| (r.is_group(), r.key.to_string()))
+            .collect()
+    });
+    assert!(top.contains(&(false, id_of("redis"))));
+    assert!(top.contains(&(false, id_of("billing-svc"))));
+    let first_single = top.iter().position(|(is_group, _)| !is_group).unwrap();
+    assert!(top[first_single..].iter().all(|(g, _)| !g), "{top:?}");
+    h.shutdown();
+}
+
+/// CON-014: the menu has the four modes in order and picking one applies at once. There is
+/// no label-key prompt: choosing *Label* opens no input and focus returns to the table.
+#[gpui_kit::test]
+fn con_014_no_label_prompt_on_containers_page(cx: &mut TestAppContext) {
+    use dk_core::grouping::GroupBy;
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    h.focus_table(cx);
+    let table = cx.read(|cx| page.read(cx).table().focus_handle(cx));
+    // Item n of the menu is Combined, Compose project, None, Label.
+    for (n, want) in [
+        (4, GroupBy::Label),
+        (3, GroupBy::None),
+        (2, GroupBy::Compose),
+        (1, GroupBy::Combined),
+    ] {
+        pick_group_by(&h, cx, n);
+        assert_eq!(cx.read(|cx| page.read(cx).group_by()), want, "item {n}");
+        assert_eq!(hub_group_by(&h), want);
+        assert!(!cx.read(|cx| page.read(cx).menu_open()));
+        assert!(h.is_focused(cx, &table), "focus returns to the table");
+        let search = cx.read(|cx| page.read(cx).search_input().focus_handle(cx));
+        assert!(!h.is_focused(cx, &search));
+    }
+    // There is no fifth item: Down wraps around to the first one.
+    pick_group_by(&h, cx, 5);
+    assert_eq!(cx.read(|cx| page.read(cx).group_by()), GroupBy::Combined);
+    assert_eq!(
+        h.hub.config().get().containers.group_label_key,
+        PART_OF,
+        "the page never changes the key"
+    );
+    h.shutdown();
+}
+
+/// CON-014: changing the key in Settings regroups a mounted Containers page.
+#[gpui_kit::test]
+fn con_014_settings_key_change_regroups_mounted_page(cx: &mut TestAppContext) {
+    use crate::state::AppState;
+    let h = start(cx, Setup::default());
+    let page = h.wait_containers(cx);
+    let webshop = format!("label:{PART_OF}=webshop");
+    assert!(row_keys(cx, &page).contains(&webshop));
+    h.update(cx, |_, _, cx| {
+        AppState::update_config(cx, |c| c.containers.group_label_key = "app".into())
+    });
+    h.wait_until(cx, "regrouped by app", |_, cx| {
+        let t = page.read(cx).table().read(cx);
+        let m = t.model(cx);
+        m.row_by_key("label:app=billing").is_some() && m.row_by_key(&webshop).is_none()
+    });
+    // Compose projects still win in Combined.
+    assert!(row_keys(cx, &page).contains(&"compose:myshop".to_owned()));
+    h.update(cx, |_, _, cx| {
+        AppState::update_config(cx, |c| c.containers.group_label_key = PART_OF.into())
+    });
+    h.wait_until(cx, "regrouped back", |_, cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .row_by_key(&webshop)
+            .is_some()
+    });
+    h.shutdown();
+}
+
+/// CON-014, NFR-003/005: above the background threshold a key change rebuilds on a worker,
+/// and the page ends on the newest key.
+#[gpui_kit::test]
+fn con_014_key_change_above_threshold_keeps_latest_result(cx: &mut TestAppContext) {
+    use crate::state::AppState;
+    let containers = (0..crate::pages::containers::BACKGROUND_THRESHOLD + 50)
+        .map(|i| {
+            let mut c = dk_core::fake::fixtures::container(
+                &format!("bulk-{i:05}"),
+                ContainerState::Running,
+            );
+            c.labels.insert("app".into(), format!("a{}", i % 5));
+            c.labels.insert("team".into(), format!("t{}", i % 3));
+            c
+        })
+        .collect();
+    let h = start(
+        cx,
+        Setup {
+            containers,
+            ..Default::default()
+        },
+    );
+    let page = h.wait_containers(cx);
+    h.update(cx, |_, _, cx| {
+        AppState::update_config(cx, |c| {
+            c.containers.group_by = dk_core::grouping::GroupBy::Label;
+            c.containers.group_label_key = "app".into();
+        });
+    });
+    h.update(cx, |_, _, cx| {
+        AppState::update_config(cx, |c| c.containers.group_label_key = "team".into());
+    });
+    h.wait_until(cx, "grouped by team", |_, cx| {
+        page.read(cx)
+            .table()
+            .read(cx)
+            .model(cx)
+            .row_by_key("label:team=t0")
+            .is_some()
+    });
+    cx.run_until_parked();
+    let keys = row_keys(cx, &page);
+    assert!(
+        keys.iter().all(|k| !k.starts_with("label:app=")),
+        "a stale build was applied: {keys:?}"
+    );
+    h.shutdown();
+}
+
+/// CON-011: a label group's header has the "label" tag with `key=value` as its tooltip and
+/// no working directory; a Compose group keeps the "compose" tag.
+#[gpui_kit::test]
+fn con_011_label_group_has_label_tag_and_no_working_dir(cx: &mut TestAppContext) {
+    use crate::pages::containers::model::group_header;
+    let mut containers = crate::demo::containers();
+    // A labelled container that carries a working directory but no Compose project.
+    if let Some(c) = containers.iter_mut().find(|c| c.name == "etl-worker") {
+        c.labels.insert(
+            dk_core::grouping::COMPOSE_WORKING_DIR_LABEL.into(),
+            "/srv/etl".into(),
+        );
+    }
+    let h = start(
+        cx,
+        Setup {
+            containers,
+            ..Default::default()
+        },
+    );
+    let page = h.wait_containers(cx);
+    let analytics = format!("label:{PART_OF}=analytics");
+    let (label_group, compose_group) = cx.read(|cx| {
+        let t = page.read(cx).table().read(cx);
+        let m = t.model(cx);
+        let g = |key: &str| m.row_by_key(key).and_then(|r| r.group().cloned()).unwrap();
+        (g(&analytics), g("compose:monitoring"))
+    });
+    assert!(!label_group.group.is_compose);
+    assert_eq!(label_group.group.working_dir, None);
+    let header = group_header(&label_group.group);
+    assert_eq!(header.tag, crate::strings::LABEL_TAG);
+    assert_eq!(
+        header.tooltip.as_deref(),
+        Some(format!("{PART_OF}=analytics").as_str())
+    );
+    let header = group_header(&compose_group.group);
+    assert_eq!(header.tag, crate::strings::COMPOSE_TAG);
+    assert_eq!(header.tooltip.as_deref(), Some("/home/dev/proj"));
+    // The rendered headers carry the matching tag: both kinds in Combined, one kind in the
+    // pure modes.
+    let rendered = |cx: &mut TestAppContext| {
+        h.draw(cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+        (
+            visual.debug_bounds("group-tag-compose").is_some(),
+            visual.debug_bounds("group-tag-label").is_some(),
+        )
+    };
+    assert_eq!(rendered(cx), (true, true));
+    for (by, want) in [
+        (dk_core::grouping::GroupBy::Compose, (true, false)),
+        (dk_core::grouping::GroupBy::Label, (false, true)),
+    ] {
+        h.update(cx, |_, _, cx| {
+            crate::state::AppState::update_config(cx, |c| c.containers.group_by = by)
+        });
+        h.wait_until(cx, "regrouped", |_, cx| page.read(cx).group_by() == by);
+        assert_eq!(rendered(cx), want, "{by:?}");
+    }
+    h.shutdown();
+}
+
+/// CON-013: only a Compose group's *Delete all* dialog carries the compose-down note.
+#[gpui_kit::test]
+fn con_013_label_group_delete_dialog_has_no_compose_note(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    let note_shown = |cx: &mut TestAppContext| {
+        h.draw(cx);
+        gpui_kit::VisualTestContext::from_window(h.any_window(), cx)
+            .debug_bounds("confirm-note")
+            .is_some()
+    };
+    h.select_row(cx, "compose:myshop");
+    h.press(cx, "delete");
+    assert!(h.has_dialog(cx));
+    assert!(note_shown(cx), "a Compose group says networks are kept");
+    h.press(cx, "escape");
+    assert!(!h.has_dialog(cx));
+    h.select_row(cx, &format!("label:{PART_OF}=webshop"));
+    h.press(cx, "delete");
+    assert!(h.has_dialog(cx));
+    assert!(!note_shown(cx), "a label group has no compose-down note");
     h.shutdown();
 }
 

@@ -2,7 +2,7 @@
 //! [`Config`], its range, and its control. The page builds its controls from this table, and
 //! every change goes through `AppState::update_config` (the hub persists it, debounced).
 
-use dk_core::grouping::GroupBy;
+use dk_core::grouping::{DEFAULT_GROUP_LABEL_KEY, GroupBy};
 use dk_hub::Config;
 use dk_hub::config::{LogLevel, StartPage, ThemeMode};
 
@@ -118,6 +118,11 @@ fn no_check(_: &str) -> Option<&'static str> {
     None
 }
 
+/// CON-014: the label key can't be empty.
+pub fn check_label_key(v: &str) -> Option<&'static str> {
+    v.trim().is_empty().then_some(s::SET_LABEL_KEY_REQUIRED)
+}
+
 /// TRM-009: the command template must say where the exec command goes.
 pub fn check_external(v: &str) -> Option<&'static str> {
     let v = v.trim();
@@ -126,7 +131,12 @@ pub fn check_external(v: &str) -> Option<&'static str> {
 
 pub const THEMES: &[&str] = &[s::THEME_SYSTEM, s::THEME_LIGHT, s::THEME_DARK];
 pub const START_PAGES: &[&str] = &[s::PAGE_CONTAINERS, s::PAGE_IMAGES, s::PAGE_VOLUMES];
-pub const GROUP_BYS: &[&str] = &[s::GROUP_BY_COMPOSE, s::GROUP_BY_NONE, s::GROUP_BY_LABEL];
+pub const GROUP_BYS: &[&str] = &[
+    s::GROUP_BY_COMBINED,
+    s::GROUP_BY_COMPOSE,
+    s::GROUP_BY_NONE,
+    s::GROUP_BY_LABEL,
+];
 pub const LOG_LEVELS: &[&str] = &[s::LOG_INFO, s::LOG_DEBUG];
 
 pub fn spec(key: Key) -> Spec {
@@ -136,14 +146,10 @@ pub fn spec(key: Key) -> Spec {
         Key::GroupBy => Spec::Choice(GROUP_BYS),
         Key::LogLevel => Spec::Choice(LOG_LEVELS),
         Key::LabelKey => Spec::Text(TextSpec {
-            placeholder: Some("app"),
-            get: |c| match &c.containers.group_by {
-                GroupBy::Label(k) => k.clone(),
-                _ => String::new(),
-            },
-            // Written through `group_by` (see `SettingsPage::commit_group_by`).
-            set: |_, _| {},
-            validate: no_check,
+            placeholder: Some(DEFAULT_GROUP_LABEL_KEY),
+            get: |c| c.containers.group_label_key.clone(),
+            set: |c, v| c.containers.group_label_key = v,
+            validate: check_label_key,
         }),
         Key::Polling => Spec::Number(NumSpec {
             min: 1.,
@@ -228,9 +234,10 @@ pub fn choice_index(key: Key, c: &Config) -> usize {
             StartPage::Volumes => 2,
         },
         Key::GroupBy => match c.containers.group_by {
-            GroupBy::Compose => 0,
-            GroupBy::None => 1,
-            GroupBy::Label(_) => 2,
+            GroupBy::Combined => 0,
+            GroupBy::Compose => 1,
+            GroupBy::None => 2,
+            GroupBy::Label => 3,
         },
         Key::LogLevel => match c.diagnostics.log_level {
             LogLevel::Info => 0,
@@ -248,7 +255,7 @@ pub fn theme_at(ix: usize) -> ThemeMode {
     }
 }
 
-/// Writes a choice setting. `GroupBy` with *Label* is handled by the page (it needs the key).
+/// Writes a choice setting.
 pub fn set_choice(key: Key, c: &mut Config, ix: usize) {
     match key {
         Key::Theme => c.general.theme = theme_at(ix),
@@ -259,11 +266,14 @@ pub fn set_choice(key: Key, c: &mut Config, ix: usize) {
                 _ => StartPage::Containers,
             }
         }
-        Key::GroupBy => match ix {
-            1 => c.containers.group_by = GroupBy::None,
-            0 => c.containers.group_by = GroupBy::Compose,
-            _ => {}
-        },
+        Key::GroupBy => {
+            c.containers.group_by = match ix {
+                1 => GroupBy::Compose,
+                2 => GroupBy::None,
+                3 => GroupBy::Label,
+                _ => GroupBy::Combined,
+            }
+        }
         Key::LogLevel => {
             c.diagnostics.log_level = if ix == 1 {
                 LogLevel::Debug
@@ -367,7 +377,7 @@ mod tests {
 
     #[test]
     fn set_choices_roundtrip() {
-        for key in [Key::Theme, Key::StartPage, Key::LogLevel] {
+        for key in [Key::Theme, Key::StartPage, Key::GroupBy, Key::LogLevel] {
             let Spec::Choice(opts) = spec(key) else {
                 panic!()
             };
@@ -378,8 +388,21 @@ mod tests {
             }
         }
         let mut c = Config::default();
-        set_choice(Key::GroupBy, &mut c, 1);
+        assert_eq!(c.containers.group_by, GroupBy::Combined);
+        set_choice(Key::GroupBy, &mut c, 2);
         assert_eq!(c.containers.group_by, GroupBy::None);
+    }
+
+    #[test]
+    fn set_020_label_key_required() {
+        assert!(check_label_key("").is_some());
+        assert!(check_label_key("  ").is_some());
+        assert!(check_label_key("app").is_none());
+        let Spec::Text(t) = spec(Key::LabelKey) else {
+            panic!()
+        };
+        let c = Config::default();
+        assert_eq!((t.get)(&c), DEFAULT_GROUP_LABEL_KEY);
     }
 
     #[test]

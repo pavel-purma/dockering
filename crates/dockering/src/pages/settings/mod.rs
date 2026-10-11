@@ -59,8 +59,6 @@ pub struct SettingsPage {
     inputs: HashMap<Key, Entity<InputState>>,
     selects: HashMap<Key, Entity<SelectState<Choice>>>,
     errors: HashMap<Key, SharedString>,
-    /// *Group by* is set to *Label…* in the UI but no key has been entered yet.
-    label_pending: bool,
     shortcuts: Entity<ShortcutList>,
     engines: engines::EnginesUi,
     /// The open (or last) *Add engine* dialog (tests drive it).
@@ -158,7 +156,6 @@ impl SettingsPage {
             inputs,
             selects,
             errors: HashMap::new(),
-            label_pending: false,
             shortcuts: cx.new(|cx| ShortcutList::new(window, cx)),
             engines: engines::EnginesUi::new(cx),
             add_dialog: None,
@@ -222,27 +219,6 @@ impl SettingsPage {
 
     /// A select changed. Applied live (theme now; the shell picks up the rest).
     pub fn set_choice(&mut self, key: Key, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if key == Key::GroupBy && ix == 2 {
-            // Label: needs the key from the label-key field.
-            self.label_pending = true;
-            let text = self
-                .inputs
-                .get(&Key::LabelKey)
-                .map(|i| i.read(cx).value().to_string())
-                .unwrap_or_default();
-            self.commit_label_key(&text, cx);
-            if self.errors.contains_key(&Key::LabelKey)
-                && let Some(i) = self.inputs.get(&Key::LabelKey)
-            {
-                i.update(cx, |i, cx| i.focus(window, cx));
-            }
-            cx.notify();
-            return;
-        }
-        if key == Key::GroupBy {
-            self.label_pending = false;
-            self.errors.remove(&Key::LabelKey);
-        }
         AppState::update_config(cx, |c| controls::set_choice(key, c, ix));
         if key == Key::Theme {
             let general = AppState::config(cx).general.clone();
@@ -270,11 +246,6 @@ impl SettingsPage {
     }
 
     fn commit_text(&mut self, key: Key, text: &str, cx: &mut Context<Self>) {
-        if key == Key::LabelKey {
-            self.commit_label_key(text, cx);
-            cx.notify();
-            return;
-        }
         let Spec::Text(spec) = controls::spec(key) else {
             return;
         };
@@ -293,39 +264,13 @@ impl SettingsPage {
         cx.notify();
     }
 
-    /// The label-key field only matters while *Group by* is *Label…* (CON-010).
-    fn commit_label_key(&mut self, text: &str, cx: &mut Context<Self>) {
-        let label_selected = self.label_pending
-            || matches!(
-                AppState::config(cx).containers.group_by,
-                dk_core::grouping::GroupBy::Label(_)
-            );
-        if !label_selected {
-            self.errors.remove(&Key::LabelKey);
-            return;
-        }
-        let k = text.trim();
-        if k.is_empty() {
-            self.errors
-                .insert(Key::LabelKey, s::SET_LABEL_KEY_REQUIRED.into());
-            return;
-        }
-        self.errors.remove(&Key::LabelKey);
-        self.label_pending = false;
-        let g = dk_core::grouping::GroupBy::Label(k.to_owned());
-        if AppState::config(cx).containers.group_by != g {
-            AppState::update_config(cx, |c| c.containers.group_by = g);
-        }
-    }
-
     /// Shows changes made elsewhere. Fields with focus or a pending error keep what the user
     /// typed.
     fn sync_from_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let config = AppState::config(cx).clone();
         for (&key, state) in &self.selects {
             let ix = controls::choice_index(key, &config);
-            let pending_label = key == Key::GroupBy && self.label_pending;
-            if !pending_label && state.read(cx).selected_index(cx) != Some(IndexPath::new(ix)) {
+            if state.read(cx).selected_index(cx) != Some(IndexPath::new(ix)) {
                 state.update(cx, |s, cx| {
                     s.set_selected_index(Some(IndexPath::new(ix)), window, cx)
                 });
@@ -340,10 +285,6 @@ impl SettingsPage {
                 Spec::Text(t) => (t.get)(&config),
                 Spec::Choice(_) => continue,
             };
-            // The label key is kept while grouping by something else.
-            if key == Key::LabelKey && want.is_empty() {
-                continue;
-            }
             if state.read(cx).value() != want {
                 state.update(cx, |s, cx| s.set_value(want, window, cx));
             }

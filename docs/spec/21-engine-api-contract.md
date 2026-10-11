@@ -277,8 +277,8 @@ pub struct EngineEvent { pub at: OffsetDateTime, pub kind: ResourceKind /* Conta
 Implemented as pure functions in `dk-core::grouping` and unit-tested.
 
 1. **Compose**: a container that has label `com.docker.compose.project` belongs to group `compose:<project>`. The group shows the project name, plus `working_dir` taken from `com.docker.compose.project.working_dir` when present.
-2. **Custom label** (setting): the user may choose another label key to group by, for example `app` or `com.example.stack`.
-3. **Ungrouped**: containers without the label are listed at top level, after groups (or interleaved, sorted by the active sort key; this is a setting).
+2. **Custom label** (setting): the user sets one label key (`containers.group_label_key`, default `app.kubernetes.io/part-of`, one of the Kubernetes recommended labels; it can be any key, for example `app` or `com.example.stack`). *Label* mode groups every container that has a non-empty value for the key under `label:<key>=<value>`; the group shows the value. *Combined* mode (the default) applies rule 1 first and, only for containers without a Compose project, this rule. A Compose project wins when a container has both. An empty or whitespace-only value counts as no value. The key is a parameter of the pure grouping functions; the Containers page never asks for it.
+3. **Ungrouped**: containers that the active mode can't place (no Compose project and no label value in *Combined*; no value for the key in *Label*; no Compose project in *Compose*) are listed at top level, after groups (or interleaved, sorted by the active sort key; this is a setting).
 4. Group aggregate state: **Running** if all members run, **Partial** (`2/3 running`) if some run, **Exited** if none run. Group CPU% and memory are the sums of member values, when stats are enabled.
 5. Group actions apply to members **in parallel with a limit of 4**: start, stop, restart, delete. Delete asks for confirmation and lists the members.
 6. Volumes and networks also get `compose` from `com.docker.compose.project` labels. This is shown as a column and filter, not as tree grouping, in v1.
