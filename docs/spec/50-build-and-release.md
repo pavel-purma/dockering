@@ -67,11 +67,11 @@ Updater: `UPDATE_SIGNING_KEY` (minisign), with the public keys in `crates/dk-upd
 | `test` | ubuntu-24.04, windows-2025, macos-15 | `cargo nextest run --workspace` (unit, contract with fixtures, gpui `TestAppContext` view tests) |
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
 | `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package (on `main`). On Windows, every push and PR also builds the Inno installer (x64, arm64) and runs silent install → `--version` → uninstall (REL-014) |
-| `gate` (`CI gate`) *(planned, REL-081)* | ubuntu-24.04, `if: always()` | Succeeds only if `lint`, `test`, `integration-docker` and `build` all succeeded. The one `ci.yml` check the ruleset requires (REL-080). |
+| `gate` (`CI gate`) *(REL-081)* | ubuntu-24.04, `if: always()` | Succeeds only if `lint`, `test`, `integration-docker` and `build` all succeeded. The one `ci.yml` check the ruleset requires (REL-080). |
 | `release` | on `v*` tags or manual dispatch; 6 targets | Verify version/changelog/channel configuration → package six targets (signed channel: Windows files go through the signing provider; macOS per `MACOS_SIGNING`) → require all 12 distributions → manifest (signed and checked against the app's public keys in the signed channel), notes, SHA256SUMS → public provenance → review artifact; tag runs create a draft. Explicit unsigned mode (REL-016); complete-asset validation (REL-017). |
 | `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
 | `release-plz` *(dormant)* | push to `main` / `release/*` | Skips without the release-bot secrets. Not used while the `/release` skill cuts releases (REL-010) |
-| `pr-title` | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that `cargo xtask release-plan` classifies, REL-011). Required by the ruleset (REL-080, planned). |
+| `pr-title` | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that `cargo xtask release-plan` classifies, REL-011). Required by the ruleset (REL-080). |
 | Dependabot | weekly (Mondays), `.github/dependabot.yml` | Version-update PRs for `cargo` and `github-actions`, titled `chore(deps): …`. Minor/patch bumps grouped per ecosystem; majors separate. Security updates are on too. |
 | `wslc-abi-watch` | weekly schedule, ubuntu-24.04 | `cargo xtask wslc-abi-check latest`. If the latest `microsoft/WSL` release changed `wslc.idl`, open an issue (20 §5.7). |
 | `linux-smoke` *(REL-070…077, REL-079; release and schedule triggers not yet exercised)* | `release: published`, weekly, manual, PRs touching it; ubuntu-24.04 runner, four distribution containers | Installs the published Linux x86_64 packages into Ubuntu 24.04/26.04, Fedora and Arch containers, launches the app on Xvfb and headless sway, walks the pages, quits, keeps screenshots. See [distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079). |
@@ -81,7 +81,7 @@ Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) 
 
 ## Merge gate (REL-080…082)
 
-*Planned (2026-10-11), plan: [ci-merge-gate](../plan/features/ci-merge-gate.md). Today the `Protect main` ruleset requires a pull request and squash merges but no status check, so a red `lint` job did not stop #38 or #39 from merging.*
+*Implemented (2026-10-11), plan: [ci-merge-gate](../plan/features/ci-merge-gate.md). Until then the `Protect main` ruleset required a pull request and squash merges but no status check, so a red `lint` job did not stop #38 or #39 from merging.*
 
 | ID | Requirement |
 |---|---|
@@ -89,7 +89,9 @@ Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) 
 | REL-081 | **One aggregate job.** `ci.yml` ends with a job `gate` (display name `CI gate`) that `needs` every other job in the file, runs with `if: always()`, and fails unless every needed job's result is `success`: a failed, cancelled or skipped job all fail it (GitHub counts a skipped required check as passing). The ruleset names the gate, not the matrix legs, so changing a matrix needs no ruleset change. A new `ci.yml` job MUST be added to `needs`. |
 | REL-082 | **Always reported.** `ci.yml` and `pr-title.yml` MUST run on every pull request to `main`: no `paths` or `paths-ignore` filter on `pull_request`, and no job-level `if` in `ci.yml`. A required check that never reports blocks the pull request for good. |
 
-Verification: `scripts/tests/test_ci_gate.py` (REL-081, REL-082, and that the names in REL-080 are real job names); the live ruleset is checked with `gh api repos/pavel-purma/dockering/rules/branches/main`, which lists both contexts.
+Verification: `scripts/tests/test_ci_gate.py` (REL-081, REL-082, and that the names in REL-080 are real job names); the live ruleset is checked with `gh api repos/pavel-purma/dockering/rules/branches/main`, which lists both contexts. Live evidence, 2026-10-11: the rule was added after #41 merged (`CI gate` green on its run); canary PR #42, with a deliberate formatting error, failed `lint` and `CI gate`, showed `mergeStateStatus: BLOCKED`, and `gh pr merge` refused it ("the base branch policy prohibits the merge"); it was closed unmerged. The Admin bypass was not exercised.
+
+Known gap: a pull request whose branch predates `ci.yml`'s `gate` job never reports `CI gate` and stays blocked until it is rebased or merged with `main`.
 
 ## Packaging (`cargo-packager`, config in `packaging/`)
 
