@@ -35,6 +35,9 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 exec > >(tee "$OUT/run.log") 2>&1
+# scratch frames stay out of $OUT, which is captioned and uploaded
+SCRATCH=$(mktemp -d)
+trap 'rm -rf "$SCRATCH"' EXIT
 t0=$(date +%s)
 now() { echo $(($(date +%s) - t0)); }
 step() { echo "--- [$(now)s] $*"; }
@@ -91,21 +94,23 @@ win_colours() {
   bounds=$(winlist ockering | grep 'layer=0.*onscreen=true' | head -n 1 | sed -n 's/.*bounds=\([^,]*\),\([^,]*\),\([^,]*\),\([^,]*\).*/\1 \2 \3 \4/p')
   [ -n "$bounds" ] || return 1
   read -r x y w h <<<"$bounds"
-  tmo 30 screencapture -x -R "$(printf '%.0f,%.0f,%.0f,%.0f' "$x" "$y" "$w" "$h")" "$OUT/.win.png" 2>/dev/null || return 1
-  colours "$OUT/.win.png"
+  rm -f "$SCRATCH/win.png"
+  tmo 30 screencapture -x -R "$(printf '%.0f,%.0f,%.0f,%.0f' "$x" "$y" "$w" "$h")" "$SCRATCH/win.png" 2>/dev/null || return 1
+  [ -s "$SCRATCH/win.png" ] || return 1
+  colours "$SCRATCH/win.png"
 }
 
 # captions are added on exit, so the checks see raw frames; a frame that cannot be captioned stays as taken
 caption_frames() {
-  local f text ok=0 raw=0 tmp="$OUT/.caption.png"
-  text="macOS $(sw_vers -productVersion) $ASCII_DOT $ARCH $ASCII_DOT $SCENARIO $ASCII_DOT dockering $EXPECTED_VERSION $ASCII_DOT Metal: ${GPU:-?}"
+  local f text ok=0 raw=0 tmp="$SCRATCH/caption.png"
+  text="macOS $(sw_vers -productVersion) $ASCII_DOT $ARCH $ASCII_DOT $SCENARIO $ASCII_DOT dockering $EXPECTED_VERSION $ASCII_DOT GPU: ${GPU:-not reported}"
   for f in "$OUT"/*.png; do
     [ -f "$f" ] || continue
     if tmo 30 "$TOOL" caption "$f" "$tmp" "$text" 2>/dev/null && mv -f "$tmp" "$f"; then ok=$((ok + 1)); else raw=$((raw + 1)); rm -f "$tmp"; fi
   done
   if [ $((ok + raw)) -gt 0 ]; then check captions INFO "$ok captioned, $raw left as taken"; fi
 }
-trap caption_frames EXIT
+trap 'caption_frames; rm -rf "$SCRATCH"' EXIT
 
 # ---- install the published .dmg, as a user would -------------------------------------------------------
 APP=/Applications/Dockering.app
@@ -289,14 +294,14 @@ launch_wait() { # <pid>: a window of layer 0 on screen within 40 s
 wait_stable() { # two frames 1 s apart that differ by fewer than 500 px
   local limit="${1:-30}" end ae
   end=$(($(date +%s) + limit))
-  rm -f "$OUT/.a.png" "$OUT/.b.png"
-  shot "$OUT/.a.png"
+  rm -f "$SCRATCH/a.png" "$SCRATCH/b.png"
+  shot "$SCRATCH/a.png"
   while [ "$(date +%s)" -lt "$end" ]; do
     sleep 1
-    shot "$OUT/.b.png"
-    ae=$(px_diff "$OUT/.a.png" "$OUT/.b.png")
+    shot "$SCRATCH/b.png"
+    ae=$(px_diff "$SCRATCH/a.png" "$SCRATCH/b.png")
     if [ -n "$ae" ] && [ "$ae" -lt 500 ]; then echo stable; return 0; fi
-    cp "$OUT/.b.png" "$OUT/.a.png"
+    cp "$SCRATCH/b.png" "$SCRATCH/a.png"
   done
   echo unstable
   return 1
