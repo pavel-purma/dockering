@@ -22,7 +22,7 @@ use futures::future::{Either, select};
 use crate::capabilities::Capabilities;
 use crate::engine::Engine;
 use crate::error::EngineError;
-use crate::grouping::{COMPOSE_PROJECT_LABEL, GroupBy, GroupNode, group};
+use crate::grouping::{COMPOSE_PROJECT_LABEL, DEFAULT_GROUP_LABEL_KEY, GroupBy, GroupNode, group};
 use crate::model::*;
 
 /// Upper bound for any single request-style check.
@@ -285,7 +285,7 @@ fn validate_containers(list: &[ContainerSummary]) -> CheckResult {
         }
     }
     // Grouping invariant: every container appears exactly once in the grouped view.
-    let mut members: Vec<usize> = group(list, &GroupBy::Compose, false)
+    let mut members: Vec<usize> = group(list, GroupBy::Compose, DEFAULT_GROUP_LABEL_KEY, false)
         .into_iter()
         .flat_map(|node| match node {
             GroupNode::Group(g) => g.members,

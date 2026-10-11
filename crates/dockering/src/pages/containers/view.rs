@@ -10,9 +10,9 @@ use dk_core::{Capabilities, ContainerState, ContainerSummary, EngineId, StatsSam
 use dk_hub::Feed;
 use futures::StreamExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::PopupMenu;
-use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, IconName, Sizable, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -38,7 +38,7 @@ use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::segmented::{Segment, Segmented};
-use crate::ui::widgets::{focus_wrap, port_url};
+use crate::ui::widgets::{self, focus_wrap, port_url};
 
 /// Search debounce (SHL-006).
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(120);
@@ -47,14 +47,29 @@ pub const BACKGROUND_THRESHOLD: usize = 2_000;
 
 type Table = ListTable<ContainersDelegate>;
 
+/// The *Group by* menu, in order (CON-010).
+const GROUP_BY_MODES: [(GroupBy, &str); 4] = [
+    (GroupBy::Combined, s::GROUP_BY_COMBINED),
+    (GroupBy::Compose, s::GROUP_BY_COMPOSE),
+    (GroupBy::None, s::GROUP_BY_NONE),
+    (GroupBy::Label, s::GROUP_BY_LABEL),
+];
+
+fn group_by_name(g: GroupBy) -> &'static str {
+    GROUP_BY_MODES
+        .iter()
+        .find(|(m, _)| *m == g)
+        .map_or(s::GROUP_BY_COMBINED, |(_, name)| name)
+}
+
 pub struct ContainersPage {
     store: Entity<EngineStore>,
     engine: EngineId,
     table: Entity<Table>,
     search: Entity<InputState>,
-    group_key_input: Entity<InputState>,
     filter: StatusFilter,
     group_by: GroupBy,
+    label_key: String,
     query: String,
     running: usize,
     stopped: usize,
@@ -83,7 +98,6 @@ pub struct ContainersPage {
     overflow_focus: FocusHandle,
     group_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
     overflow_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
-    label_prompt: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -99,7 +113,8 @@ impl ContainersPage {
             .get(engine.as_str())
             .map(|f| StatusFilter::parse(f))
             .unwrap_or_default();
-        let group_by = config.containers.group_by.clone();
+        let group_by = config.containers.group_by;
+        let label_key = config.containers.group_label_key.clone();
         let table = cx.new(|cx| {
             ListTable::new(
                 ContainersDelegate::new(),
@@ -122,20 +137,18 @@ impl ContainersPage {
                 .placeholder(s::SEARCH)
                 .clean_on_escape()
         });
-        let group_key_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(s::GROUP_LABEL_KEY));
         let mut subs = vec![
             cx.subscribe_in(&table, window, Self::on_list_event),
             cx.subscribe_in(&search, window, Self::on_search_event),
-            cx.subscribe_in(&group_key_input, window, Self::on_group_key_event),
             cx.subscribe_in(&store, window, Self::on_store_event),
             cx.observe(&store, |_, _, cx| cx.notify()),
         ];
         // M9 (SET-020): Settings apply live: group-by default, CPU/memory columns.
         subs.push(cx.observe_global::<AppState>(|this, cx| {
             let c = &AppState::config(cx).containers;
-            if c.group_by != this.group_by {
-                this.group_by = c.group_by.clone();
+            if c.group_by != this.group_by || c.group_label_key != this.label_key {
+                this.group_by = c.group_by;
+                this.label_key = c.group_label_key.clone();
                 this.rebuild(cx);
             }
             this.sync_delegate(cx);
@@ -153,9 +166,9 @@ impl ContainersPage {
             engine,
             table,
             search,
-            group_key_input,
             filter,
             group_by,
+            label_key,
             query: String::new(),
             running: 0,
             stopped: 0,
@@ -177,7 +190,6 @@ impl ContainersPage {
             overflow_focus,
             group_bounds: Default::default(),
             overflow_bounds: Default::default(),
-            label_prompt: false,
             _subs: subs,
         };
         this.sync_delegate(cx);
@@ -206,8 +218,8 @@ impl ContainersPage {
         self.filter
     }
 
-    pub fn group_by(&self) -> &GroupBy {
-        &self.group_by
+    pub fn group_by(&self) -> GroupBy {
+        self.group_by
     }
 
     /// A header menu (group-by, sort, overflow) is open.
@@ -392,7 +404,8 @@ impl ContainersPage {
         let containers = self.containers(cx).to_vec();
         // Pending rows whose state changed are done.
         let interleave = AppState::config(cx).containers.interleave_ungrouped;
-        let group_by = self.group_by.clone();
+        let group_by = self.group_by;
+        let label_key = self.label_key.clone();
         let filter = self.filter;
         let query = self.query.clone();
         let sort = self.table.read(cx).model(cx).sort.clone();
@@ -402,7 +415,8 @@ impl ContainersPage {
             let mem = |id: &str| stats.get(id).map(|s| s.mem);
             model::build(BuildInput {
                 containers: &containers,
-                group_by: &group_by,
+                group_by,
+                label_key: &label_key,
                 interleave,
                 filter,
                 query: &query,
@@ -574,46 +588,13 @@ impl ContainersPage {
     }
 
     fn set_group_by(&mut self, g: GroupBy, cx: &mut Context<Self>) {
-        self.group_by = g.clone();
+        self.group_by = g;
         AppState::update_config(cx, move |c| c.containers.group_by = g);
         self.rebuild(cx);
     }
 
-    fn on_set_group_by(&mut self, a: &SetGroupBy, window: &mut Window, cx: &mut Context<Self>) {
-        if a.mode.as_ref() == "label:" {
-            // Ask for the key (CON-010 "Label…").
-            self.label_prompt = true;
-            self.group_key_input.update(cx, |i, cx| i.focus(window, cx));
-            cx.notify();
-            return;
-        }
+    fn on_set_group_by(&mut self, a: &SetGroupBy, _: &mut Window, cx: &mut Context<Self>) {
         self.set_group_by(group_by_from_mode(&a.mode), cx);
-    }
-
-    fn on_group_key_event(
-        &mut self,
-        _: &Entity<InputState>,
-        event: &InputEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match event {
-            InputEvent::PressEnter { .. } => {
-                let key = self.group_key_input.read(cx).value().trim().to_owned();
-                self.label_prompt = false;
-                if !key.is_empty() {
-                    self.set_group_by(GroupBy::Label(key), cx);
-                }
-                let h = self.table.focus_handle(cx);
-                window.focus(&h, cx);
-                cx.notify();
-            }
-            InputEvent::Blur => {
-                self.label_prompt = false;
-                cx.notify();
-            }
-            _ => {}
-        }
     }
 
     fn on_sort_by(&mut self, a: &SortByColumn, _: &mut Window, cx: &mut Context<Self>) {
@@ -667,31 +648,18 @@ impl ContainersPage {
     }
 
     fn on_group_by_menu(&mut self, _: &list::GroupBy, window: &mut Window, cx: &mut Context<Self>) {
-        let current = self.group_by.clone();
+        let current = self.group_by;
         let anchor = self.group_focus.clone();
         self.open_menu(anchor, window, cx, move |menu, _, _| {
-            let item = |m: PopupMenu, label: &'static str, mode: &str, checked: bool| {
+            GROUP_BY_MODES.iter().fold(menu, |m, &(g, label)| {
                 m.menu_with_check(
                     label,
-                    checked,
+                    current == g,
                     Box::new(SetGroupBy {
-                        mode: mode.to_owned().into(),
+                        mode: group_by_to_mode(g).into(),
                     }),
                 )
-            };
-            let m = item(
-                menu,
-                s::GROUP_BY_COMPOSE,
-                "compose",
-                current == GroupBy::Compose,
-            );
-            let m = item(m, s::GROUP_BY_NONE, "none", current == GroupBy::None);
-            item(
-                m,
-                s::GROUP_BY_LABEL,
-                "label:",
-                matches!(current, GroupBy::Label(_)),
-            )
+            })
         });
     }
 
@@ -1081,18 +1049,22 @@ impl ContainersPage {
         );
     }
 
-    /// CON-013 Delete all: lists members, Force option, networks/volumes kept.
+    /// CON-013 Delete all: lists members and a Force option; only Compose groups get the
+    /// networks/volumes note.
     fn confirm_group_delete(
         &mut self,
         members: Vec<ContainerSummary>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let project = self
+        let (project, is_compose) = self
             .table
             .read(cx)
             .cursor_row(cx)
-            .and_then(|r| r.group().map(|g| g.group.label.clone()))
+            .and_then(|r| {
+                r.group()
+                    .map(|g| (g.group.label.clone(), g.group.is_compose))
+            })
             .unwrap_or_default();
         let any_running = members
             .iter()
@@ -1109,8 +1081,10 @@ impl ContainersPage {
             .collect();
         let mut spec = ConfirmSpec::new(s::confirm_delete_group_title(&project))
             .items(names)
-            .note(s::KEEP_NETWORKS_NOTE)
             .confirm_label(s::ACTION_DELETE_ALL);
+        if is_compose {
+            spec = spec.note(s::KEEP_NETWORKS_NOTE);
+        }
         if any_running {
             spec = spec.option(s::FORCE_RUNNING, false);
         }
@@ -1341,11 +1315,7 @@ impl ContainersPage {
     fn render_toolbar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let loading = self.store.read(cx).containers.is_loading();
         let filter = self.filter;
-        let group_label = match &self.group_by {
-            GroupBy::Compose => s::GROUP_BY_COMPOSE.to_owned(),
-            GroupBy::None => s::GROUP_BY_NONE.to_owned(),
-            GroupBy::Label(k) => format!("label: {k}"),
-        };
+        let group_name = group_by_name(self.group_by);
         let controls = [
             div()
                 .id("status-filter")
@@ -1395,12 +1365,9 @@ impl ContainersPage {
             focus_wrap(
                 "group-by-wrap",
                 &self.group_focus,
-                Button::new("group-by")
+                widgets::labelled_trigger("group-by", s::GROUP_BY, group_name, cx)
                     .debug_selector(|| "group-by".into())
-                    .small()
-                    .outline()
-                    .label(format!("{}: {group_label}", s::GROUP_BY))
-                    .dropdown_caret(true)
+                    .accessibility_label(format!("{}: {group_name}", s::GROUP_BY))
                     .tooltip_with_action(s::CMD_GROUP_BY, &list::GroupBy, None)
                     .on_click(dispatch::on_click(
                         &self.group_focus,
@@ -1479,18 +1446,6 @@ impl ContainersPage {
             overflow,
             cx,
         )
-        .when(self.label_prompt, |this| {
-            this.child(
-                h_flex()
-                    .gap_2()
-                    .child(div().text_sm().child(s::GROUP_BY_LABEL))
-                    .child(
-                        div()
-                            .w(px(240.))
-                            .child(Input::new(&self.group_key_input).small()),
-                    ),
-            )
-        })
         .into_any_element()
     }
 
@@ -1580,9 +1535,4 @@ impl Render for ContainersPage {
             .child(div().flex_1().min_h_0().child(body))
             .when_some(self.menu.as_ref(), |this, m| this.child(m.render()))
     }
-}
-
-#[allow(dead_code)]
-fn _mode(g: &GroupBy) -> String {
-    group_by_to_mode(g)
 }

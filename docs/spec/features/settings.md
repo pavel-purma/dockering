@@ -1,6 +1,6 @@
 # Feature: Settings
 
-- **Status:** implemented (2026-10-02)
+- **Status:** implemented (2026-10-02; *Combined* default and the always-shown, prefilled group label key, SET-020 changed, implemented 2026-10-11)
 - **Requirement prefix:** SET
 - **Plan:** no per-feature plan; built in milestone M9 of the [v1 plan](../../plan/README.md)
 
@@ -20,7 +20,7 @@ per row.
 |---|---|---|
 | General | SET-001 | Theme (System/Light/Dark) · Start page (Containers/Images/Volumes) · Confirm before deleting stopped containers · Show Networks page |
 | Engines | SET-010 | See ENG-104/105 · "Show all WSL distros" · "Show all WSLC sessions" · Rescan · *Add engine…* · per engine: inline rename, *Enabled*, *Test connection*, *Start & connect* (stopped WSL distros), *Hide*/*Unhide*, *Remove* (manual, confirmed), transport + a short note, only when notable (ENG-110), *Set as default* / *Clear default* (ENG-116), and the "Same daemon as" note (ENG-009/114). Rescan is the only way to re-run discovery (ENG-113); renames, *Enabled*, *Hide*, and the default survive it (ENG-115) |
-| Containers | SET-020 | Group by default (Compose/None/Label) · Custom group label key · Show CPU/Memory columns · Polling interval fallback (s, 1–300, validated inline) |
+| Containers | SET-020 | Group by default (Combined/Compose/None/Label; default *Combined*) · Group label key (default `app.kubernetes.io/part-of`, always shown and prefilled; used by *Combined* and *Label*; the only place to set it, CON-014; an empty key is rejected inline and the previous key stays) · Show CPU/Memory columns · Polling interval fallback (s, 1–300, validated inline) |
 | Logs | SET-030 | Initial tail lines (default 1000) · Max buffer lines (default 50k) · Timestamps default · Wrap default |
 | Terminal | SET-040 | Font family · Font size · Default shell · Scrollback lines · External terminal command (TRM-009; must contain `{cmd}`, validated inline) |
 | Stats | SET-050 | History window (default 15 min, 1–60) · CPU % relative to all cores |
@@ -35,7 +35,7 @@ per row.
 |---|---|
 | SET-001 | `set_001_theme_applies_live_and_persists`, `set_001_networks_page_hidden_from_sidebar`, `set_001_start_page_and_confirm_stopped_persist` |
 | SET-010 | `eng_104_*`, `eng_105_*`, `eng_109_show_all_toggles_persist`, `eng_025_enable_toggle_calls_hub_update`, `eng_116_*` (`eng_009_unmerge_adds_id_to_config` went away with *Un-merge*) |
-| SET-020 | `set_020_group_by_default_affects_containers_page`, `set_020_mounted_containers_page_follows_settings`, `set_020_cpu_columns_toggle_live`, `set_020_polling_interval_validated_inline`, `set_020_polling_interval_at_least_one_second` |
+| SET-020 | `set_020_group_by_default_affects_containers_page`, `set_020_label_key_prefilled_and_required`, `set_020_mounted_containers_page_follows_settings`, `set_020_cpu_columns_toggle_live`, `set_020_polling_interval_validated_inline`, `set_020_polling_interval_at_least_one_second`, `a11y_tab_walk_reaches_all_interactive_settings` (the key field is a tab stop) |
 | SET-030/040/050 | `set_030_040_050_numbers_text_and_switches_persist`, `set_040_font_size_accepts_decimals`, `set_050_history_window_1_to_60_minutes` |
 | SET-060 | `set_060_copy_diagnostics_to_clipboard`, `set_060_log_level_persists`, `rel_002_licences_are_embedded` |
 | SET-070 | `set_070_keyboard_section_lists_bindings` |

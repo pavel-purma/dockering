@@ -1,8 +1,8 @@
 # Feature: Containers list & grouping
 
-- **Status:** implemented (2026-10-02)
+- **Status:** implemented (2026-10-02; *Combined* grouping and the Settings-only label key, CON-010/011/013 changed and CON-014 new, implemented 2026-10-11)
 - **Requirement prefix:** CON
-- **Plan:** no per-feature plan; built in milestones M2 and M5 of the [v1 plan](../../plan/README.md)
+- **Plan:** no per-feature plan; built in milestones M2 and M5 of the [v1 plan](../../plan/README.md). 2026-10-11 changes: [group-by-combined](../../plan/features/group-by-combined.md) (done)
 
 ## User stories
 
@@ -19,10 +19,11 @@
 | CON-003 | Sort by Name, Image, Status, Created, CPU, and Memory (header click or `Mod+Shift+O`). Inside groups, members sort by the same key. Groups sort by name, or by their first member under the active key. |
 | CON-004 | Filter: a segmented control *All* / *Running* / *Stopped* (the selection persists per engine). |
 | CON-005 | Search per SHL-006. A match in a group member auto-expands that group. |
-| CON-010 | **Group by** (`Select`): *Compose project* (default) / *None* / *Label…* (custom key). Rules in [21 §4](../21-engine-api-contract.md#4-grouping-rules-con-010). |
-| CON-011 | A group row is visibly a group header: a tinted band with an accent stripe on its left edge, a disclosure chevron, a stack icon, the project name with a "compose" tag, summed CPU and memory, and group actions (Start all / Stop all / Restart all / Delete all). Groups are **expanded by default**, so every container is visible; the expanded state persists per engine and project. A click anywhere on the group row expands/collapses it. |
+| CON-010 | **Group by**: *Combined* (default) / *Compose project* / *None* / *Label*. The header control is a field: a recessed *Group by* caption, then the selected mode name and a caret, in the same outline chrome as the search input. The caption never changes; the value is its own element. It opens a menu with the four modes, *Combined* first. The label key that *Combined* and *Label* use is never shown or entered on this page: it is a setting (CON-014, SET-020). Rules in [21 §4](../21-engine-api-contract.md#4-grouping-rules-con-010). |
+| CON-011 | A group row is visibly a group header: a tinted band with an accent stripe on its left edge, a disclosure chevron, a stack icon, the group name with a "compose" tag (a group made by a label has a "label" tag instead, and the label `key=value` as that tag's tooltip), summed CPU and memory, and group actions (Start all / Stop all / Restart all / Delete all). Groups are **expanded by default**, so every container is visible; the expanded state persists per engine and project. A click anywhere on the group row expands/collapses it. |
 | CON-012 | Group rows display the working directory as a tooltip, from `com.docker.compose.project.working_dir`. |
-| CON-013 | **Group action semantics.** *Start all*: members start in Compose dependency order when `com.docker.compose.depends_on` labels exist, otherwise in parallel (limit 4). *Stop all*: reverse order, then parallel. *Restart all* = stop all + start all. *Delete all*: the confirm dialog lists the members. Running members need *Force* (checkbox, off by default). Project **networks and volumes are kept** and the dialog says so ("use `docker compose down` to remove networks/volumes"). One-off containers (`com.docker.compose.oneoff=True`) are included and marked. Partial failures are reported per member in one notification. |
+| CON-013 | **Group action semantics.** *Start all*: members start in Compose dependency order when `com.docker.compose.depends_on` labels exist, otherwise in parallel (limit 4). *Stop all*: reverse order, then parallel. *Restart all* = stop all + start all. *Delete all*: the confirm dialog lists the members. Running members need *Force* (checkbox, off by default). For a Compose group, project **networks and volumes are kept** and the dialog says so ("use `docker compose down` to remove networks/volumes"); a label group has no such note. One-off containers (`com.docker.compose.oneoff=True`) are included and marked. Partial failures are reported per member in one notification. |
+| CON-014 | **Label key** *(2026-10-11)*. *Combined* and *Label* modes read their key from `containers.group_label_key` ([SET-020](settings.md)), default `app.kubernetes.io/part-of` (the Kubernetes recommended label for "the name of a higher level application this one is part of"). The key is configured only in Settings. The Containers page MUST NOT show it or ask for it: no inline prompt, and no key in the *Group by* control or menu. Changing the key in Settings regroups a mounted Containers page without a remount. A container in a *Label* group has no Compose project requirement; in *Combined* mode a Compose project always wins over the label. |
 | CON-020 | Row actions: Start (if not running), Stop (if running), Restart, Pause/Unpause (overflow menu, capability-gated), Kill (overflow), Delete (`⋮` menu and selection actions only, SHL-026). Inline buttons: start/stop, restart, `⋮`. Also: open in Terminal, View logs, Copy id, and Inspect, through the overflow menu and the right-click `context_menu`. |
 | CON-021 | Delete of a running container MUST confirm with "Force delete running container?". Delete of a stopped one asks unless "Don't ask again" is set. |
 | CON-022 | Bulk actions bar appears for ≥ 2 selected rows. Selecting a group selects all of its members. |
@@ -46,7 +47,7 @@ Containers page ──(double-click row)──▶ Container detail (Overview)
 ## Data & contract usage
 
 - `EngineStore.containers: Resource<Vec<ContainerSummary>>` ← `Engine::list_containers` (`ContainerQuery::default()` = `all: true`)
-- Grouping: `dk_core::grouping::group(&[ContainerSummary], GroupBy, interleave) -> Vec<GroupNode>`. Filter, search, grouping, and sorting run in `background_spawn` above 2,000 rows (`BACKGROUND_THRESHOLD`), with a revision id that drops stale results.
+- Grouping: `dk_core::grouping::group(&[ContainerSummary], GroupBy, label_key, interleave) -> Vec<GroupNode>`. Filter, search, grouping, and sorting run in `background_spawn` above 2,000 rows (`BACKGROUND_THRESHOLD`), with a revision id that drops stale results.
 - Actions: `Engine::container_action`, `Engine::remove_container`, `Engine::prune_containers`. Group and bulk fan-out runs 4 in parallel.
 - Live: `Engine::events(container)` → 150 ms debounce → refetch
 - Optional CPU/mem columns: `hub.stats` (the hub `StatsService`) for **visible running rows only** (`visible_rows_changed`), capped at `EngineInfo.list_stats_limit`, which is per transport (STA-006: Docker/WSLC COM 20, WSL bridge 8, WSLC CLI 0 = columns hidden).
@@ -69,10 +70,11 @@ Manual, on real engines: tracked in the [release checklist](../../plan/release-c
 | CON-003 | `con_003_sort_by_status_desc_and_name`, `con_003_sort_by_memory_usage` |
 | CON-004 | `con_004_filter_running_and_stopped`, `con_004_filter_clicks_work_after_clicking_header_background` |
 | CON-005 | `con_005_search_matches_member_and_expands_group` |
-| CON-010 | `con_010_*` (dk-core grouping, list model, view), `kbd_039_group_by_none_flattens` |
-| CON-011 | `con_011_aggregate_*`, `con_011_list_default_expands_groups`, `con_010_groups_start_collapsed_and_flatten_on_expand` (model) |
+| CON-010 | `con_010_*` (dk-core grouping, list model, view), `con_010_combined_default_groups_label_fallback`, `con_010_combined_prefers_compose_then_label`, `con_010_combined_ungrouped_without_either`, `con_010_label_mode_ignores_compose`, `con_010_empty_label_value_is_ungrouped`, `kbd_039_group_by_none_flattens` |
+| CON-011 | `con_011_aggregate_*`, `con_011_list_default_expands_groups`, `con_010_groups_start_collapsed_and_flatten_on_expand` (model), `con_011_group_is_compose_follows_resolution`, `con_011_group_header_tag_and_tooltip_follow_group_kind`, `con_011_label_group_has_label_tag_and_no_working_dir` |
 | CON-012 | `con_012_working_dir` |
-| CON-013 | `con_013_*` (start order, cycles, stop all, delete all) |
+| CON-013 | `con_013_*` (start order, cycles, stop all, delete all), `con_013_label_group_delete_dialog_has_no_compose_note` |
+| CON-014 | `con_014_default_is_combined_with_part_of_key`, `con_014_empty_label_key_normalised`, `con_014_legacy_label_group_by_migrates`, `con_014_legacy_compose_and_none_load_unchanged`, `con_014_group_by_roundtrips_in_the_new_shape`, `con_014_corrupt_group_by_is_backed_up_and_defaulted` (dk-hub); `con_014_no_label_prompt_on_containers_page`, `con_014_settings_key_change_regroups_mounted_page`, `con_014_key_change_above_threshold_keeps_latest_result`, `con_014_label_key_is_part_of_the_build` |
 | CON-020 | `kbd_030_s_starts_stopped_container`, `kbd_036_shift_f10_opens_row_menu` |
 | CON-021 | `con_021_running_delete_needs_force`, `set_001_start_page_and_confirm_stopped_persist` |
 | CON-022 | `kbd_034_space_on_group_toggles_members`, `kbd_038_select_all_includes_collapsed_members_and_targets` |

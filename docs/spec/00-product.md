@@ -60,7 +60,7 @@ macOS 15+ and Vulkan on Linux are requirements inherited from GPUI Kit
 | **Engine kind** | `docker` (socket, pipe, or TCP), `wsl-distro`, `wslc`; `apple-container` is reserved for a future release |
 | **Backend** | A crate implementing the `Engine` contract for one runtime. It may contain several **transports**, for example WSLC's COM and CLI. |
 | **Active engine** | The engine whose resources are currently shown. Exactly one at a time per window. |
-| **Group** | A set of containers that share a group key. By default this is the Compose project label `com.docker.compose.project`. |
+| **Group** | A set of containers that share a group key. By default (*Combined*) this is the Compose project label `com.docker.compose.project`, or, for containers outside Compose, the value of a label key set in Settings (default `app.kubernetes.io/part-of`). |
 | **Capability** | A feature flag an engine advertises (for example, `exec_resize`). The UI hides or disables what the engine can't do. |
 | **Hub** | `EngineHub`, the background service that owns the async runtime and all engine connections. |
 | **Store** | A GPUI entity that caches an engine's resource lists for the UI. |

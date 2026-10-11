@@ -7,6 +7,7 @@ use dk_core::grouping::{self, ContainerGroup, GroupBy, GroupNode};
 use dk_core::{ContainerState, ContainerSummary};
 use gpui_kit::SharedString;
 
+use crate::strings as s;
 use crate::ui::list_table::{ListNode, SortState};
 
 /// Status filter segment (CON-004).
@@ -138,7 +139,8 @@ pub fn compare(
 /// The inputs of a tree build.
 pub struct BuildInput<'a> {
     pub containers: &'a [ContainerSummary],
-    pub group_by: &'a GroupBy,
+    pub group_by: GroupBy,
+    pub label_key: &'a str,
     pub interleave: bool,
     pub filter: StatusFilter,
     pub query: &'a str,
@@ -157,6 +159,27 @@ pub struct BuildOutput {
 
 pub fn group_key(g: &ContainerGroup) -> SharedString {
     g.key.clone().into()
+}
+
+/// The tag and tooltip on a group header (CON-011, CON-012): a Compose group shows its
+/// working directory, a label group its `key=value` (from the group key `label:<key>=<value>`).
+pub struct GroupHeader {
+    pub tag: &'static str,
+    pub tooltip: Option<String>,
+}
+
+pub fn group_header(g: &ContainerGroup) -> GroupHeader {
+    if g.is_compose {
+        GroupHeader {
+            tag: s::COMPOSE_TAG,
+            tooltip: g.working_dir.clone(),
+        }
+    } else {
+        GroupHeader {
+            tag: s::LABEL_TAG,
+            tooltip: Some(g.key.strip_prefix("label:").unwrap_or(&g.key).to_owned()),
+        }
+    }
 }
 
 /// Filters, searches, groups, and sorts. Pure; runs on `background_spawn` for large lists.
@@ -184,7 +207,7 @@ pub fn build(input: BuildInput<'_>) -> BuildOutput {
     let sort = input.sort.unwrap_or(&default_sort);
     let cmp = |a: &ContainerSummary, b: &ContainerSummary| compare(a, b, sort, &input.stats);
 
-    let grouped = grouping::group(&visible, input.group_by, input.interleave);
+    let grouped = grouping::group(&visible, input.group_by, input.label_key, input.interleave);
     let mut nodes = Vec::with_capacity(grouped.len());
     let mut force_expanded = HashSet::new();
     for node in grouped {
@@ -264,6 +287,7 @@ pub fn build(input: BuildInput<'_>) -> BuildOutput {
 mod tests {
     use super::*;
     use dk_core::fake::fixtures;
+    use dk_core::grouping::DEFAULT_GROUP_LABEL_KEY;
 
     fn sample() -> Vec<ContainerSummary> {
         vec![
@@ -277,7 +301,7 @@ mod tests {
 
     fn input<'a>(
         cs: &'a [ContainerSummary],
-        by: &'a GroupBy,
+        by: GroupBy,
         filter: StatusFilter,
         query: &'a str,
         sort: Option<&'a SortState>,
@@ -285,6 +309,7 @@ mod tests {
         BuildInput {
             containers: cs,
             group_by: by,
+            label_key: DEFAULT_GROUP_LABEL_KEY,
             interleave: false,
             filter,
             query,
@@ -309,7 +334,7 @@ mod tests {
     #[test]
     fn con_010_groups_first_then_ungrouped_sorted_by_name() {
         let cs = sample();
-        let out = build(input(&cs, &GroupBy::Compose, StatusFilter::All, "", None));
+        let out = build(input(&cs, GroupBy::Compose, StatusFilter::All, "", None));
         assert_eq!(keys(&out), ["G:shop", "alpha", "paused", "redis"]);
         let ListNode::Group { children, .. } = &out.nodes[0] else {
             panic!()
@@ -323,28 +348,22 @@ mod tests {
     #[test]
     fn con_004_filter_running_and_stopped() {
         let cs = sample();
-        let out = build(input(&cs, &GroupBy::None, StatusFilter::Running, "", None));
+        let out = build(input(&cs, GroupBy::None, StatusFilter::Running, "", None));
         assert_eq!(keys(&out), ["paused", "redis", "shop-web-1"]);
-        let out = build(input(&cs, &GroupBy::None, StatusFilter::Stopped, "", None));
+        let out = build(input(&cs, GroupBy::None, StatusFilter::Stopped, "", None));
         assert_eq!(keys(&out), ["alpha", "shop-db-1"]);
     }
 
     #[test]
     fn con_005_search_matches_member_and_expands_group() {
         let cs = sample();
-        let out = build(input(
-            &cs,
-            &GroupBy::Compose,
-            StatusFilter::All,
-            "WEB",
-            None,
-        ));
+        let out = build(input(&cs, GroupBy::Compose, StatusFilter::All, "WEB", None));
         assert_eq!(keys(&out), ["G:shop"]);
         assert!(out.force_expanded.contains("compose:shop"));
         // Project name and id prefix match too.
         let out = build(input(
             &cs,
-            &GroupBy::Compose,
+            GroupBy::Compose,
             StatusFilter::All,
             "shop",
             None,
@@ -353,7 +372,7 @@ mod tests {
         let id_prefix = &cs[2].id[..6];
         let out = build(input(
             &cs,
-            &GroupBy::None,
+            GroupBy::None,
             StatusFilter::All,
             id_prefix,
             None,
@@ -370,7 +389,7 @@ mod tests {
         };
         let out = build(input(
             &cs,
-            &GroupBy::None,
+            GroupBy::None,
             StatusFilter::All,
             "",
             Some(&sort),
@@ -385,7 +404,7 @@ mod tests {
         };
         let out = build(input(
             &cs,
-            &GroupBy::None,
+            GroupBy::None,
             StatusFilter::All,
             "",
             Some(&sort),
@@ -414,7 +433,7 @@ mod tests {
                 cpu: &|_| None,
                 mem: &mem,
             },
-            ..input(&cs, &GroupBy::None, StatusFilter::Running, "", Some(&sort))
+            ..input(&cs, GroupBy::None, StatusFilter::Running, "", Some(&sort))
         });
         // Descending: most memory first; rows without a sample last.
         assert_eq!(keys(&out), ["redis", "shop-web-1", "paused"]);
@@ -424,9 +443,86 @@ mod tests {
     fn label_grouping() {
         let mut cs = sample();
         cs[2].labels.insert("app".into(), "cache".into());
-        let by = GroupBy::Label("app".into());
-        let out = build(input(&cs, &by, StatusFilter::All, "", None));
+        let out = build(BuildInput {
+            label_key: "app",
+            ..input(&cs, GroupBy::Label, StatusFilter::All, "", None)
+        });
         assert_eq!(keys(&out)[0], "G:cache");
+    }
+
+    #[test]
+    fn con_010_combined_groups_compose_then_label_fallback() {
+        let mut cs = sample();
+        cs[2]
+            .labels
+            .insert(DEFAULT_GROUP_LABEL_KEY.into(), "webshop".into());
+        cs[3]
+            .labels
+            .insert(DEFAULT_GROUP_LABEL_KEY.into(), "webshop".into());
+        // A Compose container that also carries the label stays in its project.
+        cs[0]
+            .labels
+            .insert(DEFAULT_GROUP_LABEL_KEY.into(), "webshop".into());
+        let out = build(input(&cs, GroupBy::Combined, StatusFilter::All, "", None));
+        assert_eq!(keys(&out), ["G:shop", "G:webshop", "paused"]);
+        let groups: Vec<(&str, bool)> = out
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                ListNode::Group { key, group, .. } => Some((key.as_ref(), group.group.is_compose)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("compose:shop", true),
+                ("label:app.kubernetes.io/part-of=webshop", false)
+            ]
+        );
+    }
+
+    #[test]
+    fn con_011_group_header_tag_and_tooltip_follow_group_kind() {
+        let mut cs = sample();
+        cs[0].compose.as_mut().unwrap().working_dir = Some("/srv/shop".into());
+        cs[2]
+            .labels
+            .insert(DEFAULT_GROUP_LABEL_KEY.into(), "webshop".into());
+        let out = build(input(&cs, GroupBy::Combined, StatusFilter::All, "", None));
+        let header = |label: &str| {
+            out.nodes
+                .iter()
+                .find_map(|n| match n {
+                    ListNode::Group { group, .. } if group.group.label == label => {
+                        Some(group_header(&group.group))
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let compose = header("shop");
+        assert_eq!(compose.tag, s::COMPOSE_TAG);
+        assert_eq!(compose.tooltip.as_deref(), Some("/srv/shop"));
+        let label = header("webshop");
+        assert_eq!(label.tag, s::LABEL_TAG);
+        assert_eq!(
+            label.tooltip.as_deref(),
+            Some("app.kubernetes.io/part-of=webshop")
+        );
+    }
+
+    #[test]
+    fn con_014_label_key_is_part_of_the_build() {
+        let mut cs = sample();
+        cs[2].labels.insert("team".into(), "infra".into());
+        let by_default = build(input(&cs, GroupBy::Label, StatusFilter::All, "", None));
+        assert!(!keys(&by_default).contains(&"G:infra".to_owned()));
+        let by_team = build(BuildInput {
+            label_key: "team",
+            ..input(&cs, GroupBy::Label, StatusFilter::All, "", None)
+        });
+        assert!(keys(&by_team).contains(&"G:infra".to_owned()));
     }
 
     #[test]
