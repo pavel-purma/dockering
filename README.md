@@ -47,6 +47,34 @@ Public GitHub release builds generate build-provenance attestations: `gh attesta
 
 Requires Windows 10 22H2 or newer, x64 or ARM64.
 
+### Install on Linux
+
+- **Ubuntu (`.deb`):** `sudo apt install ./Dockering-x86_64.deb`. apt installs the declared libraries and,
+  through the recommends of `libvulkan1`, `mesa-vulkan-drivers`.
+- **Fedora (`.tar.gz`):** install these libraries, then unpack the archive and run `./dockering`:
+
+  ```sh
+  sudo dnf install vulkan-loader mesa-vulkan-drivers libwayland-client libxkbcommon libxkbcommon-x11 libX11-xcb libxcb fontconfig freetype libzstd
+  tar -xzf Dockering-x86_64.tar.gz
+  cd dockering-x86_64-unknown-linux-gnu && ./dockering
+  ```
+
+- **Arch (`.tar.gz`):** the same with these libraries. If you have a GPU Vulkan driver, install it instead
+  of `vulkan-swrast`:
+
+  ```sh
+  sudo pacman -S vulkan-icd-loader vulkan-swrast wayland libxkbcommon libxkbcommon-x11 libxcb libx11 fontconfig freetype2 zstd
+  tar -xzf Dockering-x86_64.tar.gz
+  cd dockering-x86_64-unknown-linux-gnu && ./dockering
+  ```
+
+- **AppImage:** `chmod +x Dockering-x86_64.AppImage`, then run it. If FUSE is missing, run it with
+  `--appimage-extract-and-run`.
+
+Requires glibc 2.39 or newer and a Vulkan driver. Mesa's software driver works but is slow. After each
+release, an automated test installs the x86_64 packages on Ubuntu, Fedora, and Arch and starts the app
+([Linux smoke test](docs/release.md#linux-smoke-test)).
+
 ## Why Dockering
 
 - **Native and fast.** Built with Rust and GPUI, GPU-rendered at 60 fps. No Electron.

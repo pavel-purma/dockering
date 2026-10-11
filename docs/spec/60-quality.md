@@ -10,6 +10,8 @@
 | Hub | `dk-hub` | supervisor state machine, backoff, cancellation on drop, stale-revision handling, StatsService dedup | `tokio::test(start_paused = true)`, `FakeEngine` |
 | View | `dockering` | stores react to hub results; pages render states (loading, empty, error, data); actions call the hub | `gpui::TestAppContext` + `FakeEngine` |
 | E2E (manual) | release checklist | Real engines on all three OSes, including WSL distro + WSLC on Windows | `docs/plan/release-checklist.md` |
+| E2E (Linux, automated) | `linux-smoke.yml` ([distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079)) | The published Linux packages installed in clean Ubuntu, Fedora and Arch containers; launch, keyboard walk, quit, screenshots; software rendering, `--demo` engine | Xvfb, headless sway, xdotool/wtype, AT-SPI |
+| E2E (macOS, automated) | `macos-smoke.yml` ([distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079)) | The published `.dmg` installed on hosted macOS 15 and 26 runners; launch, keyboard walk through System Events, quit, Gatekeeper dialog on a quarantined copy, screenshots; renders on whatever GPU the hosted runner reports (recorded in the results), `--demo` engine | `screencapture`, System Events, `swiftc` helper |
 
 `dk-core` provides `FakeEngine`: a scriptable in-memory engine with configurable latency,
 errors, and event injection. It's used by the hub and view tests. View tests MUST NOT need
@@ -24,7 +26,7 @@ Docker.
 
 1. Requirement IDs are referenced in the PR description. The feature spec status is updated (`in-progress` → `implemented` when complete).
 2. Unit, parser, and view tests cover the new logic and all four UI states (loading, empty, error, data).
-3. `cargo fmt`, `clippy -D warnings`, and the NFR-001 grep pass. CI is green on all three OSes.
+3. `cargo fmt`, `clippy -D warnings`, and the NFR-001 grep pass. CI is green on all three OSes: the `CI gate` check, which `main` requires before a merge (REL-080).
 4. No blocking call on the UI thread. New long-lived tasks are stored on an entity.
 5. Capability gating is applied for any op that isn't universal.
 6. A screenshot (light and dark) is attached to the PR for UI changes.

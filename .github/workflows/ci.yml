@@ -36,7 +36,11 @@ jobs:
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
-      - name: Script tests (macOS packaging recovery REL-017, release verify step REL-031…034)
+      - name: Smoke test scripts, shellcheck and Python syntax (REL-070, REL-078)
+        run: |
+          shellcheck scripts/linux-smoke/*.sh scripts/macos-smoke/*.sh
+          python3 -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"), sys.argv[1])' scripts/linux-smoke/atspi.py
+      - name: Script tests (macOS packaging recovery REL-017, release verify step REL-031…034, Linux smoke scripts REL-071)
         run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Release verifier parses (REL-018)
         shell: pwsh
@@ -234,3 +238,23 @@ jobs:
           path: upload/
           retention-days: 14
           if-no-files-found: error
+
+  # The one check the Protect main ruleset requires for this workflow (REL-080, REL-081). A skipped
+  # required check counts as passing, so this runs `always()` and fails on anything but success.
+  # Add every new job above to `needs`; scripts/tests/test_ci_gate.py fails if one is missing.
+  gate:
+    name: CI gate
+    if: always()
+    needs: [lint, test, integration-docker, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every CI job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs: $RESULTS"
+          read -r -a results <<< "$RESULTS"
+          [ "${#results[@]}" -gt 0 ] || { echo "::error::no CI job results"; exit 1; }
+          for result in "${results[@]}"; do
+            [ "$result" = success ] || { echo "::error::a CI job finished as '$result'"; exit 1; }
+          done
