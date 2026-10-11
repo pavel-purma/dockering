@@ -52,7 +52,9 @@ from whatever state it finds if a run is interrupted.
    `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (`release.yml` fails without it and uses it as the release
    notes) and the matching lines to `docs/spec/CHANGELOG.md`. Check with `cargo xtask release-verify --version X.Y.Z`.
    Copy the latest section of the [release checklist](plan/release-checklist.md) for the new version.
-2. **Pull request.** Title `chore(release): vX.Y.Z`; squash-merge once every check is green.
+2. **Pull request.** Title `chore(release): vX.Y.Z`; squash-merge once every check is green. `main` requires
+   `CI gate` and `conventional commit title` (REL-080) and GitHub refuses the merge until both pass. Only the
+   maintainer can bypass, from the PR UI; the release skill never does.
 3. **CI incidents.** If a job fails with "The job was not acquired by Runner of type hosted even after
    multiple attempts", it was cancelled before any step ran. Check [githubstatus.com](https://www.githubstatus.com),
    then `gh run rerun <run-id> --failed`. A job that fails *after* starting is a real failure: read its
