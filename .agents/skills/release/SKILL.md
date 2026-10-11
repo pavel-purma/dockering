@@ -85,7 +85,7 @@ Run what CI's `lint` and `test` jobs run, on the scratch worktree: `cargo fmt --
 
 ### 6. Gate 1, before anything is pushed
 
-Show: the version and why (`reason`), the channel, the changelog diff (both files), the coverage table, the local results. `--dry-run` ends here: print the diff stat, remove the worktree, push nothing. Otherwise ask: open the release PR / edit the changelog first / cancel. With `auto` skip the question when the conditions in "Auto" hold.
+Show: the version and why (`reason`), the channel, the changelog diff (both files), the coverage table, the local results. `--dry-run` ends here: print the diff stat, remove the worktree, push nothing. The changelogs are always derived by the skill from the merged commits and PRs ([changelog.md](changelog.md)); never ask the maintainer to write or supply them, only to review the result. Otherwise ask: open the release PR / edit the changelog first / cancel. With `auto` skip the question when the conditions in "Auto" hold.
 
 ### 7. Release PR
 
