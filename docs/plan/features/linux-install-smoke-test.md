@@ -198,8 +198,8 @@ run as root inside the container, which is what CI containers do; a non-root var
 | 9 | Phase 2c: `engine` scenario against the runner's Docker (verified once by hand). The assertion is chosen then: log line, accessibility row count, or OCR. | qa-engineer | REL-074 | the app lists the labelled container |
 | 10 | README: a Linux install section with the per-distro runtime packages the legs use (§6.4). | release-engineer | REL-015 | **Done**: the dnf, pacman and apt commands were run in clean containers; links resolve |
 | 11 | Review. | reviewer | all | pending |
-| 12 | macOS (§10): `macos-smoke.yml`, `scripts/macos-smoke/`, `fetch.sh` with `PLATFORM=macos`. | release-engineer | REL-078 | **Built**; not run on GitHub yet, so every check name and role in `run.sh` that was not seen in a probe is unproven |
-| 13 | macOS first runs: a pull-request run and a dispatch with `tag=v0.2.0`; read the screenshots; record the runs here. Then a self-test job for `run.sh` (discarded keys, wrong version, no notice) as for Linux task 3. | release-engineer | REL-078 | green runs, recorded |
+| 12 | macOS (§10): `macos-smoke.yml`, `scripts/macos-smoke/`, `fetch.sh` with `PLATFORM=macos`. | release-engineer | REL-078 | **Done** (2026-10-11): green on all three legs in [38120860726](https://github.com/pavel-purma/dockering/actions/runs/38120860726) |
+| 13 | macOS first runs: a pull-request run (**done**, §10) and a dispatch with `tag=v0.2.0`. Then a self-test job for `run.sh` (discarded keys, wrong version, no notice) as for Linux task 3: until it exists, a green leg is evidence that the checks can pass, not that they fail when they should. | release-engineer | REL-078 | a dispatch run recorded; the self-test job |
 | 14 | Draft gate for both workflows: dispatch input `run`, `fetch.sh run:<id>`; the `/release` skill runs it between steps 10 and 11. | release-engineer | REL-079 | **Built**: the real `gh` fetched the three Linux packages and a `.dmg` from release run 37393414312 and verified their attestations; not yet run through a workflow |
 | 15 | Packaging follow-up (finding F9): make the macOS bundle's signature consistent, then drop `SMOKE_BUNDLE_SEAL: warn`. | release-engineer | REL-078 | the next release's `bundle_seal` passes |
 
@@ -231,7 +231,7 @@ run as root inside the container, which is what CI containers do; a non-root var
 
 ## 10. macOS (REL-078, REL-079)
 
-**Status: built, not run on GitHub.** Same idea as the Linux test, different mechanics. `macos-smoke.yml` runs three legs on hosted
+**Status: green on three hosted legs in a pull-request run (2026-10-11); no self-test job yet.** Same idea as the Linux test, different mechanics. `macos-smoke.yml` runs three legs on hosted
 runners (macOS 15 Apple silicon, macOS 15 Intel, macOS 26 Apple silicon). Each installs the published `.dmg` of its architecture
 the way a user does, then runs `scripts/macos-smoke/run.sh` for three scenarios: `demo`, `upgrade` and `quarantine`. The download
 and verification are `fetch.sh` with `PLATFORM=macos`, so the checksum and attestation gates are the Linux ones.
@@ -258,10 +258,14 @@ the copy through LaunchServices. On the current builds Gatekeeper puts up a dial
 notarization arrive that flips, and the scenario fails with a message that says so: it is a tripwire for that change, not a
 property of the product.
 
-**Not verified.** The workflow has not run. `run.sh` was checked with `bash -n` under bash 3.2 and with shellcheck 0.9.0;
-`smoketool.swift` was not compiled (no Swift toolchain on the development machine). It extends the helper the probe compiled with
-a `caption` command, and that command is untested. The page, click, notice and quit logic follows probe output, and the rest is
-expected to need a fix or two on its first run (task 13). A review before the first run found and fixed these defects in `run.sh`, among others (a profile path with a space that emptied the log, a colour check that counted the Dock, retry counts that could total 25 minutes, a self-test switch that could not fail the last chord, a `codesign` timeout read as a pass, a dialog wait shorter than the observed appearance, a guard that a self-hosted runner would pass); each is a line in the diff, not a finding of the product.
+**First runs.** The first pull-request run ([38120243301](https://github.com/pavel-purma/dockering/actions/runs/38120243301)) passed 22 of 27 demo checks on every image and failed `first_paint`, `first_frame_stable` and the three `render_*` checks. The cause was in the harness: `screencapture` writes no file when its target is a dot-named file in the output directory (26 `cp: .b.png: No such file or directory` lines), so the stability check never had two frames and the window crop measured 0 colours. Scratch frames now live in a temporary directory (`d2743dc`). The second run ([38120860726](https://github.com/pavel-purma/dockering/actions/runs/38120860726)) is green: macOS 15 (Apple silicon) 27, 9 and 17 checks for `demo`, `quarantine` and `upgrade`; macOS 26 (Apple silicon) 27, 9 and 17; macOS 15 (Intel) 28, 10 and 18; none failed. One evidence upload failed with `ENOTFOUND` and passed on a rerun of that job. What the runs showed, beyond the pass counts:
+
+- `first_paint` counted 1329 colours inside the window on macOS 15, and a page switch changed 41 641 to 125 048 pixels, so the thresholds (200 colours, 1500 pixels) have a wide margin. `first_frame_stable` took 14 s, 29 s and 51 s.
+- `Cmd+3` works (it was never pressed in a probe), as do all five chords, the pointer click and `Cmd+Q` with exit status 0 on all three images. The accessibility dump of each page lists its controls (`AXRadioButton` filters, `AXButton` Create and Pull, `AXTextField` Search…), which are written to `ax-<page>.txt` and are the material for asserting page controls later.
+- The runners report no GPU, except the Intel image, which reports "Apple Paravirtualized Graphics Device"; the app rendered on all of them.
+- **F9 is confirmed on both Apple-silicon images.** The quarantined copy's dialog reads "Dockering is damaged and can't be opened" (macOS 26 screenshot: `01-gatekeeper-dialog.png`), and `bundle_seal` reports `code has no resources but signature indicates they must be present` on macOS 15 and 26. The Intel build is plainly unsigned: `bundle_seal` passes its unsigned branch and `spctl` says `rejected, source=no usable signature`.
+
+**Not verified.** The `release: published` and weekly triggers and the `alert` job have not fired, and the draft gate has not been dispatched through a workflow (the fetch path was run against the real run 37393414312). There is no self-test job for `run.sh`: that a check fails when it should is argued from reading, not demonstrated (task 13). `smoketool.swift` compiled and ran on all three images, and the captions are present (`captions INFO  7 captioned, 0 left as taken`); that they are legible was checked on two screenshots.
 
 ## 11. Revision log
 
@@ -269,3 +273,4 @@ expected to need a fix or two on its first run (task 13). A review before the fi
 - 2026-10-09: Implemented. Scripts, workflow, unit tests (69), the `selftest` job and docs are in the branch; the four legs and the 30 self-test controls pass in local Docker. Not yet run on a GitHub runner. The prototype folder is deleted: its scripts live on as `scripts/linux-smoke/`, and only `contact-sheet.png` stays here.
 - 2026-10-10: Opened as draft PR #37. A pull-request run and a manual dispatch (tag v0.2.0) passed on GitHub runners (§6.5). The release trigger, the weekly schedule and the alert job have not fired yet. Review pending.
 - 2026-10-11: Added macOS (§10, REL-078) and the draft gate (REL-079; it replaces task 7) after three probe rounds on hosted macOS runners. The macOS workflow is built and has not run. A review of the first macOS draft found and fixed: a timeout helper that kept `| tail` waiting for its full limit (reproduced in Git Bash and bash 3.2), a scenario that would have replaced a developer's `/Applications/Dockering.app` and deleted their profile if run locally (it now refuses outside GitHub Actions), a Gatekeeper check that asserted "rejected" where the observed state is "damaged" (finding F9), and page checks that asserted control roles nobody had seen on a Mac.
+- 2026-10-11 (later): The macOS workflow ran on GitHub. The first pull-request run failed on a harness bug (scratch frames written to dot-named files, which `screencapture` does not write), the second is green on all three legs (§10). F9 is confirmed on macOS 15 and 26.

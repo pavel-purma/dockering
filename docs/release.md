@@ -243,7 +243,7 @@ deletes the Dockering profile and kills running copies, so it refuses to run out
 **Known state of the published macOS builds.** On Apple silicon the published `.app` carries a linker signature that does
 not cover its resources, so Gatekeeper calls a quarantined download "damaged" with no *Open Anyway*; the Intel build is
 unsigned and gets the ordinary prompt
-([finding F9](plan/features/linux-install-smoke-test.md#10-macos-rel-078-rel-079)). Until packaging is fixed, `bundle_seal` is
+([finding F9](plan/features/linux-install-smoke-test.md#10-macos-rel-078-rel-079), seen on macOS 15 and 26 in the smoke test's own runs). Until packaging is fixed, `bundle_seal` is
 reported as `INFO`, and the macOS advice under [Unsigned installation](#unsigned-installation) does not hold for Apple silicon.
 
 **When it fails.** As for Linux: a published build is not edited, deleted or re-uploaded; read the failing check and its
