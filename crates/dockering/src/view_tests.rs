@@ -758,6 +758,64 @@ fn kbd_020_palette_runs_action(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// Height of the overlay panel and of its content. The panel adds only its padding and border
+/// (about 23 px at the test rem), so there's no empty band under the content (KBD-020); a
+/// stretched panel is 560 px whatever it holds.
+fn overlay_heights(h: &crate::testing::Harness, cx: &mut TestAppContext) -> (f32, f32) {
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let panel = visual.debug_bounds("overlay-panel").expect("panel");
+    let body = visual.debug_bounds("overlay-body").expect("body");
+    (panel.size.height.as_f32(), body.size.height.as_f32())
+}
+
+#[gpui_kit::test]
+fn kbd_020_palette_panel_hugs_its_content(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "secondary-p");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Palette);
+    let (panel, body) = overlay_heights(&h, cx);
+    assert!(
+        (10.0..32.0).contains(&(panel - body)),
+        "full palette: panel {panel} vs body {body}"
+    );
+    assert!(panel <= 560.0, "the panel respects its cap, got {panel}");
+    h.type_text(cx, "Collapse all");
+    cx.run_until_parked();
+    let (panel, body) = overlay_heights(&h, cx);
+    assert!(
+        (10.0..32.0).contains(&(panel - body)),
+        "filtered palette: panel {panel} vs body {body}"
+    );
+    assert!(panel < 300.0, "a two-row palette is short, got {panel}");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn kbd_022_reference_panel_hugs_its_content(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.press(cx, "f1");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Shortcuts);
+    let (panel, body) = overlay_heights(&h, cx);
+    assert!(
+        (10.0..32.0).contains(&(panel - body)),
+        "full reference: panel {panel} vs body {body}"
+    );
+    assert!(panel <= 560.0, "the panel respects its cap, got {panel}");
+    h.type_text(cx, "Next row");
+    cx.run_until_parked();
+    let (panel, body) = overlay_heights(&h, cx);
+    assert!(
+        (10.0..32.0).contains(&(panel - body)),
+        "filtered reference: panel {panel} vs body {body}"
+    );
+    assert!(panel < 300.0, "a filtered reference is short, got {panel}");
+    h.shutdown();
+}
+
 #[gpui_kit::test]
 fn kbd_022_reference_lists_os_bindings(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());

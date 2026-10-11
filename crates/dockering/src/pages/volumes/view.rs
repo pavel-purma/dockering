@@ -54,6 +54,8 @@ pub struct VolumesPage {
     usage: UsageState,
     usage_rev: u64,
     usage_task: Option<Task<()>>,
+    /// Parked by the shell (SHL-014): no `disk_usage` calls while true.
+    suspended: bool,
     search_task: Option<Task<()>>,
     action_tasks: Vec<Task<()>>,
     pending: HashSet<String>,
@@ -103,6 +105,7 @@ impl VolumesPage {
             usage: UsageState::Loading,
             usage_rev: 0,
             usage_task: None,
+            suspended: false,
             search_task: None,
             action_tasks: Vec::new(),
             pending: HashSet::new(),
@@ -166,6 +169,9 @@ impl VolumesPage {
     /// Fetches `disk_usage()` once the list has data (and again after the volume list
     /// changes). Revision-guarded; previous sizes stay visible while refreshing (SHL-004).
     fn load_usage(&mut self, cx: &mut Context<Self>) {
+        if self.suspended {
+            return;
+        }
         let Some(caps) = self.caps(cx) else {
             return; // wait for EngineInfo (InfoChanged)
         };
@@ -304,19 +310,34 @@ impl VolumesPage {
         &mut self,
         _: &Entity<InputState>,
         event: &InputEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let InputEvent::Change = event {
-            let value = self.search.read(cx).value().to_string();
-            self.search_task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-                this.update(cx, |this, cx| {
-                    this.query = value;
-                    this.rebuild(cx);
-                })
-                .ok();
-            }));
+        match event {
+            InputEvent::Change => {
+                let value = self.search.read(cx).value().to_string();
+                self.search_task = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(SEARCH_DEBOUNCE).await;
+                    this.update(cx, |this, cx| {
+                        this.query = value;
+                        this.rebuild(cx);
+                    })
+                    .ok();
+                }));
+            }
+            // KBD-094: apply the query now, then move into the table.
+            InputEvent::PressEnter {
+                secondary: false,
+                shift: false,
+            } => {
+                self.search_task = None;
+                self.query = self.search.read(cx).value().to_string();
+                self.rebuild(cx);
+                let keep = self.query.is_empty();
+                self.table
+                    .update(cx, |t, cx| t.enter_from_search(keep, window, cx));
+            }
+            _ => {}
         }
     }
 
@@ -671,7 +692,20 @@ impl PageView for VolumesPage {
     }
 }
 
-impl RoutedPage for VolumesPage {}
+impl RoutedPage for VolumesPage {
+    fn suspend(&mut self, cx: &mut Context<Self>) {
+        self.suspended = true;
+        self.usage_rev += 1;
+        self.usage_task = None;
+        self.menu = None;
+        self.table.update(cx, |t, cx| t.suspend(cx));
+    }
+
+    fn resume(&mut self, cx: &mut Context<Self>) {
+        self.suspended = false;
+        self.load_usage(cx);
+    }
+}
 
 impl Render for VolumesPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

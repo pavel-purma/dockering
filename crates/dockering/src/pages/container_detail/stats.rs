@@ -174,6 +174,7 @@ pub struct StatsTab {
     visible: bool,
     window_focus: FocusHandle,
     card_focus: [FocusHandle; 4],
+    scroll: gpui_kit::ScrollHandle,
     stream: Option<Task<()>>,
     stream_error: Option<EngineError>,
     /// Revision of the stats subscription (stale stream items dropped, NFR-005).
@@ -204,6 +205,7 @@ impl StatsTab {
             visible: false,
             window_focus: cx.focus_handle().tab_stop(true),
             card_focus: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            scroll: gpui_kit::ScrollHandle::new(),
             stream: None,
             stream_error: None,
             generation: 0,
@@ -259,6 +261,16 @@ impl StatsTab {
     }
     pub fn window_focus(&self) -> &FocusHandle {
         &self.window_focus
+    }
+
+    /// Scrolls the charts column by one viewport page from the tab bar (KBD-096).
+    pub fn scroll_page(&self, up: bool) {
+        crate::ui::scroll::scroll_page(&self.scroll, up);
+    }
+
+    /// The charts column's current scroll offset (tests).
+    pub fn scroll_offset_y(&self) -> f32 {
+        self.scroll.offset().y.as_f32()
     }
 
     fn caps(&self, cx: &App) -> Capabilities {
@@ -867,6 +879,7 @@ impl Render for StatsTab {
             .id("stats-tab")
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .gap_3()
             .on_action(
                 cx.listener(|this, _: &act::Window1m, _, cx| this.set_window(StatsWindow::M1, cx)),

@@ -261,6 +261,13 @@ pub mod detail {
             PrevTab,
             /// `Alt+↑` (KBD-042)
             ParentList,
+            /// `↓` on the tab bar: into the tab's content (KBD-095)
+            FocusContent,
+            /// `Esc` in the content, `Mod+Shift+F6` anywhere in a tab (KBD-097)
+            FocusTabs,
+            /// `PgUp` / `PgDn` on the tab bar (KBD-096)
+            ScrollPageUp,
+            ScrollPageDown,
         ]
     );
 }

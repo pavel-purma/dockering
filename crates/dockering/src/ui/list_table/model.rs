@@ -177,6 +177,11 @@ impl<G: Clone, I: Clone> ListModel<G, I> {
         self.rows.iter().find(|r| r.key == key)
     }
 
+    /// The first row that isn't a group header (KBD-094).
+    pub fn first_item_ix(&self) -> Option<usize> {
+        self.rows.iter().position(|r| !r.is_group())
+    }
+
     /// Every item key in the tree (including members of collapsed groups).
     pub fn all_item_keys(&self) -> Vec<SharedString> {
         let mut out = Vec::new();

@@ -57,6 +57,10 @@ pub mod ctx {
     pub const LIST_KEYS: &str = "ListTable > DataTable";
     pub const DETAIL_HEADER: &str = "DetailHeader";
     pub const DETAIL_TABS: &str = "DetailTabs";
+    /// The root of a detail page (KBD-097 `Mod+Shift+F6`).
+    pub const DETAIL_PAGE: &str = "DetailPage";
+    /// The read-only Inspect editor's wrapper (KBD-097 `Esc`).
+    pub const DETAIL_INSPECT: &str = "DetailInspect";
     pub const LOGS: &str = "Logs";
     pub const TERMINAL: &str = dk_terminal::KEY_CONTEXT;
     pub const DIALOG: &str = "Dialog";
@@ -135,6 +139,7 @@ const W: Option<&str> = Some(WORKSPACE);
 const L: Option<&str> = Some(LIST_KEYS);
 const D: Option<&str> = Some(DETAIL_HEADER);
 const T: Option<&str> = Some(DETAIL_TABS);
+const DP: Option<&str> = Some(DETAIL_PAGE);
 const G: Option<&str> = Some(LOGS);
 const TERM: Option<&str> = Some(TERMINAL);
 const DLG: Option<&str> = Some(DIALOG);
@@ -537,14 +542,6 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
     b!("c", list::CopyId, L, Os::ALL, s::CMD_COPY_ID, Lists),
     b!("delete", list::Delete, L, Os::ALL, s::CMD_DELETE, Lists),
     b!(
-        "backspace",
-        list::Delete,
-        L,
-        Os::NOT_MAC,
-        s::CMD_DELETE,
-        Lists
-    ),
-    b!(
         "cmd-backspace",
         list::Delete,
         L,
@@ -680,6 +677,8 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
     b!("i", container::Inspect, D, Os::ALL, s::CMD_INSPECT, Detail),
     b!("c", list::CopyId, D, Os::ALL, s::CMD_COPY_ID, Detail),
     b!("delete", list::Delete, D, Os::ALL, s::CMD_DELETE, Detail),
+    // KBD-098: never in a text field, the editor or the terminal (none sit under `DetailHeader`).
+    b!("backspace", Back, D, Os::ALL, s::CMD_BACK, Detail),
     b!(
         "right",
         detail::NextTab,
@@ -689,6 +688,79 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
         Detail
     ),
     b!("left", detail::PrevTab, T, Os::ALL, s::CMD_PREV_TAB, Detail),
+    // KBD-095…097: view a tab's content from the keyboard.
+    b!(
+        "down",
+        detail::FocusContent,
+        T,
+        Os::ALL,
+        s::CMD_FOCUS_CONTENT,
+        Detail
+    ),
+    b!(
+        "pageup",
+        detail::ScrollPageUp,
+        T,
+        Os::ALL,
+        s::CMD_SCROLL_PAGE_UP,
+        Detail
+    ),
+    b!(
+        "pagedown",
+        detail::ScrollPageDown,
+        T,
+        Os::ALL,
+        s::CMD_SCROLL_PAGE_DOWN,
+        Detail
+    ),
+    b!(
+        "secondary-shift-f6",
+        detail::FocusTabs,
+        DP,
+        Os::NOT_MAC,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
+    b!(
+        "cmd-escape",
+        detail::FocusTabs,
+        DP,
+        Os::MACOS,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
+    b!(
+        "escape",
+        detail::FocusTabs,
+        Some(DETAIL_ROWS),
+        Os::ALL,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
+    b!(
+        "escape",
+        detail::FocusTabs,
+        Some(LOG_LINES),
+        Os::ALL,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
+    b!(
+        "escape",
+        detail::FocusTabs,
+        Some(STATS_WINDOW),
+        Os::ALL,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
+    b!(
+        "escape",
+        detail::FocusTabs,
+        Some(DETAIL_INSPECT),
+        Os::ALL,
+        s::CMD_FOCUS_TABS,
+        Detail
+    ),
     // ── logs (KBD-050…053) ──────────────────────────────────────────────────────────────
     // Enter / Shift+Enter only in the logs search field (KBD-050).
     b!("enter", logs::FindNext, LGS, Os::ALL, "Next match", Logs),

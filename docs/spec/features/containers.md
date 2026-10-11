@@ -31,7 +31,7 @@
 | CON-031 | Optimistic UI: an action immediately shows a spinner on the row. The final state comes from the refetch, and the row is never guessed. |
 | CON-032 | Empty state: "No containers yet". When the engine has images, a *Run an image* CTA links to Images. |
 | CON-033 | A click anywhere on an item row, or `Enter`, opens [container detail](container-detail.md). |
-| CON-034 | Keyboard: all list, group, selection, and row actions are operable from the keyboard per [keyboard.md](keyboard.md) KBD-030…039 (single-letter row actions, `←/→` collapse/expand groups, `Space` select, `Shift+F10` context menu). |
+| CON-034 | Keyboard: all list, group, selection, and row actions are operable from the keyboard per [keyboard.md](keyboard.md) KBD-030…039 (single-letter row actions, `←/→` collapse/expand groups, `Space` select, `Shift+F10` context menu). `Enter` in the search field hands focus to the first matching item row (KBD-094), and the list keeps its search, filter, sort, selection, cursor and scroll when the user returns from a detail (SHL-014). *(planned 2026-10-10)* |
 
 ## UI flow
 
@@ -81,7 +81,7 @@ Manual, on real engines: tracked in the [release checklist](../../plan/release-c
 | CON-031 | `kbd_030_s_starts_stopped_container` (pending, then refetched state) |
 | CON-032 | `containers_empty_state` (empty list; the CTA render isn't asserted) |
 | CON-033 | `con_033_enter_opens_detail_with_primary_focus`, `con_033_row_click_toggles_group_and_opens_item` |
-| CON-034 | KBD-030…039 tests (see [keyboard.md](keyboard.md)) |
+| CON-034 | KBD-030…039 tests (see [keyboard.md](keyboard.md)); `kbd_094_*` (search hand-off); SHL-014: `shl_014_containers_state_survives_detail_round_trip`, `shl_014_scroll_position_survives`, `shl_014_images_and_volumes_keep_state_while_parked`, `shl_014_engine_switch_drops_parked_lists`, `sta_006_parked_list_has_no_stats_subscriptions` |
 
 ## Known gaps (v1)
 

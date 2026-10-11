@@ -688,6 +688,61 @@ impl<D: ListDelegate> ListTable<D> {
         r
     }
 
+    /// The page leaves the screen (SHL-014): closes the quick-find field and any row menu.
+    pub fn suspend(&mut self, cx: &mut Context<Self>) {
+        self.find_open = false;
+        self.key_menu = None;
+        cx.notify();
+    }
+
+    /// Moves the cursor to the first item row, or row 0 when there are only groups (KBD-094).
+    /// False when there are no rows.
+    pub fn cursor_to_first_item(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(ix) = self
+            .model(cx)
+            .first_item_ix()
+            .or_else(|| (!self.model(cx).rows().is_empty()).then_some(0))
+        else {
+            return false;
+        };
+        self.update_model(cx, |m| m.set_cursor_ix(ix));
+        cx.emit(ListEvent::SelectionChanged);
+        true
+    }
+
+    /// `Enter` in a page search field (KBD-094): puts the cursor on the first match. An empty
+    /// query keeps the cursor where it was (unless there is none). False when there are no
+    /// rows, so the caller leaves focus where it was.
+    pub fn place_cursor_for_search(&mut self, keep_cursor: bool, cx: &mut Context<Self>) -> bool {
+        if self.model(cx).rows().is_empty() {
+            return false;
+        }
+        if !(keep_cursor && self.model(cx).cursor_ix().is_some()) {
+            self.cursor_to_first_item(cx);
+        }
+        true
+    }
+
+    /// [`Self::place_cursor_for_search`], then focuses the table.
+    pub fn enter_from_search(
+        &mut self,
+        keep_cursor: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.place_cursor_for_search(keep_cursor, cx) {
+            return false;
+        }
+        self.focus_table(window, cx);
+        true
+    }
+
+    /// Focuses the table (its cursor stays).
+    pub fn focus_table(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = self.table.focus_handle(cx);
+        window.focus(&handle, cx);
+    }
+
     /// Focus targets for leaving the table with Tab / Shift+Tab (KBD-004).
     pub fn set_tab_neighbours(&mut self, prev: Option<FocusHandle>, next: Option<FocusHandle>) {
         self.prev_focus = prev;

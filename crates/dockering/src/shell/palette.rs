@@ -16,11 +16,12 @@ use crate::strings as s;
 /// Cap on dynamic entries per kind (filtering stays snappy; KBD-020).
 pub const MAX_GOTO: usize = 500;
 
-/// Builds the palette contents for the current context.
+/// Builds the palette contents for the current context. `max_h` caps the list.
 pub fn build(
     state: &Entity<CommandState>,
     ctx: CommandContext,
     store: Option<&Entity<EngineStore>>,
+    max_h: gpui_kit::Pixels,
     cx: &App,
 ) -> Command {
     let mut groups: Vec<(commands::CommandGroup, Vec<CommandItem>)> = Vec::new();
@@ -58,7 +59,7 @@ pub fn build(
     let mut cmd = Command::new(state)
         .placeholder(s::PALETTE_PLACEHOLDER)
         .bordered(false)
-        .max_h(gpui_kit::px(420.));
+        .max_h(max_h);
     for (g, items) in groups {
         cmd = cmd.group(CommandGroup::new().label(g.label()).items(items));
     }
@@ -139,9 +140,10 @@ pub fn element(
     state: &Entity<CommandState>,
     ctx: CommandContext,
     store: Option<&Entity<EngineStore>>,
+    max_h: gpui_kit::Pixels,
     cx: &App,
 ) -> Command {
-    build(state, ctx, store, cx)
+    build(state, ctx, store, max_h, cx)
 }
 
 /// Wraps a palette command. The palette's own focus isn't inside the page, so the shell

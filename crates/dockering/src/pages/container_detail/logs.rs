@@ -613,6 +613,23 @@ impl LogsView {
         18.0
     }
 
+    /// One viewport minus a line of overlap, in pixels (KBD-051, KBD-096).
+    fn page_px(&self) -> f32 {
+        let h = self.list.viewport_bounds().size.height.as_f32();
+        if h > 0.0 {
+            (h - self.line_height()).max(self.line_height())
+        } else {
+            400.0
+        }
+    }
+
+    /// Scrolls the lines by one viewport page from the tab bar (KBD-096); scrolling up
+    /// pauses following (LOG-003).
+    pub fn scroll_page(&mut self, up: bool, cx: &mut Context<Self>) {
+        let d = self.page_px();
+        self.scroll_px(if up { -d } else { d }, cx);
+    }
+
     // ── toolbar (LOG-004, KBD-052/053) ─────────────────────────────────────────────────
 
     fn toggle_timestamps(
@@ -889,8 +906,10 @@ impl LogsView {
                 let d = this.line_height();
                 this.scroll_px(d, cx)
             }))
-            .on_action(cx.listener(|this, _: &logs_nav::PageUp, _, cx| this.scroll_px(-400.0, cx)))
-            .on_action(cx.listener(|this, _: &logs_nav::PageDown, _, cx| this.scroll_px(400.0, cx)))
+            .on_action(cx.listener(|this, _: &logs_nav::PageUp, _, cx| this.scroll_page(true, cx)))
+            .on_action(
+                cx.listener(|this, _: &logs_nav::PageDown, _, cx| this.scroll_page(false, cx)),
+            )
             .child(lines)
             .into_any_element()
     }
