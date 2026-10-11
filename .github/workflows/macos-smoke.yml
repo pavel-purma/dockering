@@ -1,0 +1,208 @@
+# Install-and-launch smoke test of the published macOS packages (REL-078, REL-079).
+# Plan: docs/plan/features/linux-install-smoke-test.md (§11). The logic lives in scripts/macos-smoke/; the download and
+# verification are scripts/linux-smoke/fetch.sh with PLATFORM=macos, shared with the Linux smoke test.
+# Run it for a tag, or for a release run that has not been published yet: docs/release.md, "Smoke tests".
+name: macOS smoke
+run-name: macOS smoke (${{ github.event.release.tag_name || (inputs.run && format('draft, run {0}', inputs.run)) || inputs.tag || 'latest release' }})
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC: new runner images and macOS point releases arrive without a Dockering release
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to test (empty = the latest published release)
+        required: false
+        type: string
+      run:
+        description: Release workflow run id whose unpublished release-review bundle to test instead (the draft gate; wins over tag)
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/macos-smoke.yml"
+      - "scripts/macos-smoke/**"
+      - "scripts/linux-smoke/fetch.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-smoke-${{ github.event.release.tag_name || inputs.run || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    name: fetch and verify the packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # actions: read lets the draft gate (inputs.run) download the release run's artifact (REL-079)
+    permissions:
+      actions: read
+      contents: read
+      attestations: read
+    outputs:
+      tag: ${{ steps.fetch.outputs.tag }}
+      version: ${{ steps.fetch.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: fetch
+        name: Download and verify the macOS packages (REL-071)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ github.event.release.tag_name || (inputs.run && format('run:{0}', inputs.run)) || inputs.tag || 'latest' }}
+        run: |
+          out=$(PLATFORM=macos ARCH=aarch64 bash scripts/linux-smoke/fetch.sh "$SOURCE" pkg/aarch64)
+          printf '%s\n' "$out" >> "$GITHUB_OUTPUT"
+          # `latest` is resolved once, so that both packages come from the same release
+          second=$SOURCE
+          if [[ $SOURCE == latest ]]; then second=$(sed -n 's/^tag=//p' <<< "$out"); fi
+          PLATFORM=macos ARCH=x86_64 bash scripts/linux-smoke/fetch.sh "$second" pkg/x86_64 > /dev/null
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-macos
+          path: |
+            pkg/aarch64/Dockering-aarch64.dmg
+            pkg/aarch64/packages.sha256
+            pkg/x86_64/Dockering-x86_64.dmg
+            pkg/x86_64/packages.sha256
+          retention-days: 3
+          overwrite: true # a re-run of the workflow uploads the same name again
+          if-no-files-found: error
+
+  smoke:
+    name: ${{ matrix.name }}
+    needs: fetch
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The release supports macOS 15 and newer (LSMinimumSystemVersion): the oldest hosted image on both CPU
+        # architectures, and the newest hosted image on Apple silicon.
+        include:
+          - name: macOS 15 (Apple silicon)
+            slug: macos-15
+            runner: macos-15
+            arch: aarch64
+          - name: macOS 15 (Intel)
+            slug: macos-15-intel
+            runner: macos-15-intel
+            arch: x86_64
+          - name: macOS 26 (Apple silicon)
+            slug: macos-26
+            runner: macos-26
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages-macos
+          path: pkg
+      - name: Demo scenario on ${{ matrix.name }} (REL-078)
+        timeout-minutes: 12
+        env:
+          EXPECTED_VERSION: ${{ needs.fetch.outputs.version }}
+          PKG_DIR: pkg/${{ matrix.arch }}
+          SMOKE_BUNDLE_SEAL: warn # plan task 15 removes this once a release ships a bundle with a consistent signature (finding F9)
+          SMOKE_TOOL: ${{ runner.temp }}/smoketool
+          OUT_DIR: out
+        run: bash scripts/macos-smoke/run.sh demo
+      - name: Upgrade scenario on ${{ matrix.name }} (REL-078)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
+        env:
+          EXPECTED_VERSION: ${{ needs.fetch.outputs.version }}
+          PKG_DIR: pkg/${{ matrix.arch }}
+          SMOKE_BUNDLE_SEAL: warn # plan task 15 removes this once a release ships a bundle with a consistent signature (finding F9)
+          SMOKE_TOOL: ${{ runner.temp }}/smoketool
+          OUT_DIR: out
+        run: bash scripts/macos-smoke/run.sh upgrade
+      - name: Quarantine scenario on ${{ matrix.name }} (REL-078)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 6
+        env:
+          EXPECTED_VERSION: ${{ needs.fetch.outputs.version }}
+          PKG_DIR: pkg/${{ matrix.arch }}
+          SMOKE_BUNDLE_SEAL: warn # plan task 15 removes this once a release ships a bundle with a consistent signature (finding F9)
+          SMOKE_TOOL: ${{ runner.temp }}/smoketool
+          OUT_DIR: out
+        run: bash scripts/macos-smoke/run.sh quarantine
+      - name: Screenshots, logs and results
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-smoke-${{ matrix.slug }}
+          path: out/
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: warn
+      - name: Summary (REL-076)
+        if: always()
+        env:
+          LEG_NAME: ${{ matrix.name }}
+          TAG: ${{ needs.fetch.outputs.tag }}
+          EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          {
+            echo "### $LEG_NAME: $TAG"
+            echo
+            for f in out/*/results.txt; do
+              if [[ -f "$f" ]] && grep -q '^platform ' "$f"; then
+                echo "Platform: \`$(grep -m 1 '^platform ' "$f" | sed 's/^platform *INFO *//')\`"
+                break
+              fi
+            done
+            echo
+            echo '| scenario | passed | failed |'
+            echo '|---|---|---|'
+            fails=""
+            for f in out/*/results.txt; do
+              [[ -f "$f" ]] || continue
+              scenario=$(basename "$(dirname "$f")")
+              echo "| $scenario | $(grep -c ' PASS ' "$f") | $(grep -c ' FAIL ' "$f") |"
+              while IFS= read -r line; do
+                fails+="$scenario: ${line:0:240}"$'\n'
+              done < <(grep ' FAIL ' "$f" || true)
+            done
+            if [[ -n "$fails" ]]; then
+              echo
+              echo "Failed checks:"
+              echo
+              echo '```'
+              printf '%s' "$fails" | tr -d '`'
+              echo '```'
+            fi
+            echo
+            echo "${EVIDENCE_URL:+[All screenshots, logs and results]($EVIDENCE_URL)}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  alert:
+    name: open an issue on drift
+    needs: [fetch, smoke]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Open or update the tracking issue
+        run: |
+          title="macOS smoke test failing on the latest release"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          body="The weekly macOS smoke test failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

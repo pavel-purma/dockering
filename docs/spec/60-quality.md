@@ -10,6 +10,8 @@
 | Hub | `dk-hub` | supervisor state machine, backoff, cancellation on drop, stale-revision handling, StatsService dedup | `tokio::test(start_paused = true)`, `FakeEngine` |
 | View | `dockering` | stores react to hub results; pages render states (loading, empty, error, data); actions call the hub | `gpui::TestAppContext` + `FakeEngine` |
 | E2E (manual) | release checklist | Real engines on all three OSes, including WSL distro + WSLC on Windows | `docs/plan/release-checklist.md` |
+| E2E (Linux, automated) | `linux-smoke.yml` ([distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079)) | The published Linux packages installed in clean Ubuntu, Fedora and Arch containers; launch, keyboard walk, quit, screenshots; software rendering, `--demo` engine | Xvfb, headless sway, xdotool/wtype, AT-SPI |
+| E2E (macOS, automated) | `macos-smoke.yml` ([distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079)) | The published `.dmg` installed on hosted macOS 15 and 26 runners; launch, keyboard walk through System Events, quit, Gatekeeper dialog on a quarantined copy, screenshots; renders on whatever GPU the hosted runner reports (recorded in the results), `--demo` engine | `screencapture`, System Events, `swiftc` helper |
 
 `dk-core` provides `FakeEngine`: a scriptable in-memory engine with configurable latency,
 errors, and event injection. It's used by the hub and view tests. View tests MUST NOT need
