@@ -35,16 +35,18 @@ from gi.repository import Atspi  # noqa: E402
 R = Atspi.Role
 ROLE = {"entry": R.ENTRY, "tab": R.PAGE_TAB, "button": R.PUSH_BUTTON, "item": R.TREE_ITEM}
 
-# Named controls per page of the --demo profile; a rename in crates/dockering/src must be mirrored here.
+# Named controls per page of the --demo profile; a rename in crates/dockering/src must be mirrored here. A name ending in "*" is a
+# prefix: the group-by button reads "Group by: <current mode>", and the default mode changed after 0.2.0 (Compose project, then
+# Combined) while dispatch and weekly runs test a release with the scripts of main.
 PAGES = {
-    "Containers": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Group by: Compose project"), (R.ENTRY, "Search\u2026")],
+    "Containers": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Group by: *"), (R.ENTRY, "Search\u2026")],
     "Images": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Pull"), (R.ENTRY, "Search\u2026")],
     "Volumes": [(R.PAGE_TAB, "All"), (R.PUSH_BUTTON, "Create"), (R.ENTRY, "Search\u2026")],
     "Networks": [(R.ENTRY, "Search\u2026")],
 }
 # controls that belong to one page only: they must be absent from the pages that do not own them
 ONLY_ON = {
-    "Containers": [(R.PUSH_BUTTON, "Group by: Compose project"), (R.PAGE_TAB, "Running"), (R.PAGE_TAB, "Stopped")],
+    "Containers": [(R.PUSH_BUTTON, "Group by: *"), (R.PAGE_TAB, "Running"), (R.PAGE_TAB, "Stopped")],
     "Images": [(R.PUSH_BUTTON, "Pull"), (R.PAGE_TAB, "Dangling")],
     "Volumes": [(R.PUSH_BUTTON, "Create")],
 }
@@ -116,17 +118,24 @@ def page_is(name):
     return item is not None and selected(item)
 
 
+def has_name(role, name):
+    names = {x.get_name() for x in named(role)}
+    if name.endswith("*"):
+        return any(n.startswith(name[:-1]) for n in names)
+    return name in names
+
+
 def missing_controls(page):
     expected = PAGES.get(page)
     if expected is None:
         return [f"no expectations for page {page!r}"]
-    return [f"{Atspi.role_get_name(r)} {n!r}" for r, n in expected if n not in {x.get_name() for x in named(r)}]
+    return [f"{Atspi.role_get_name(r)} {n!r}" for r, n in expected if not has_name(r, n)]
 
 
 def foreign_controls(page):
     own = set(ONLY_ON.get(page, []))
     return [f"{Atspi.role_get_name(r)} {n!r}" for owner, items in ONLY_ON.items() if owner != page for r, n in items
-            if (r, n) not in own and n in {x.get_name() for x in named(r)}]
+            if (r, n) not in own and has_name(r, n)]
 
 
 def settled_missing(page):

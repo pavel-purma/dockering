@@ -1176,17 +1176,18 @@ class ScriptContractTests(ContractCase):
         self.assertEqual(order, ["Images", "Volumes", "Networks", "Containers"])
         self.assertEqual(sorted(pages), sorted(order))
         self.assertEqual({s["PAGE_CONTAINERS"], s["PAGE_IMAGES"], s["PAGE_VOLUMES"], s["PAGE_NETWORKS"]}, set(pages))
-        group_by = f"{s['GROUP_BY']}: {s['GROUP_BY_COMPOSE']}"
+        # the group-by button is "Group by: <mode>", whatever the default mode is, so atspi.py matches the prefix
+        group_by = f"{s['GROUP_BY']}: *"
         known = {"All": s["FILTER_ALL"], "Pull": s["PULL"], "Create": s["CREATE"], "Search\u2026": s["SEARCH"], group_by: group_by}
         for page, controls in pages.items():
             for role, name in controls:
                 self.assertIn(role, ("PAGE_TAB", "PUSH_BUTTON", "ENTRY"), f"{page}: unknown role {role}")
                 self.assertIn(name, known, f"atspi.py expects {name!r} on {page}; trace it to strings.rs here")
                 self.assertEqual(known[name], name)
-        self.assertHas(
-            'format!("{}: {group_label}", s::GROUP_BY)',
+        self.assertFound(
+            r'accessibility_label\(format!\("\{\}: \{[a-z_]+\}", s::GROUP_BY\)\)',
             read(ROOT / "crates/dockering/src/pages/containers/view.rs"),
-            "the Containers view (the group-by button label)",
+            "the Containers view (the group-by button label is GROUP_BY, a colon, then the mode)",
         )
         atspi = read(SMOKE / "atspi.py")
         self.assertEqual(set(re.findall(r'sidebar_item\("([^"]+)"\)', atspi)), {s["PAGE_CONTAINERS"], s["SEC_GENERAL"]})
