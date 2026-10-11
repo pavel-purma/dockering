@@ -962,8 +962,10 @@ fn kbd_095_resource_detail_down_enters_used_by_and_esc_returns(cx: &mut TestAppC
     let image = crate::demo::image_id("redis:7");
     let many: Vec<_> = (0..60)
         .map(|i| {
-            let mut c =
-                dk_core::fake::fixtures::container(&format!("user-{i:02}"), ContainerState::Running);
+            let mut c = dk_core::fake::fixtures::container(
+                &format!("user-{i:02}"),
+                ContainerState::Running,
+            );
             c.image_id = image.clone();
             c
         })
@@ -986,7 +988,9 @@ fn kbd_095_resource_detail_down_enters_used_by_and_esc_returns(cx: &mut TestAppC
     });
     h.draw(cx);
     h.draw(cx);
-    let bar = h.read(cx, |_, window, cx| window.focused(cx)).expect("focus");
+    let bar = h
+        .read(cx, |_, window, cx| window.focused(cx))
+        .expect("focus");
     let list = cx.read(|cx| detail.read(cx).used_by_focus().clone());
     assert!(!h.is_focused(cx, &list));
     // ↓ enters the Used by list itself.
@@ -996,7 +1000,8 @@ fn kbd_095_resource_detail_down_enters_used_by_and_esc_returns(cx: &mut TestAppC
     // Esc returns to the tab bar.
     h.press(cx, "escape");
     assert_eq!(
-        h.read(cx, |_, window, cx| window.focused(cx)).expect("focus"),
+        h.read(cx, |_, window, cx| window.focused(cx))
+            .expect("focus"),
         bar,
         "Esc returns to the tab bar"
     );
@@ -1009,7 +1014,8 @@ fn kbd_095_resource_detail_down_enters_used_by_and_esc_returns(cx: &mut TestAppC
     h.draw(cx);
     assert!(cx.read(|cx| detail.read(cx).body_scroll_y()) > down);
     assert_eq!(
-        h.read(cx, |_, window, cx| window.focused(cx)).expect("focus"),
+        h.read(cx, |_, window, cx| window.focused(cx))
+            .expect("focus"),
         bar
     );
     // Backspace from inside the list.
@@ -1058,7 +1064,9 @@ fn shl_014_parked_volumes_make_no_disk_usage_calls(cx: &mut TestAppContext) {
             s.refetch(crate::state::Collection::Volumes, cx);
         })
     });
-    h.wait_until(cx, "refetched", |_, _| !h.engine.calls_to("list_volumes").is_empty());
+    h.wait_until(cx, "refetched", |_, _| {
+        !h.engine.calls_to("list_volumes").is_empty()
+    });
     h.draw(cx);
     assert!(
         h.engine.calls_to("disk_usage").is_empty(),
@@ -1101,7 +1109,9 @@ fn kbd_094_enter_survives_a_refresh_during_the_background_build(cx: &mut TestApp
     // A store refresh lands before the build does: it supersedes the build.
     let store = h.shell.read_with(cx, |s, _| s.store().cloned()).unwrap();
     cx.update(|cx| {
-        store.update(cx, |s, cx| s.refetch(crate::state::Collection::Containers, cx))
+        store.update(cx, |s, cx| {
+            s.refetch(crate::state::Collection::Containers, cx)
+        })
     });
     h.wait_until(cx, "hand-off still happens", |window, cx| {
         let Some(p) = h.shell.read(cx).containers_page().cloned() else {
@@ -1134,4 +1144,3 @@ fn kbd_020_palette_fits_at_high_zoom(cx: &mut TestAppContext) {
     );
     h.shutdown();
 }
-
