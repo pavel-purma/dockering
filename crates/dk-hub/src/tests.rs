@@ -34,6 +34,10 @@ struct TestFactory {
     probes: Mutex<Vec<EngineId>>,
     starts: Mutex<Vec<EngineId>>,
     discovers: Mutex<u32>,
+    prompts: Mutex<bool>,
+    probe_results: Mutex<HashMap<EngineId, ProbeResult>>,
+    start_error: Mutex<Option<EngineError>>,
+    start_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 fn sock_cfg(id: &str) -> EngineConfig {
@@ -78,6 +82,12 @@ impl TestFactory {
     fn discovers(&self) -> u32 {
         *lock(&self.discovers)
     }
+    fn set_prompt(&self, on: bool) {
+        *lock(&self.prompts) = on;
+    }
+    fn starts(&self) -> usize {
+        lock(&self.starts).len()
+    }
     fn probes(&self) -> Vec<String> {
         lock(&self.probes).iter().map(|i| i.0.clone()).collect()
     }
@@ -114,14 +124,31 @@ impl EngineFactory for TestFactory {
     }
     async fn probe(&self, cfg: &EngineConfig) -> ProbeResult {
         lock(&self.probes).push(cfg.id.clone());
+        if let Some(r) = lock(&self.probe_results).get(&cfg.id) {
+            return r.clone();
+        }
         match lock(&self.connect_errors).get(&cfg.id) {
             Some(e) => ProbeResult::Unreachable(e.clone()),
             None => ProbeResult::Reachable,
         }
     }
+    fn start_prompt(&self, _cfg: &EngineConfig) -> Option<StartPrompt> {
+        (*lock(&self.prompts)).then(|| StartPrompt {
+            title: "Not running".into(),
+            body: "Start it to continue.".into(),
+            action_label: "Start".into(),
+        })
+    }
     async fn start(&self, cfg: &EngineConfig) -> EngineResult<()> {
         lock(&self.starts).push(cfg.id.clone());
-        Ok(())
+        let gate = lock(&self.start_gate).clone();
+        if let Some(g) = gate {
+            g.notified().await;
+        }
+        match lock(&self.start_error).clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
 
@@ -577,7 +604,7 @@ async fn eng_021_wsl_distro_stops_auto_retry_after_three_failures() {
     assert_eq!(f.connects().len(), 3);
     // ENG-106: explicit start, then connect.
     f.set_connect_error("wsl-ubuntu", None);
-    hub.start_wsl_distro(&EngineId::new("wsl-ubuntu"))
+    hub.start_engine(&EngineId::new("wsl-ubuntu"))
         .await
         .unwrap();
     until(Duration::from_secs(1), || {
@@ -2288,7 +2315,7 @@ async fn eng_106_start_and_connect_activates_a_stopped_non_active_distro() {
     let mut ev = hub.hub_events();
     let _ = next(&mut ev, Duration::from_secs(1)).await;
 
-    hub.start_wsl_distro(&wsl).await.unwrap();
+    hub.start_engine(&wsl).await.unwrap();
     assert_eq!(lock(&f.starts).clone(), vec![wsl.clone()]);
     assert_eq!(hub.active_engine(), Some(wsl.clone()));
     until(Duration::from_secs(5), || {
@@ -2378,5 +2405,370 @@ fn save_file_concurrent_saves_to_one_path_all_succeed_durably() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(names, vec!["logs.txt".to_string()]);
+    hub.shutdown();
+}
+
+fn no_session() -> EngineError {
+    EngineError::not_found(ResourceKind::Session, "default")
+}
+
+fn last_engine(id: &str) -> UiState {
+    UiState {
+        last_engine: Some(EngineId::new(id)),
+        ..UiState::default()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_137_missing_default_session_is_stopped_not_failed() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    assert_eq!(f.connects().len(), 1, "no backoff retries");
+    let st = status_of(&hub, "a").await;
+    assert_eq!(
+        st.start_prompt.map(|p| p.action_label),
+        Some("Start".to_string())
+    );
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_137_active_supervisor_stops_instead_of_failing() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("a"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("a")));
+    assert_eq!(f.connects().len(), 1);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_137_other_errors_stay_failed() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub, "a"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    assert!(status_of(&hub, "a").await.start_prompt.is_none());
+
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("b"), preference::LOCAL_SOCKET);
+    f.set_connect_error("b", Some(EngineError::unreachable("down")));
+    let (hub2, _dir2) = start_paused(f, Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub2, "b"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    hub.shutdown();
+    hub2.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_138_never_started_by_connect_probe_or_retry() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Stopped);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    let _ = hub.retry(&EngineId::new("a")).await;
+    tokio::time::sleep(Duration::from_secs(125)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    assert!(!f.probes().is_empty());
+    assert_eq!(f.starts(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_stopped_engine_connects_when_session_appears() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Stopped);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("a"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    assert!(f.probes().len() >= 2, "rechecks while stopped");
+
+    f.set_connect_error("a", None);
+    lock(&f.probe_results).remove(&EngineId::new("a"));
+    until(Duration::from_secs(15), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(f.starts(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_inactive_stopped_engine_follows_probe() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let mut d = DiscoveredEngine::new(sock_cfg("w"), preference::WSL_DISTRO);
+    d.initial_state = Some(EngineState::Stopped);
+    f.add_discovered(d, Some(FakeEngine::new("w")));
+    lock(&f.probe_results).insert(EngineId::new("w"), ProbeResult::Stopped);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(65)).await;
+    assert_eq!(state_of(&hub, "w"), Some(EngineState::Stopped));
+    lock(&f.probe_results).insert(EngineId::new("w"), ProbeResult::Reachable);
+    tokio::time::sleep(Duration::from_secs(65)).await;
+    assert_eq!(state_of(&hub, "w"), Some(EngineState::Disconnected));
+    assert_eq!(f.starts(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_recheck_never_calls_start() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Stopped);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("a"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(f.probes().len() >= 5);
+    assert_eq!(f.starts(), 0);
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    hub.shutdown();
+}
+
+fn stopped_distro(f: &TestFactory, id: &str) {
+    let mut d = DiscoveredEngine::new(sock_cfg(id), preference::WSL_DISTRO);
+    d.initial_state = Some(EngineState::Stopped);
+    f.add_discovered(d, Some(FakeEngine::new(id)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_137_named_session_missing_stays_failed() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub, "a"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    let Some(EngineState::Failed { error, .. }) = state_of(&hub, "a") else {
+        panic!("not failed")
+    };
+    assert_eq!(error.hint(), Some(dk_core::error::SESSION_NOT_FOUND_HINT));
+    assert!(status_of(&hub, "a").await.start_prompt.is_none());
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_137_policy_and_elevation_never_become_stopped() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error(
+        "a",
+        Some(EngineError::unreachable_with_hint(
+            "blocked",
+            "Blocked by policy.",
+        )),
+    );
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub, "a"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    let Some(EngineState::Failed { error, .. }) = state_of(&hub, "a") else {
+        panic!("not failed")
+    };
+    assert_eq!(error.hint(), Some("Blocked by policy."));
+    assert_eq!(f.starts(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_138_start_failure_sets_failed_and_clears_connecting() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    stopped_distro(&f, "w");
+    *lock(&f.start_error) = Some(EngineError::unreachable("no go"));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let w = EngineId::new("w");
+    assert!(hub.start_engine(&w).await.is_err());
+    assert_eq!(f.starts(), 1);
+    assert!(matches!(
+        state_of(&hub, "w"),
+        Some(EngineState::Failed { .. })
+    ));
+    assert_eq!(hub.active_engine(), Some(EngineId::new("a")));
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_138_start_on_connected_engine_is_rejected_and_state_kept() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let err = hub.start_engine(&EngineId::new("a")).await.unwrap_err();
+    assert!(matches!(err, EngineError::Conflict(_)));
+    assert_eq!(f.starts(), 0);
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Connected));
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_recheck_skips_when_start_in_flight() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Stopped);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("a"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *lock(&f.start_gate) = Some(gate.clone());
+    let a = EngineId::new("a");
+    let call = tokio::spawn(hub.start_engine(&a));
+    until(Duration::from_secs(1), || {
+        state_of(&hub, "a") == Some(EngineState::Connecting)
+    })
+    .await;
+    let probes = f.probes().len();
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    assert_eq!(f.probes().len(), probes, "recheck must not probe mid-start");
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Connecting));
+
+    f.set_connect_error("a", None);
+    gate.notify_one();
+    call.await.unwrap().unwrap();
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(f.starts(), 1);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_recheck_never_creates_a_session() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(no_session()));
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Unknown);
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("a"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    assert!(f.probes().len() >= 5);
+
+    f.set_connect_error("a", None);
+    lock(&f.probe_results).insert(EngineId::new("a"), ProbeResult::Reachable);
+    until(Duration::from_secs(15), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(f.starts(), 0);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_140_inactive_stopped_with_prompt_survives_inconclusive_probe() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    stopped_distro(&f, "w");
+    lock(&f.probe_results).insert(
+        EngineId::new("w"),
+        ProbeResult::Unreachable(EngineError::unreachable("x")),
+    );
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(65)).await;
+    assert_eq!(state_of(&hub, "w"), Some(EngineState::Stopped));
+    lock(&f.probe_results).insert(EngineId::new("w"), ProbeResult::Unknown);
+    tokio::time::sleep(Duration::from_secs(65)).await;
+    assert_eq!(state_of(&hub, "w"), Some(EngineState::Stopped));
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_106_start_during_switch() {
+    let f = TestFactory::new();
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    stopped_distro(&f, "w");
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Connected)
+    })
+    .await;
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *lock(&f.start_gate) = Some(gate.clone());
+    let w = EngineId::new("w");
+    let call = tokio::spawn(hub.start_engine(&w));
+    until(Duration::from_secs(1), || {
+        state_of(&hub, "w") == Some(EngineState::Connecting)
+    })
+    .await;
+    hub.set_active(&w).await.unwrap();
+    gate.notify_one();
+    call.await.unwrap().unwrap();
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "w") == Some(EngineState::Connected)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(w));
+    assert_ne!(state_of(&hub, "a"), Some(EngineState::Connecting));
     hub.shutdown();
 }

@@ -4,7 +4,7 @@
 //! (SHL-020/021).
 
 pub mod app_shell;
-mod engine_views;
+pub(crate) mod engine_views;
 pub mod menus;
 pub mod palette;
 pub mod regions;

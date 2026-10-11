@@ -9,6 +9,7 @@
 
     "container list --quiet": { "stdout_file": "container_list/quiet.txt" },
     "container list --all --no-trunc --format json": { "stdout_file": "container_list/list.ndjson" },
+    "container list --all --format json": { "stdout_file": "container_list/list.ndjson" },
     "container list --no-trunc --format json": { "stdout_file": "container_list/running.ndjson" },
     "container inspect --format json dk-cli-fixture": { "stdout_file": "container_inspect/inspect_single_line.json" },
     "container inspect --format json dk-cli-exited": { "stdout_file": "container_inspect/inspect_exited.json" },

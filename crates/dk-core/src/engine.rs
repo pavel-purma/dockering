@@ -110,6 +110,12 @@ pub trait EngineFactory: Send + Sync + 'static {
         let _ = cfg;
         ProbeResult::Unknown
     }
+    /// Wording for a stopped engine the backend can start; `None` = nothing to offer (ENG-139).
+    /// A missing session reported by `connect` is only treated as `Stopped` when this is `Some`.
+    fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> {
+        let _ = cfg;
+        None
+    }
     /// Explicit user action: start a stopped backend (e.g. boot a WSL distro, ENG-106).
     async fn start(&self, cfg: &EngineConfig) -> EngineResult<()> {
         let _ = cfg;

@@ -345,7 +345,7 @@ fn confirm_version(
     Ok(got)
 }
 
-fn discovery_on(
+pub(crate) fn discovery_on(
     mgr: &abi::IWSLCSessionManager,
     v: WslVersion,
 ) -> EngineResult<(Vec<SessionEntry>, Option<String>)> {
@@ -353,8 +353,15 @@ fn discovery_on(
     let sessions = list_sessions_on(mgr)?;
     let mut out: Option<abi::IWSLCSession> = None;
     // SAFETY: trusted ABI confirmed above, NULL resolves caller default.
-    ffi::check(unsafe { mgr.OpenSessionByName(PCWSTR::null(), &mut out) })
-        .map_err(|e| com_err(e, None))?;
+    let opened = ffi::check(unsafe { mgr.OpenSessionByName(PCWSTR::null(), &mut out) })
+        .map_err(|e| com_err(e, None));
+    match opened {
+        Err(EngineError::NotFound {
+            kind: ResourceKind::Session,
+            ..
+        }) => return Ok((sessions, None)),
+        other => other?,
+    }
     let default = if let Some(s) = out {
         blanket(&s);
         let mut name = CoTaskMemWStr::null();

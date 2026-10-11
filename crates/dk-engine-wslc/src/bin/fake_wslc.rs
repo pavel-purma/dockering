@@ -15,6 +15,13 @@
 //! (default 0), `line_delay_ms` (sleep between stdout lines), `hang_ms` (sleep after output,
 //! simulating a long-running child). `--session <s>` with `s` not in `sessions` fails like
 //! wslc 3.0.1 (`WSLC_E_SESSION_NOT_FOUND`). Unknown argv → exit 99.
+//!
+//! No-session simulation (ENG-137/138, wslc 3.0.1 per spec 20 §5.8 S-4): with
+//! `$FAKE_WSLC_SESSION_FILE` set, every argv is appended to `<file>.argv`. While that file
+//! doesn't exist, `container list` (any form, no `--session`) CREATES it (or fails with a VM
+//! error when `<file>.fail` exists), `system session list` prints an empty table, and other
+//! `container …` commands fail with `Session not found`. `system info` and `version` never
+//! create it.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -65,6 +72,18 @@ fn main() {
         .unwrap_or_else(|e| fail(&format!("fake-wslc: no fake_map.json: {e}"), 98));
     let map: Value = serde_json::from_str(&map_text)
         .unwrap_or_else(|e| fail(&format!("fake-wslc: bad fake_map.json: {e}"), 98));
+    let explicit_session = args.first().map(String::as_str) == Some("--session");
+    let session_file = std::env::var_os("FAKE_WSLC_SESSION_FILE")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from);
+    if let Some(f) = &session_file
+        && let Ok(mut log) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(f.with_extension("argv"))
+    {
+        let _ = writeln!(log, "{}", args.join(" "));
+    }
 
     if args.first().map(String::as_str) == Some("--session") {
         let session = args.get(1).cloned().unwrap_or_default();
@@ -86,6 +105,31 @@ fn main() {
     }
 
     let key = args.join(" ");
+    if let Some(f) = &session_file
+        && !explicit_session
+        && !f.exists()
+    {
+        if key == "system session list" {
+            let _ = writeln!(std::io::stdout(), "ID   Creator PID   Display Name");
+            std::process::exit(0);
+        }
+        if key.starts_with("container list") {
+            if f.with_extension("fail").exists() {
+                fail(
+                    "Virtual machine is not running\r\nError code: WSLC_E_VM_NOT_RUNNING",
+                    1,
+                );
+            }
+            let _ = std::fs::write(f, "session");
+        } else if key.starts_with("container ") {
+            fail(
+                "Session not found: 'default'\r\nError code: WSLC_E_SESSION_NOT_FOUND\r\n\
+                 If this error was unexpected, please consider searching for existing issues \
+                 or filing a new issue at https://github.com/microsoft/WSL/issues.",
+                1,
+            );
+        }
+    }
     let Some(commands) = map.get("commands").and_then(Value::as_object) else {
         fail("fake-wslc: fake_map.json has no \"commands\"", 98);
     };

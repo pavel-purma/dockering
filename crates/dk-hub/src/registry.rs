@@ -96,6 +96,7 @@ pub(crate) struct Registry {
     pub active: Option<EngineId>,
     pub supervisor: Option<Supervisor>,
     pub events: broadcast::Sender<HubEvent>,
+    pub factories: Vec<Arc<dyn EngineFactory>>,
 }
 
 /// Initial state of an engine that isn't connected (ENG-010/025/106/112).
@@ -176,6 +177,7 @@ impl Registry {
             active: None,
             supervisor: None,
             events,
+            factories: Vec::new(),
         }
     }
 
@@ -221,12 +223,20 @@ impl Registry {
     }
 
     pub fn status(&self, e: &Entry) -> EngineStatus {
+        let start_prompt = if matches!(e.state, EngineState::Stopped) {
+            e.factory
+                .and_then(|i| self.factories.get(i))
+                .and_then(|f| f.start_prompt(&e.config))
+        } else {
+            None
+        };
         EngineStatus {
             config: e.config.clone(),
             state: e.state.clone(),
             info: e.info.clone(),
             active: self.is_active(&e.config.id),
             also_reachable_via: e.also_reachable_via.clone(),
+            start_prompt,
         }
     }
 

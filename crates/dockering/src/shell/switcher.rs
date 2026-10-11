@@ -277,7 +277,8 @@ impl Render for EngineSwitcher {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().link)
-                                .child(s::START_AND_CONNECT),
+                                .debug_selector(|| "switcher-start-label".into())
+                                .child(super::engine_views::start_label(e)),
                         )
                     })
                     .child(dot(dot_color))

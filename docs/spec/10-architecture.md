@@ -148,7 +148,7 @@ impl HubHandle {
     pub fn remove_engine(&self, id: &EngineId) -> HubCall<()>;
     pub fn test_engine(&self, cfg: EngineConfig) -> HubCall<EngineInfo>;
     pub fn rescan(&self) -> HubCall<()>;
-    pub fn start_wsl_distro(&self, id: &EngineId) -> HubCall<()>; // ENG-106 explicit user action only
+    pub fn start_engine(&self, id: &EngineId) -> HubCall<()>; // ENG-106/138 explicit user action only (renamed `start_engine`; rejects engines that are not Stopped/Failed/Disconnected)
 
     // ── services owned by the hub ─────────────────────────────────────────────────────────
     pub fn events(&self, engine: &EngineId) -> HubStream<Feed<EngineEvent>>;   // shared, deduped per engine

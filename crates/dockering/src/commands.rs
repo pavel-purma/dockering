@@ -177,11 +177,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     c!(s::RETRY, RetryEngine, Engines, Engine, &["reconnect"]),
     c!(
-        s::START_AND_CONNECT,
+        s::CMD_START_ENGINE,
         StartEngine,
         Engines,
         Engine,
-        &["wsl", "boot"]
+        &["wsl", "boot", "session"]
     ),
     c!(s::CMD_REFRESH, Refresh, General, Engine, &["reload"]),
     c!(s::CMD_PALETTE, CommandPalette, General, Always),

@@ -131,6 +131,7 @@ impl HubInner {
         let factories = opts.factories.unwrap_or_else(crate::default_factories);
         let (events_tx, _) = broadcast::channel(HUB_EVENTS_CAPACITY);
         let mut reg = Registry::new(View::from_settings(&opts.config.engines), events_tx);
+        reg.factories = factories.clone();
         for cfg in &opts.config.engines.entries {
             if reg.idx(&cfg.id).is_none() {
                 let f = registry::factory_for(&factories, &cfg.endpoint);
@@ -787,7 +788,7 @@ pub(crate) fn start_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
     h.inner.handle.spawn(async move {
         let res = async {
             let (cfg, fi) = {
-                let reg = lock(&inner.reg);
+                let mut reg = lock(&inner.reg);
                 let e = reg
                     .get(&id)
                     .ok_or_else(|| EngineError::not_found(ResourceKind::Engine, id.as_str()))?;
@@ -796,22 +797,39 @@ pub(crate) fn start_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                         "engine '{id}' can't be started"
                     )));
                 }
-                (e.config.clone(), e.factory)
+                if !matches!(
+                    e.state,
+                    EngineState::Stopped | EngineState::Failed { .. } | EngineState::Disconnected
+                ) {
+                    return Err(EngineError::Conflict("engine is already running".into()));
+                }
+                let out = (e.config.clone(), e.factory);
+                if out.1.and_then(|i| inner.factories.get(i)).is_none() {
+                    return Err(EngineError::unreachable("no backend for this endpoint"));
+                }
+                reg.set_state(&id, EngineState::Connecting);
+                out
             };
             let factory = fi
                 .and_then(|i| inner.factories.get(i).cloned())
                 .ok_or_else(|| EngineError::unreachable("no backend for this endpoint"))?;
-            inner.set_state(&id, EngineState::Connecting);
-            match guarded(factory.start(&cfg)).await {
+            let res = guarded(factory.start(&cfg)).await;
+            let mut reg = lock(&inner.reg);
+            let ours = reg
+                .get(&id)
+                .is_some_and(|e| matches!(e.state, EngineState::Connecting));
+            match res {
                 Ok(()) => {
-                    let sup = {
-                        let mut reg = lock(&inner.reg);
-                        reg.set_state(&id, EngineState::Disconnected);
-                        reg.supervisor
-                            .as_ref()
-                            .filter(|s| s.id == id)
-                            .map(|s| s.retry.clone())
-                    };
+                    if !ours {
+                        return Ok(());
+                    }
+                    reg.set_state(&id, EngineState::Disconnected);
+                    let sup = reg
+                        .supervisor
+                        .as_ref()
+                        .filter(|s| s.id == id)
+                        .map(|s| s.retry.clone());
+                    drop(reg);
                     match sup {
                         // Already supervised: wake it so it connects now.
                         Some(retry) => retry.notify_one(),
@@ -822,13 +840,15 @@ pub(crate) fn start_engine(h: &HubHandle, id: &EngineId) -> HubCall<()> {
                     Ok(())
                 }
                 Err(e) => {
-                    inner.set_state(
-                        &id,
-                        EngineState::Failed {
-                            error: e.clone(),
-                            retry_in_ms: None,
-                        },
-                    );
+                    if ours {
+                        reg.set_state(
+                            &id,
+                            EngineState::Failed {
+                                error: e.clone(),
+                                retry_in_ms: None,
+                            },
+                        );
+                    }
                     Err(e)
                 }
             }

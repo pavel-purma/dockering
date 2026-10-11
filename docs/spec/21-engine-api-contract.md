@@ -369,7 +369,12 @@ pub trait EngineFactory: Send + Sync + 'static {
     async fn connect(&self, cfg: &EngineConfig) -> EngineResult<Arc<dyn Engine>>;
     /// Settings UI schema for the "Add engine" dialog (fields, validation), so the UI stays generic.
     fn config_schema(&self) -> EngineConfigSchema;
+    /// Planned (ENG-139): what to tell the user while an engine is `Stopped`. Default `None`.
+    fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> { None }
 }
+
+/// Planned (ENG-139). Plain user-facing text; no transport or process names (ENG-030).
+pub struct StartPrompt { pub title: String, pub body: String, pub action_label: String }
 ```
 
 | Factory | Crate | OS (cfg) | v1 |

@@ -269,6 +269,7 @@ mod tests {
             info: None,
             active: false,
             also_reachable_via: Vec::new(),
+            start_prompt: None,
         }
     }
 

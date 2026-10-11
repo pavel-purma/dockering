@@ -275,7 +275,7 @@ impl EngineStore {
                         }
                         Err(err) => {
                             tracing::debug!(%err, "engine events failed");
-                            unreachable = err.is_unreachable();
+                            unreachable = connection_lost(&err);
                             false
                         }
                     })
@@ -352,7 +352,7 @@ impl EngineStore {
     pub fn set_connected(&mut self, connected: bool, cx: &mut Context<Self>) {
         if connected {
             let failed =
-                self.containers.error().is_some_and(|e| e.is_unreachable()) || !self.connected_once;
+                self.containers.error().is_some_and(connection_lost) || !self.connected_once;
             if failed || self.live_mode == LiveMode::Idle {
                 self.activate(cx);
             }
@@ -416,6 +416,18 @@ pub struct ResourceState {
     pub loading: bool,
     pub first_load: bool,
     pub error: Option<EngineError>,
+}
+
+/// A lost connection, including a WSL containers session that disappeared (ENG-137).
+fn connection_lost(e: &dk_core::EngineError) -> bool {
+    e.is_unreachable()
+        || matches!(
+            e,
+            dk_core::EngineError::NotFound {
+                kind: dk_core::ResourceKind::Session,
+                ..
+            }
+        )
 }
 
 #[cfg(test)]

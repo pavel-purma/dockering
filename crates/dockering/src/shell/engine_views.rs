@@ -1,20 +1,31 @@
 //! Engine connection UX (SHL-013, ENG-107, ENG-111): the full-page disconnected/failed
 //! alert, the degraded banner, the first-run screen, and the no-active-engine screen.
 
-use dk_core::{EngineState, EngineStatus};
+use dk_core::{EngineState, EngineStatus, StartPrompt};
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Icon, IconName, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, IconName, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, FocusHandle, IntoElement, div, px};
 
 use crate::actions::{EngineSwitcher, Rescan, RetryEngine, StartEngine};
 use crate::strings as s;
 use crate::ui::dispatch;
+use crate::ui::widgets::focus_wrap;
 
 /// Full-page alert for Disconnected/Failed/Stopped (SHL-013, ENG-107). Last-known data is
 /// not shown so the user can't act on stale ids.
-pub fn disconnected_page(status: &EngineStatus, origin: &FocusHandle, cx: &App) -> AnyElement {
+pub fn disconnected_page(
+    status: &EngineStatus,
+    origin: &FocusHandle,
+    start_focus: &FocusHandle,
+    cx: &App,
+) -> AnyElement {
+    if matches!(status.state, EngineState::Stopped)
+        && let Some(prompt) = &status.start_prompt
+    {
+        return start_page(prompt, false, origin, start_focus, cx);
+    }
     let (message, hint, retry_in) = match &status.state {
         EngineState::Failed { error, retry_in_ms } => (
             error.to_string(),
@@ -35,6 +46,7 @@ pub fn disconnected_page(status: &EngineStatus, origin: &FocusHandle, cx: &App) 
     let stopped = matches!(status.state, EngineState::Stopped);
     v_flex()
         .id("engine-unreachable")
+        .debug_selector(|| "engine-unreachable".into())
         .size_full()
         .items_center()
         .justify_center()
@@ -64,7 +76,7 @@ pub fn disconnected_page(status: &EngineStatus, origin: &FocusHandle, cx: &App) 
                             this.child(
                                 Button::new("start-engine")
                                     .primary()
-                                    .label(s::START_AND_CONNECT)
+                                    .label(start_label(status))
                                     .on_click(dispatch::on_click(origin, Box::new(StartEngine))),
                             )
                         })
@@ -163,6 +175,85 @@ pub fn no_active_engine(origin: &FocusHandle) -> AnyElement {
                 .primary()
                 .label(s::SWITCH_ENGINE)
                 .on_click(dispatch::on_click(origin, Box::new(EngineSwitcher))),
+        )
+        .into_any_element()
+}
+
+/// The start button's label: the backend's own wording, else the generic one (ENG-139).
+pub fn start_label(status: &EngineStatus) -> String {
+    status.start_prompt.as_ref().map_or_else(
+        || s::START_AND_CONNECT.to_owned(),
+        |p| p.action_label.clone(),
+    )
+}
+
+/// A stopped engine the backend can start: a calm empty state, not an error (ENG-139).
+/// `starting` disables the button and shows its progress.
+pub fn start_page(
+    prompt: &StartPrompt,
+    starting: bool,
+    origin: &FocusHandle,
+    start_focus: &FocusHandle,
+    cx: &App,
+) -> AnyElement {
+    let activate = {
+        let origin = origin.clone();
+        move |_: &gpui_kit::KeyDownEvent, window: &mut gpui_kit::Window, cx: &mut App| {
+            dispatch::dispatch_from(&origin, &StartEngine, window, cx)
+        }
+    };
+    v_flex()
+        .id("engine-stopped")
+        .debug_selector(|| "engine-stopped".into())
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_3()
+        .p_8()
+        .child(
+            div()
+                .text_color(cx.theme().muted_foreground)
+                .child(Icon::new(crate::assets::Lucide::Plug).size(px(48.))),
+        )
+        .child(
+            div()
+                .text_xl()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(prompt.title.clone()),
+        )
+        .child(
+            div()
+                .max_w(px(480.))
+                .text_sm()
+                .text_center()
+                .text_color(cx.theme().muted_foreground)
+                .child(prompt.body.clone()),
+        )
+        .child(
+            h_flex()
+                .gap_2()
+                .child(focus_wrap(
+                    "start-engine-wrap",
+                    start_focus,
+                    Button::new("start-engine")
+                        .primary()
+                        .label(if starting {
+                            s::STARTING.to_owned()
+                        } else {
+                            prompt.action_label.clone()
+                        })
+                        .loading(starting)
+                        .disabled(starting)
+                        .on_click(dispatch::on_click(origin, Box::new(StartEngine))),
+                    activate,
+                    cx,
+                ))
+                .child(
+                    Button::new("switch-engine")
+                        .label(s::SWITCH_ENGINE)
+                        .tooltip_with_action(s::SWITCH_ENGINE, &EngineSwitcher, None)
+                        .on_click(dispatch::on_click(origin, Box::new(EngineSwitcher))),
+                ),
         )
         .into_any_element()
 }

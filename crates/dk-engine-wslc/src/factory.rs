@@ -15,7 +15,7 @@ use dk_core::engine::preference;
 use dk_core::{
     ConfigField, ConfigFieldKind, DiscoveredEngine, Engine, EngineConfig, EngineConfigSchema,
     EngineEndpoint, EngineError, EngineFactory, EngineId, EngineKind, EngineOrigin, EngineResult,
-    ProbeResult, WslcTransportPref,
+    EngineState, ProbeResult, StartPrompt, WslcTransportPref,
 };
 
 use crate::version::{self, WslVersion};
@@ -104,22 +104,29 @@ fn wslc_config(id: EngineId, name: String, session: Option<String>) -> EngineCon
 
 /// Builds the discovery list (pure, unit-tested). `sessions` = every session display name
 /// visible to the caller; `default_session` = the caller's default (skipped as a duplicate).
-pub fn discovered_engines(
+/// `default_absent` marks the default engine `Stopped` (ENG-137) when a trusted-ABI
+/// enumeration positively found no default session.
+pub fn discovered_engines_with_default(
     present: bool,
     sessions: &[String],
     default_session: Option<&str>,
+    default_absent: bool,
 ) -> Vec<DiscoveredEngine> {
     if !present {
         return Vec::new();
     }
-    let mut out = vec![DiscoveredEngine::new(
+    let mut default = DiscoveredEngine::new(
         wslc_config(
             EngineId::new(DEFAULT_ENGINE_ID),
             DEFAULT_ENGINE_NAME.to_owned(),
             None,
         ),
         preference::WSLC,
-    )];
+    );
+    if default_absent {
+        default.initial_state = Some(EngineState::Stopped);
+    }
+    let mut out = vec![default];
     let mut seen = vec![EngineId::new(DEFAULT_ENGINE_ID)];
     for s in sessions {
         if s.is_empty() || Some(s.as_str()) == default_session {
@@ -263,8 +270,8 @@ impl EngineFactory for WslcFactory {
             if !present {
                 return Vec::new();
             }
-            let (sessions, default) = discover_sessions(v).await;
-            discovered_engines(true, &sessions, default.as_deref())
+            let (sessions, default, absent) = discover_sessions(v).await;
+            discovered_engines_with_default(true, &sessions, default.as_deref(), absent)
         }
         #[cfg(not(windows))]
         {
@@ -334,6 +341,10 @@ impl EngineFactory for WslcFactory {
                     UPDATE_HINT,
                 ));
             }
+            if matches!(endpoint_parts(cfg), Ok((None, _))) {
+                // ENG-140: never infer the default from a process check or the CLI.
+                return default_probe(probe_default_session().await);
+            }
             if crate::com::win32::process_running("wslcsession.exe") {
                 ProbeResult::Reachable
             } else {
@@ -349,10 +360,52 @@ impl EngineFactory for WslcFactory {
             ))
         }
     }
+
+    fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> {
+        match endpoint_parts(cfg) {
+            Ok((None, _)) if start_available() => Some(default_start_prompt()),
+            _ => None,
+        }
+    }
+
+    async fn start(&self, cfg: &EngineConfig) -> EngineResult<()> {
+        let (session, _) = endpoint_parts(cfg)?;
+        if session.is_some() {
+            return Err(EngineError::Api {
+                status: 400,
+                message: "only the default WSL containers session can be started".into(),
+            });
+        }
+        #[cfg(windows)]
+        {
+            crate::cli::start_default_session().await
+        }
+        #[cfg(not(windows))]
+        {
+            Err(EngineError::unreachable_with_hint(
+                "WSL containers are only available on Windows",
+                "Use a Docker engine on this OS.",
+            ))
+        }
+    }
 }
 
+/// Plan §6.3: Start is offered only when `wslc.exe` exists (Windows only).
+fn start_available() -> bool {
+    cfg!(windows) && crate::cli::wslc_exe().is_some()
+}
+
+fn default_start_prompt() -> StartPrompt {
+    StartPrompt {
+        title: "WSL containers isn't running".into(),
+        body: "There's no active WSL containers session, so there are no containers or images to show yet. Start one to continue.".into(),
+        action_label: "Start WSL containers".into(),
+    }
+}
+
+/// `(owned session names, caller's default, default positively absent)`.
 #[cfg(windows)]
-async fn discover_sessions(v: Option<WslVersion>) -> (Vec<String>, Option<String>) {
+async fn discover_sessions(v: Option<WslVersion>) -> (Vec<String>, Option<String>, bool) {
     if let Some(v) = v
         && crate::com::abi::select(&v).is_some()
     {
@@ -363,14 +416,14 @@ async fn discover_sessions(v: Option<WslVersion>) -> (Vec<String>, Option<String
         .await;
     }
     // CLI tables contain no owner SID. Do not enumerate at all, including on policy failure.
-    (Vec::new(), None)
+    (Vec::new(), None, false)
 }
 
 #[cfg(windows)]
 async fn owned_discovery(
     probe: impl Future<Output = EngineResult<(Vec<crate::com::engine::SessionEntry>, Option<String>)>>,
     me: Option<String>,
-) -> (Vec<String>, Option<String>) {
+) -> (Vec<String>, Option<String>, bool) {
     match probe.await {
         Ok((sessions, default)) => {
             // ListSessions returns every session the service tracks; keep the caller's.
@@ -379,12 +432,50 @@ async fn owned_discovery(
                 .filter(|s| owned_sid(s.sid.as_deref(), me.as_deref()))
                 .filter_map(|s| s.name)
                 .collect();
-            return (names, default);
+            let absent = default.is_none();
+            return (names, default, absent);
         }
         Err(e) => tracing::debug!(%e, "COM ListSessions failed; extra sessions excluded"),
     }
     // CLI tables contain no owner SID. Do not enumerate at all, including on policy failure.
-    (Vec::new(), None)
+    (Vec::new(), None, false)
+}
+
+/// ENG-140: read-only COM check of the caller's default session. `None` = no trusted ABI or
+/// the listing failed; the caller reports `Unknown`.
+#[cfg(windows)]
+async fn probe_default_session() -> Option<ProbeResult> {
+    let v = version::detect()?;
+    crate::com::abi::select(&v)?;
+    probe_from_listing(crate::com::list_sessions(v)).await
+}
+
+/// No positive listing means `Unknown`; never `Reachable` (ENG-140).
+#[cfg(any(windows, test))]
+fn default_probe(listed: Option<ProbeResult>) -> ProbeResult {
+    listed.unwrap_or(ProbeResult::Unknown)
+}
+
+#[cfg(windows)]
+async fn probe_from_listing(
+    listing: impl Future<Output = EngineResult<(Vec<crate::com::engine::SessionEntry>, Option<String>)>>,
+) -> Option<ProbeResult> {
+    match listing.await {
+        Ok((_, default)) => Some(probe_from_default(default.as_deref())),
+        Err(e) => {
+            tracing::debug!(%e, "COM ListSessions failed during probe");
+            None
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+fn probe_from_default(default: Option<&str>) -> ProbeResult {
+    if default.is_some() {
+        ProbeResult::Reachable
+    } else {
+        ProbeResult::Stopped
+    }
 }
 
 #[cfg(windows)]
@@ -484,6 +575,108 @@ mod tests {
     use crate::com::abi::AbiModule;
 
     #[cfg(windows)]
+    async fn fake_listing(
+        sessions: Vec<(u32, String)>,
+        default: &str,
+    ) -> EngineResult<(Vec<crate::com::engine::SessionEntry>, Option<String>)> {
+        use crate::com::{fake, pool::RpcPool};
+        let state = Arc::new(std::sync::Mutex::new(fake::FakeState {
+            version: (3, 0, 1),
+            sessions,
+            default_session: default.into(),
+            ..Default::default()
+        }));
+        let pool = RpcPool::new(1);
+        pool.run(move || {
+            crate::com::engine::discovery_on(
+                &fake::FakeManager::new_interface(state),
+                WslVersion::new(3, 0, 1, 0),
+            )
+        })
+        .await
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn eng_140_probe_reports_stopped_when_default_absent() {
+        let r = probe_from_listing(fake_listing(Vec::new(), "wslc-cli-tester")).await;
+        assert!(matches!(r, Some(ProbeResult::Stopped)), "{r:?}");
+        let r = probe_from_listing(fake_listing(
+            vec![(1, "wslc-cli-tester".into())],
+            "wslc-cli-tester",
+        ))
+        .await;
+        assert!(matches!(r, Some(ProbeResult::Reachable)), "{r:?}");
+        let r = probe_from_listing(async { Err(EngineError::unreachable("rpc")) }).await;
+        assert!(r.is_none(), "failed listing keeps the existing probe");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn eng_137_discovery_marks_default_stopped_when_no_sessions() {
+        let (names, default, absent) = owned_discovery(
+            fake_listing(Vec::new(), "wslc-cli-tester"),
+            Some("S-1-5-21-1-2-3-1001".into()),
+        )
+        .await;
+        assert!(names.is_empty() && default.is_none() && absent);
+        let found = discovered_engines_with_default(true, &names, default.as_deref(), absent);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].config.id.as_str(), DEFAULT_ENGINE_ID);
+        assert_eq!(found[0].initial_state, Some(EngineState::Stopped));
+
+        let (_, _, absent) = owned_discovery(
+            fake_listing(vec![(1, "wslc-cli-tester".into())], "wslc-cli-tester"),
+            Some("S-1-5-21-1-2-3-1001".into()),
+        )
+        .await;
+        assert!(!absent);
+        let (_, _, absent) = owned_discovery(
+            async { Err(EngineError::unreachable("policy")) },
+            Some("S-1-5-21-1-2-3-1001".into()),
+        )
+        .await;
+        assert!(!absent, "failed enumeration is not proof of absence");
+        let plain = discovered_engines_with_default(true, &[], None, false);
+        assert_eq!(plain[0].initial_state, None);
+    }
+
+    #[test]
+    fn eng_140_probe_unknown_never_reachable_without_listing() {
+        assert!(matches!(default_probe(None), ProbeResult::Unknown));
+        assert!(matches!(
+            default_probe(Some(ProbeResult::Stopped)),
+            ProbeResult::Stopped
+        ));
+    }
+
+    #[test]
+    fn eng_137_probe_mapping_and_prompt_scope() {
+        assert!(matches!(probe_from_default(None), ProbeResult::Stopped));
+        assert!(matches!(
+            probe_from_default(Some("x")),
+            ProbeResult::Reachable
+        ));
+    }
+
+    #[test]
+    fn eng_129_missing_session_never_prepares_cli() {
+        #[cfg(windows)]
+        {
+            let missing = EngineError::not_found(dk_core::ResourceKind::Session, "default");
+            let result = futures::executor::block_on(connected_or_cli(
+                Err(missing.clone()),
+                None,
+                None,
+                false,
+                None,
+                || panic!("NotFound must never fall back to the CLI"),
+            ));
+            assert!(matches!(result, Err(e) if e == missing));
+        }
+    }
+
+    #[cfg(windows)]
     #[test]
     fn explicit_target_contradiction_final_zero_cli_and_protected_calls() {
         use crate::com::{WslcComEngine, dispatch, fake};
@@ -570,7 +763,9 @@ mod tests {
         )
         .await;
         assert!(sessions.0.is_empty());
-        let found = discovered_engines(true, &sessions.0, sessions.1.as_deref());
+        assert!(!sessions.2);
+        let found =
+            discovered_engines_with_default(true, &sessions.0, sessions.1.as_deref(), false);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].config.id.as_str(), DEFAULT_ENGINE_ID);
     }
@@ -685,7 +880,7 @@ mod tests {
             "wslc-cli-admin-pavel".to_owned(),
             "My Dev Session".to_owned(),
         ];
-        let d = discovered_engines(true, &sessions, Some("wslc-cli-pavel"));
+        let d = discovered_engines_with_default(true, &sessions, Some("wslc-cli-pavel"), false);
         assert_eq!(d.len(), 3);
         assert_eq!(d[0].config.id.as_str(), DEFAULT_ENGINE_ID);
         assert_eq!(d[0].config.name, DEFAULT_ENGINE_NAME);
@@ -708,7 +903,7 @@ mod tests {
                 transport: WslcTransportPref::Auto
             }
         );
-        assert!(discovered_engines(false, &sessions, None).is_empty());
+        assert!(discovered_engines_with_default(false, &sessions, None, false).is_empty());
     }
 
     #[test]
