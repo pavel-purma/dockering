@@ -69,3 +69,6 @@ fn main() -> anyhow::Result<()> {
         other => bail!("unknown xtask command `{other}`\n\n{USAGE}"),
     }
 }
+
+// canary: unformatted on purpose
+fn   canary ( ) { let _x=1 ; }
