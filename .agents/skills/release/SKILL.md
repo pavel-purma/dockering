@@ -29,7 +29,7 @@ Host tools: `AskUserQuestion` in Claude Code is `question` in OpenCode; `Task` i
 7. Never choose `1.0.0` yourself. Leaving `0.x` is the maintainer's explicit decision (`/release 1.0.0`).
 8. Never rerun a failed job or continue past a failed check without reading its log.
 9. Work in the scratch worktree (step 1). Never modify the maintainer's current checkout.
-10. Squash merges only; auto-merge is off. GitHub does not require green checks on `main`, so **you** wait for them.
+10. Squash merges only; auto-merge is off. `main` requires the `CI gate` and `conventional commit title` checks (REL-080), so GitHub refuses a merge until both pass. Only the maintainer can bypass that, from the PR UI: never use `gh pr merge --admin`, and still read a failed check's log (rule 8) rather than rerunning blindly.
 
 ## Mode: release
 
