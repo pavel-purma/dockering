@@ -13,7 +13,8 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
   -->
 </p>
 
-<!-- TODO: add docs/assets/screenshot-containers.png (the containers list grouped by Compose project) -->
+<p align="center"><img src="docs/screenshots/containers-dark.png" alt="Dockering showing containers grouped by Compose project, dark theme"></p>
+<p align="center"><a href="docs/screenshots.md">More screenshots</a>, dark and light</p>
 
 ## Download
 
