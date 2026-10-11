@@ -17,7 +17,7 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
 
 ## Download
 
-**[Dockering 0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0)** is available
+**[Dockering 0.3.0](https://github.com/pavel-purma/dockering/releases/tag/v0.3.0)** is available
 for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 
 | Windows | macOS | Linux |
@@ -26,7 +26,7 @@ for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 | winget: planned after signing | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.tar.gz) |
 | Portable: [x64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x64.zip) · [ARM64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-arm64.zip) | | |
 
-Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.2.0/SHA256SUMS).
+Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.3.0/SHA256SUMS).
 See [all releases](https://github.com/pavel-purma/dockering/releases) and the
 [verification record](docs/plan/release-checklist.md#evidence-for-v020).
 Public GitHub release builds generate build-provenance attestations: `gh attestation verify <file> -R pavel-purma/dockering`.
@@ -116,7 +116,7 @@ Before anything runs, a download is checked against a signed manifest and its SH
 
 ## Code signing policy
 
-Releases 0.1.0 and 0.2.0 are unsigned. From the first signed release, the Windows executables
+Releases 0.1.0, 0.2.0 and 0.3.0 are unsigned. From the first signed release, the Windows executables
 (`dockering.exe` and the installers) are signed through [SignPath Foundation](https://signpath.org),
 which provides free code signing for open-source projects. macOS files stay unsigned until Developer
 ID signing is set up.
@@ -205,7 +205,7 @@ Windows, so the MSVC environment is loaded automatically):
 Releases are cut with the `/release` skill ([`.agents/skills/release`](.agents/skills/release/SKILL.md)).
 It writes the changelogs from the merged commits, picks the version, builds locally, opens and merges
 the release PR, tags, watches the build, verifies the draft release, and publishes it after the
-maintainer's approval. Feature pull requests never edit `CHANGELOG.md`. Releases so far (0.1.0, 0.2.0)
+maintainer's approval. Feature pull requests never edit `CHANGELOG.md`. Releases so far (0.1.0, 0.2.0, 0.3.0)
 are unsigned; Windows signing through SignPath Foundation is prepared ([docs/signing.md](docs/signing.md)).
 [docs/release.md](docs/release.md) is the runbook. PR titles use
 [conventional commits](https://www.conventionalcommits.org/), because they decide the version and
