@@ -53,13 +53,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app.outputs.token }}
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-03
         if: env.RELEASE_BOT_APP_ID != ''
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: release-plz release-pr
         if: env.RELEASE_BOT_APP_ID != ''
-        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        uses: release-plz/action@18641b6c63063cc5ff8786ebf69cd57e8541bae1 # v0.5.140
         with:
           command: release-pr
         env:
@@ -87,13 +87,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app.outputs.token }}
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-03
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-03
         if: env.RELEASE_BOT_APP_ID != ''
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: release-plz release
         if: env.RELEASE_BOT_APP_ID != ''
-        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        uses: release-plz/action@18641b6c63063cc5ff8786ebf69cd57e8541bae1 # v0.5.140
         with:
           command: release
         env:
