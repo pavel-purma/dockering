@@ -4,6 +4,26 @@ Use the exact release commit. Record run URLs and tested platforms; leave unavai
 checks unchecked. Each release has its own section, newest first. The `/release` skill copies the
 [template](../../.agents/skills/release/checklist-template.md) for the next release; ticks only what it verified.
 
+## Planned updater gates (not executed)
+
+Draft [plan](features/linux-appimage-updates.md), REL-083…087 / UPD-013…017.
+These unchecked gates do not alter any historical release result below.
+
+- [x] Approve the revised plan and ADR-0007 (shared updater, installs without OS signing, macOS *Download* only): approved 2026-10-19.
+- [ ] Maintainer: update keys per signing.md Phase 4 (no agent holds a private key); public keys committed.
+- [ ] Gate: `updater` / `sign_manifest` truth table; a rehearsal from `main` with `updater=all` (unsigned is enough) builds
+  all six targets with the updater, `updater-evidence-*.txt` agree, no seam, `.minisig` made by the current key,
+  manifest URL/kind/hash/size/version match the draft.
+- [ ] Shared on all three OSes (view tests in CI): one notification per version, title-bar button from the offer,
+  retention through re-checks and offline start, withdrawal of a pulled release, Settings offer row.
+- [ ] Windows x64/ARM64: spike W1 report (no Mark-of-the-Web, *Unknown publisher*, share-locked start, cancellation,
+  Explorer relaunch) and the `installer-smoke.ps1` update leg; manual UAC check on a real machine.
+- [ ] Linux: scenarios S1 (extract-and-run and FUSE legs) to S4 in `linux-update-e2e.yml`; manual check on a real
+  desktop (this machine: Hyprland, real FUSE, launched from the `.desktop` entry, a symlinked install).
+- [ ] macOS: the update shows a *Download* offer (no in-app install; UPD-016 is deferred).
+- [ ] Attach exact commit, artifact, OS and architecture to each result. Linux runs and mocks do not complete the Windows items.
+- [ ] First updater release installed by hand, then a second release updates it by itself.
+
 ## v0.3.0 (unsigned)
 
 Released from `main` at `7bef9c1` as workspace version `0.3.0`: three `feat` commits since `v0.2.0` (keyboard navigation polish, Combined grouping, the WSLC start page) make this a minor bump under REL-011.

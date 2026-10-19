@@ -295,7 +295,11 @@ Keep `PUBLIC_RELEASES` and `WINGET_ENABLED` unset/false and `WINDOWS_SIGNING` un
 
 All 12 distribution files must exist and be nonempty. Assembly rejects duplicate names.
 The release also includes `dockering-update.json`, `SHA256SUMS`, and `RELEASE_NOTES.md`.
-The unsigned manifest is informational; the app is built without the updater. Public GitHub
+For the historical first-release configuration the unsigned manifest is informational and
+the app has no updater. The [planned updater](plan/features/linux-appimage-updates.md) is independent of OS signing
+(REL-083): with `UPDATER=all` an OS-unsigned release still signs the manifest (`.minisig`) and builds the updater
+on every target. It is not implemented yet.
+Public GitHub
 builds generate provenance attestations independently of code signing. macOS packaging retries
 the observed busy DMG eject failure at most three times, with cleanup restricted to its own image. Packages bundle the
 MIT license and third-party notices.
@@ -425,7 +429,8 @@ how far it got. The channel is chosen by repository variables:
 
 | Variable | Meaning |
 |---|---|
-| `PUBLIC_RELEASES=true` | the signed channel: tag builds are signed and contain the updater. Its historical name means the channel, not repository visibility. Manual `unsigned=true` overrides it. |
+| `PUBLIC_RELEASES=true` | Current workflow: signed channel, which also builds the updater. Planned (REL-083): selects OS signing only and no longer the updater. Manual `unsigned=true` overrides OS signing. |
+| `UPDATER=none` \| `all` *(planned)* | The only switch for the updater: `all` builds every target with it and signs the manifest, with or without OS signing; off (`none`) by default. A manual run takes the input `updater` = `inherit` (default) \| `none` \| `all`. Needs `UPDATE_SIGNING_KEY` and public keys in `keys.rs`. Set it only after the key phase and an `updater=all` rehearsal from `main`; do not use it until implemented. |
 | `WINDOWS_SIGNING` | `signpath` \| `azure` \| `none` (default). |
 | `MACOS_SIGNING` | `apple` \| `none` (default). Independent of Windows (REL-034): a signed release never requires it. |
 | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | SignPath project. |
@@ -443,7 +448,7 @@ packaging, then the installers are signed and verified (Authenticode `Valid`, RF
 SHA-256, one signer). Inno's generated uninstaller needs a local compile-time
 `DOCKERING_INNO_SIGNTOOL`; remote signing alone does not cover it.
 
-Updater keys: `cargo xtask gen-update-keys <private-directory>`; the current private key becomes
+Updater keys: the **maintainer** runs `cargo xtask gen-update-keys <private-directory>` (no agent holds a private key); the current private key becomes
 `UPDATE_SIGNING_KEY` and the reviewed **public** keys go into `crates/dk-update/src/keys.rs`
 ([key rotation](../crates/dk-update/keys/README.md)). The assembled manifest signature is verified
 against those keys before the draft is created.

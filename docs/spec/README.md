@@ -32,9 +32,9 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Images | [features/images.md](features/images.md) | implemented (2026-10-04 WSLC Run repair; cross-OS release gate open) |
 | Volumes | [features/volumes.md](features/volumes.md) | implemented |
 | Networks | [features/networks.md](features/networks.md) | implemented |
-| Settings | [features/settings.md](features/settings.md) | implemented |
+| Settings | [features/settings.md](features/settings.md) | implemented; shared updater Settings/retained-offer UX planned (SET-090, UPD-009/017) |
 | Keyboard navigation & shortcuts | [features/keyboard.md](features/keyboard.md) | implemented (KBD-090 release walkthrough and KBD-092 beyond Settings open; 2026-10-10 search hand-off, back navigation and detail-tab keys planned) |
-| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (unsigned v0.1.0 and v0.2.0 published and verified; `/release` skill and SignPath signing flow built, signed channel not yet enabled; Linux install-and-launch smoke test built and green in pull-request and manual GitHub runs, REL-070…077; macOS smoke test green on three hosted images and the draft gate green for both workflows, REL-078, REL-079) |
+| Distribution, releases & updates | [features/distribution.md](features/distribution.md) | in-progress (existing releases/install smoke evidence retained); a shared updater for Windows, macOS and Linux that installs without OS code signing (Inno installer, AppImage swap; macOS offers *Download*) is approved 2026-10-19 and in progress (2026-10-19, UPD-013…017, REL-083…087); Windows behaviour beyond the existing smoke tests is a spike |
 | macOS native engine (Apple `container`) | [features/macos-native-engine.md](features/macos-native-engine.md) | deferred (ENG-030…033 binding in v1) |
 
 Each implemented spec has a *Verification* table (requirement → tests) and a *Known gaps (v1)*
