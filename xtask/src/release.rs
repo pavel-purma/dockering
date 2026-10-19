@@ -5,6 +5,8 @@
 //! - `verify-update-artifacts`: the draft gate's checks on the update manifest (REL-084): made by the
 //!   *current* key, the release's version, every entry equal to its asset
 //! - `gen-update-keys`: one-time minisign key pair for the updater (UPD-003)
+//! - the manifest, signing and key-file helpers are also used by `update_e2e` (REL-085), which
+//!   writes the end-to-end fixture with a throwaway key through the same code
 //! - `checksums`: `SHA256SUMS` over every asset (REL-012)
 //! - `verify-assets`: require every distribution file before collecting metadata (REL-017)
 
@@ -136,7 +138,7 @@ const KEY_ENV: &str = "UPDATE_SIGNING_KEY";
 /// Password for an encrypted key (optional).
 const KEY_PASSWORD_ENV: &str = "UPDATE_SIGNING_KEY_PASSWORD";
 /// The update manifest asset (UPD-002).
-const MANIFEST: &str = "dockering-update.json";
+pub(crate) const MANIFEST: &str = "dockering-update.json";
 
 /// `cargo xtask update-manifest --assets <dir> --version <semver> [--repo owner/name] [--out <file>]`
 pub fn run_update_manifest(args: &[String]) -> anyhow::Result<()> {
@@ -171,6 +173,18 @@ fn build_manifest(
     repo: &str,
     pub_date: &str,
 ) -> anyhow::Result<String> {
+    build_manifest_for(assets, version, repo, pub_date, None)
+}
+
+/// [`build_manifest`], optionally restricted to the one platform key `only` (the end-to-end
+/// fixture has a single AppImage: the other platforms are neither looked for nor reported).
+pub(crate) fn build_manifest_for(
+    assets: &Path,
+    version: &str,
+    repo: &str,
+    pub_date: &str,
+    only: Option<&str>,
+) -> anyhow::Result<String> {
     validate_version(version)?;
     if !repo
         .chars()
@@ -180,6 +194,9 @@ fn build_manifest(
     }
     let mut platforms = Map::new();
     for (key, name, kind) in PLATFORMS {
+        if only.is_some_and(|only| only != *key) {
+            continue;
+        }
         let path = assets.join(name);
         if !path.is_file() {
             eprintln!("xtask: {name} not found; `{key}` is left out of the manifest");
@@ -229,7 +246,10 @@ pub fn run_sign_manifest(args: &[String]) -> anyhow::Result<()> {
 
 /// Without a password the key must be unencrypted (what `gen-update-keys` writes); with one it must
 /// be encrypted. Never prompts: a missing password for an encrypted key is an error.
-fn load_secret_key(text: &str, password: Option<String>) -> anyhow::Result<minisign::SecretKey> {
+pub(crate) fn load_secret_key(
+    text: &str,
+    password: Option<String>,
+) -> anyhow::Result<minisign::SecretKey> {
     let boxed = minisign::SecretKeyBox::from_string(text)
         .map_err(|e| anyhow::anyhow!("invalid ${KEY_ENV}: {e}"))?;
     match password {
@@ -242,7 +262,7 @@ fn load_secret_key(text: &str, password: Option<String>) -> anyhow::Result<minis
     }
 }
 
-fn sign_bytes(sk: &minisign::SecretKey, data: &[u8]) -> anyhow::Result<String> {
+pub(crate) fn sign_bytes(sk: &minisign::SecretKey, data: &[u8]) -> anyhow::Result<String> {
     let sig = minisign::sign(
         None,
         sk,
@@ -336,7 +356,7 @@ pub(crate) fn parse_public_keys(source: &str) -> anyhow::Result<Vec<String>> {
 }
 
 /// The base64 line of a public key given bare or as a whole `.pub` file (as `dk_update::verify`).
-fn key_line(key: &str) -> &str {
+pub(crate) fn key_line(key: &str) -> &str {
     key.lines()
         .map(str::trim)
         .rfind(|l| !l.is_empty() && !l.starts_with("untrusted comment:"))
@@ -344,7 +364,11 @@ fn key_line(key: &str) -> &str {
 }
 
 /// Index of the first key that verifies `data`, using the verifier the app uses.
-fn verifying_key(data: &[u8], signature: &str, keys: &[String]) -> anyhow::Result<usize> {
+pub(crate) fn verifying_key(
+    data: &[u8],
+    signature: &str,
+    keys: &[String],
+) -> anyhow::Result<usize> {
     let signature = minisign_verify::Signature::decode(signature)
         .map_err(|e| anyhow::anyhow!("malformed signature: {e}"))?;
     keys.iter()
@@ -383,12 +407,12 @@ impl Updater {
 /// The repository the app's updater trusts (`dk_update::source::REPO`, UPD-001). `xtask` does not
 /// depend on `dk-update`, so the URL pin below replicates `release_asset_name` exactly; a test
 /// compares the two sources.
-const UPDATER_REPO: &str = "pavel-purma/dockering";
+pub(crate) const UPDATER_REPO: &str = "pavel-purma/dockering";
 
 /// The asset file name of `url` if it has the shape the app accepts (UPD-001):
 /// `https://github.com/<UPDATER_REPO>/releases/download/v<version>/<plain name>`, where a plain name
 /// is non-empty, does not start with a dot, and uses only ASCII letters, digits, `-`, `_` and `.`.
-fn pinned_asset_name<'a>(url: &'a str, version: &str) -> Option<&'a str> {
+pub(crate) fn pinned_asset_name<'a>(url: &'a str, version: &str) -> Option<&'a str> {
     let prefix = format!("https://github.com/{UPDATER_REPO}/releases/download/v{version}/");
     url.strip_prefix(&prefix).filter(|name| {
         !name.is_empty()
@@ -663,7 +687,7 @@ fn new_file_options(secret: bool) -> fs::OpenOptions {
     options
 }
 
-fn write_new_file(path: &Path, contents: &str, secret: bool) -> anyhow::Result<()> {
+pub(crate) fn write_new_file(path: &Path, contents: &str, secret: bool) -> anyhow::Result<()> {
     let mut file = new_file_options(secret)
         .open(path)
         .with_context(|| format!("creating {} (refusing to overwrite a key)", path.display()))?;
@@ -747,7 +771,7 @@ pub fn run_checksums(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn hash_file(path: &Path) -> anyhow::Result<(String, u64)> {
+pub(crate) fn hash_file(path: &Path) -> anyhow::Result<(String, u64)> {
     let mut f = fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 1 << 16];
@@ -780,7 +804,7 @@ pub(crate) fn validate_version(v: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn now_rfc3339() -> anyhow::Result<String> {
+pub(crate) fn now_rfc3339() -> anyhow::Result<String> {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .context("formatting the current time")

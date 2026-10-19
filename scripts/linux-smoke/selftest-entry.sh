@@ -23,6 +23,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$ID" = ubuntu ] || { echo "selftest-entry.sh: needs an Ubuntu image, not $ID"; exit 2; }
 # the published 0.2.0 .deb declares plain libc6, so a missing glibc floor is INFO unless a control says otherwise
 export LEG=selftest SMOKE_LIBC_FLOOR=warn LANG=C.UTF-8 DEBIAN_FRONTEND=noninteractive
+# no launch of the app in this container checks for updates (REL-085, plan §3 decision 14), the real .deb included
+export DOCKERING_DISABLE_UPDATES=1
 DEB="$PKG_DIR/Dockering-$(uname -m).deb"
 t0=$(date +%s)
 at() { echo $(($(date +%s) - t0)); }

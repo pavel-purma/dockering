@@ -27,6 +27,9 @@ esac
 SCENARIO=$1
 LABEL="${2:-}"
 : "${EXPECTED_VERSION:?set EXPECTED_VERSION}"
+# no launch of the app under test checks for updates (REL-085, plan §3 decision 14): with the updater built in (UPDATER=all)
+# a real-mode launch would fetch GitHub 30 s in, which is noise in the upgrade scenario and unrelated to what this test proves
+export DOCKERING_DISABLE_UPDATES=1
 PKG_DIR="${PKG_DIR:-pkg}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 case "$(uname -m)" in arm64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
@@ -315,7 +318,8 @@ if [ "$SCENARIO" = quarantine ]; then
   verdict=$(tmo 30 spctl --assess --type execute --verbose=4 /tmp/quarantined/Dockering.app 2>&1 | head -n 2 | tr '\n' ' ' | cut -c1-200)
   check gatekeeper_assessment INFO "${verdict:-no output}"
   step "open the quarantined copy through LaunchServices"
-  # `open` does not return while Gatekeeper's dialog holds the launch
+  # `open` does not return while Gatekeeper's dialog holds the launch. The app never starts here (blocked_until_approved
+  # fails if it does), so this launch has no update check to disable
   open -n -a /tmp/quarantined/Dockering.app >/dev/null 2>&1 &
   OPEN_PID=$!
   dialog=""
@@ -343,7 +347,7 @@ if [ "$SCENARIO" = quarantine ]; then
 fi
 
 step "launch $BIN $ARGS"
-RUST_LOG=info "$BIN" $ARGS >"$OUT/app.stdout" 2>"$OUT/app.stderr" &
+DOCKERING_DISABLE_UPDATES=1 RUST_LOG=info "$BIN" $ARGS >"$OUT/app.stdout" 2>"$OUT/app.stderr" &
 APP_PID=$!
 tw=$(date +%s)
 if ! launch_wait $APP_PID; then

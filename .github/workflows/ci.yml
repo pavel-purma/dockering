@@ -36,9 +36,9 @@ jobs:
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           ./actionlint -color
-      - name: Smoke test and release evidence scripts, shellcheck and Python syntax (REL-070, REL-078, REL-084)
+      - name: Smoke test, update test and release evidence scripts, shellcheck and Python syntax (REL-070, REL-078, REL-084, REL-085)
         run: |
-          shellcheck scripts/linux-smoke/*.sh scripts/macos-smoke/*.sh scripts/release-evidence.sh
+          shellcheck scripts/linux-smoke/*.sh scripts/macos-smoke/*.sh scripts/linux-update/*.sh scripts/release-evidence.sh
           python3 -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"), sys.argv[1])' scripts/linux-smoke/atspi.py
       - name: Script tests (macOS packaging recovery REL-017, release verify step REL-031…034, Linux smoke scripts REL-071)
         run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'

@@ -633,8 +633,9 @@ class LegScriptTests(unittest.TestCase):
         environment = [argv[index + 1] for index, word in enumerate(argv) if word == "-e"]
         self.assertEqual(
             environment,
-            ["EXPECTED_VERSION=0.2.0", "LEG=fedora", "SMOKE_LIBC_FLOOR", "SMOKE_SELFTEST_ONLY"],
-            "the two settings without a value are forwarded from the environment of the caller, never put on the command line",
+            ["EXPECTED_VERSION=0.2.0", "LEG=fedora", "DOCKERING_DISABLE_UPDATES=1", "SMOKE_LIBC_FLOOR", "SMOKE_SELFTEST_ONLY"],
+            "the two settings without a value are forwarded from the environment of the caller, never put on the command line;"
+            " the container never checks for updates (REL-085)",
         )
         self.assertEqual(argv[-4:], [self.IMAGE, "bash", "/scripts/entry.sh", "tar"])
         self.assertNotIn("secret", " ".join(argv))
@@ -1237,6 +1238,37 @@ class ScriptContractTests(ContractCase):
         self.assertTrue(nav.rstrip().endswith('key "$@"\n}'), "every other press goes to key")
         self.assertEqual(len(re.findall(r'^\s+nav_key "', self.run_sh, flags=re.M)), 1, "only the chord loop calls nav_key")
         self.assertFound(r'for attempt in 1 2; do\n\s+nav_key "\$chord"', self.run_sh, "run.sh (the retry loop sets attempt)")
+
+    def test_rel_075_smoke_launches_disable_updates(self):
+        """No smoke test checks for updates (REL-085, plan §3 decision 14): every place that launches the app sets the variable."""
+        variable = "DOCKERING_DISABLE_UPDATES=1"
+        macos = read(ROOT / "scripts/macos-smoke/run.sh")
+        scripts = {
+            "linux-smoke/run.sh": (self.run_sh, r'"\$\{BIN\[@\]\}"'),
+            "linux-smoke/stub-app.sh": (read(SMOKE / "stub-app.sh"), r'"\$REAL"'),
+            "macos-smoke/run.sh": (macos, r'"\$BIN"'),
+        }
+        for name, (text, launch) in scripts.items():
+            lines = text.split("\n")
+            launches = [i for i, line in enumerate(lines) if re.search(launch, line) and not line.lstrip().startswith("#")]
+            self.assertTrue(launches, f"{name} has no launch of the app")
+            exported = [i for i, line in enumerate(lines) if re.match(rf"^export (?:[A-Z_]+=\S+ )*{variable}\b", line)]
+            self.assertTrue(exported, f"{name} does not export {variable}")
+            for index in launches:
+                self.assertLess(exported[0], index, f"{name}, line {index + 1}: the variable is exported after the launch")
+        # the launches that run the app (not `--version`) carry it on the command line too, whatever the environment says
+        self.assertFound(rf'^{variable} RUST_LOG=info "\$\{{BIN\[@\]\}}" ', self.run_sh, "linux-smoke/run.sh (the launch)", re.M)
+        self.assertFound(rf'^{variable} RUST_LOG=info "\$BIN" ', macos, "macos-smoke/run.sh (the launch)", re.M)
+        self.assertFound(rf'\nreal\(\) \{{\n  {variable} "\$REAL" "\$@"\n', read(SMOKE / "stub-app.sh"), "stub-app.sh (real)")
+        # the container the Linux scripts run in has it from the start, and so do the ones that start run.sh
+        for name in ("entry.sh", "selftest-entry.sh"):
+            self.assertFound(rf"^export {variable}$", read(SMOKE / name), name, re.M)
+        self.assertHas(f"-e {variable}", read(LEG), "leg.sh (the container environment)")
+        # the only other way the macOS test starts the app is LaunchServices, behind Gatekeeper's dialog: it must never run
+        opens = [line for line in macos.split("\n") if re.search(r"\bopen -n -a\b", line)]
+        self.assertEqual(len(opens), 1, "one LaunchServices launch")
+        self.assertFound(r"blocked_until_approved", macos, "macos-smoke/run.sh")
+        self.assertFound(r"The app never starts here[^\n]*\n[^\n]*no update check to disable", macos, "macos-smoke/run.sh")
 
     def test_rel_075_the_upgrade_scenario_launches_the_real_mode_on_an_older_profile(self):
         start = self.run_sh.index("upgrade)")
