@@ -1,8 +1,9 @@
 # Releasing Dockering
 
 The repository is public. Releases so far are unsigned for all six supported targets. Windows code
-signing through SignPath Foundation is prepared ([signing.md](signing.md)); macOS notarization, the
-updater, winget, and the release bot stay deferred. The workflow always creates a **draft**;
+signing through SignPath Foundation is prepared ([signing.md](signing.md)); macOS notarization,
+winget, and the release bot stay deferred, and so does the updater: it is its own switch (`UPDATER=none|all`,
+REL-083, unset today), independent of OS signing, and the app side of it is still being built. The workflow always creates a **draft**;
 publication is a separate maintainer action. See [the specification](spec/features/distribution.md),
 the [signing guide](signing.md) and the [first-release plan](plan/features/unsigned-first-release.md).
 
@@ -39,7 +40,7 @@ from whatever state it finds if a run is interrupted.
 | 4–5 | Local gate on a scratch worktree, bump, local release build | **Prepare** |
 | 6–7 | Gate 1, release PR, wait for every check, squash-merge | **Pull request** |
 | 8–9 | Annotated tag on the merge commit, watch `release.yml` (signed channel: approve the SignPath requests) | **Tag**, **Build** |
-| 10 | `scripts/verify-release.ps1`, then the [draft gate](#draft-gate): the Linux and macOS smoke tests on the unpublished build | **Verify the draft** |
+| 10 | `scripts/verify-release.ps1 -Expect … -Updater …` and `cargo xtask verify-update-artifacts --updater …` side by side, then the [draft gate](#draft-gate): the Linux and macOS smoke tests on the unpublished build | **Verify the draft** |
 | 11 | Gate 2, publish, check the public URLs, wait for the [Linux](#linux-smoke-test) and [macOS](#macos-smoke-test) smoke tests that publishing starts | **Publish** |
 | 12 | Record PR: README, release table, checklist | **Record** |
 
@@ -72,19 +73,34 @@ from whatever state it finds if a run is interrupted.
 5. **Build.** The tag starts `release.yml`: `gh run list --workflow release.yml --branch vX.Y.Z`, then
    `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly. On the
    signed channel each Windows job waits for two SignPath approvals ([signing.md](signing.md)).
-6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`):
+6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`). Read the channel from the
+   draft: the run's `updater-evidence-X.Y.Z` artifact (`gh run download <run-id> -n updater-evidence-X.Y.Z --dir
+   target/release-review/evidence-X.Y.Z`, not into the release directory) holds six `updater-evidence-<target>.txt` files
+   that all say `updater=true` (`-Updater all`) or all `updater=false` (`-Updater none`), and `seam=false`; the draft's
+   `RELEASE_NOTES.md` carries the matching sentence. Don't infer it from the files: `dockering-update.json.minisig` exists
+   when the manifest is signed (`UPDATER=all` **or** an OS-signed build).
 
    ```sh
    pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y.Z -Version X.Y.Z \
-     -Expect Unsigned -Changelog CHANGELOG.md -Attest -Commit <release-commit>
+     -Expect Unsigned -Updater none -Changelog CHANGELOG.md -Attest -Commit <release-commit>
+   cargo xtask verify-update-artifacts --assets target/release-review/vX.Y.Z --version X.Y.Z --updater none
    ```
 
-   (`-Expect Signed` on the signed channel, plus `cargo xtask verify-manifest --assets <dir>`). It checks exactly the
-   15 files (16 with `.minisig`), every `SHA256SUMS` line, the manifest's six platforms, versions, URLs, hashes and
-   sizes, the notes, PE/ELF/Debian/DMG formats and architectures, that the Windows executables are GUI-subsystem,
+   `-Expect Signed` is the OS-signed mode and `-Updater all` the updater build (REL-083); they are independent (an unsigned
+   build can have the updater, and a signed build can lack it). `verify-release.ps1` checks exactly the
+   15 files (16 with `.minisig` when `-Updater all` or `-Expect Signed`; forbidden otherwise), every `SHA256SUMS` line, the manifest's six platforms, versions, URLs, hashes and
+   sizes, the notes (including the one sentence for the update channel), PE/ELF/Debian/DMG formats and architectures, that the Windows executables are GUI-subsystem,
    carry the version and are `NotSigned` (or `Valid`, timestamped, SHA-256 and one signer when signed), and that the
    portable x64 build prints the version. `-Attest` runs `gh attestation verify` for every file, pinned with
    `--source-digest <release-commit> --source-ref refs/tags/vX.Y.Z --signer-workflow pavel-purma/dockering/.github/workflows/release.yml --deny-self-hosted-runners`.
+
+   The script has no cargo and no minisign, so `cargo xtask verify-update-artifacts` runs next to it, from the release
+   commit (its `keys.rs` is the one the build embedded). It checks that the `.minisig` verifies and was made by the
+   **first** (current) key (a secret set to `next.key` fails: "the secret `UPDATE_SIGNING_KEY` is not the current key"),
+   that the manifest `version` is X.Y.Z, and that each of the six platform entries equals its asset in kind, URL
+   (`https://github.com/pavel-purma/dockering/releases/download/vX.Y.Z/<file>`, the shape the app accepts), size and
+   SHA-256. With `--updater all` the `.minisig` must exist; with `--updater none` and none present, only the entries and
+   the version are checked. It supersedes `verify-manifest` for a draft.
 
    **Start the application from the downloaded files.** Every check above passed for the first v0.2.0
    build, which crashed at launch after an upgrade. `-LaunchSmoke` does it: it backs up `state.json` and
@@ -102,7 +118,7 @@ from whatever state it finds if a run is interrupted.
    gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest
    ```
 
-   Then `verify-release.ps1 ... -Published`: anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset
+   Then `verify-release.ps1 ... -Expect … -Updater … -Published`: anonymous HTTP 200 for the 15 version-pinned and 12 `latest` asset
    URLs and the latest-release API. Publishing also starts the `winget` workflow, which must be skipped while
    `PUBLIC_RELEASES` and `WINGET_ENABLED` are unset. It starts the [Linux](#linux-smoke-test) and
    [macOS](#macos-smoke-test) smoke tests as well, now on the published files: wait for both and record their runs and
@@ -296,9 +312,11 @@ Keep `PUBLIC_RELEASES` and `WINGET_ENABLED` unset/false and `WINDOWS_SIGNING` un
 All 12 distribution files must exist and be nonempty. Assembly rejects duplicate names.
 The release also includes `dockering-update.json`, `SHA256SUMS`, and `RELEASE_NOTES.md`.
 For the historical first-release configuration the unsigned manifest is informational and
-the app has no updater. The [planned updater](plan/features/linux-appimage-updates.md) is independent of OS signing
-(REL-083): with `UPDATER=all` an OS-unsigned release still signs the manifest (`.minisig`) and builds the updater
-on every target. It is not implemented yet.
+the app has no updater. The updater is independent of OS signing (REL-083, implemented in `release.yml`): with
+`UPDATER=all` every target builds with `--features updater`, the manifest is signed (`dockering-update.json.minisig`)
+even for an OS-unsigned release, and `assemble` fails unless the six per-target evidence files agree
+(REL-084). `UPDATER` is unset today, and the updater's behaviour in the app (AppImage install, retained offer,
+title-bar button) is still planned ([plan](plan/features/linux-appimage-updates.md)).
 Public GitHub
 builds generate provenance attestations independently of code signing. macOS packaging retries
 the observed busy DMG eject failure at most three times, with cleanup restricted to its own image. Packages bundle the
@@ -429,8 +447,8 @@ how far it got. The channel is chosen by repository variables:
 
 | Variable | Meaning |
 |---|---|
-| `PUBLIC_RELEASES=true` | Current workflow: signed channel, which also builds the updater. Planned (REL-083): selects OS signing only and no longer the updater. Manual `unsigned=true` overrides OS signing. |
-| `UPDATER=none` \| `all` *(planned)* | The only switch for the updater: `all` builds every target with it and signs the manifest, with or without OS signing; off (`none`) by default. A manual run takes the input `updater` = `inherit` (default) \| `none` \| `all`. Needs `UPDATE_SIGNING_KEY` and public keys in `keys.rs`. Set it only after the key phase and an `updater=all` rehearsal from `main`; do not use it until implemented. |
+| `PUBLIC_RELEASES=true` | Selects **OS signing** only (REL-031, REL-083): tags are Authenticode-signed (and `MACOS_SIGNING` applies); it no longer decides the updater. A manual run's `unsigned` input (default true) overrides OS signing, never the updater. |
+| `UPDATER=none` \| `all` | The only switch for the updater (REL-083): `all` builds every target with `--features updater` and signs the manifest, with or without OS signing; off (`none`, also when unset) by default. A manual run takes the input `updater` = `inherit` (default, uses the variable) \| `none` \| `all`; on a `v*` tag the input must be `inherit`. Needs `UPDATE_SIGNING_KEY` and public keys in `keys.rs`. Set it only after the key phase and an `updater=all` rehearsal from `main`, and not before the app side of the updater (AppImage install, retained offer, title-bar button) lands: that part is planned. |
 | `WINDOWS_SIGNING` | `signpath` \| `azure` \| `none` (default). |
 | `MACOS_SIGNING` | `apple` \| `none` (default). Independent of Windows (REL-034): a signed release never requires it. |
 | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | SignPath project. |
@@ -442,16 +460,18 @@ Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNI
 `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`; Apple: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`. Never commit a key.
 
-A signed run fails early, in `verify`, when the configuration is incomplete, when `keys.rs` has no
-public key, or when a tag has no `WINDOWS_SIGNER_SUBJECT`. Windows binaries are signed before
+A run that signs the manifest (`UPDATER=all`, or an OS-signed build) fails early, in `verify`, when `UPDATE_SIGNING_KEY` is missing or `keys.rs` has no
+public key; an OS-signed run also fails when the signing configuration is incomplete or a tag has no `WINDOWS_SIGNER_SUBJECT`. Windows binaries are signed before
 packaging, then the installers are signed and verified (Authenticode `Valid`, RFC 3161 timestamp,
 SHA-256, one signer). Inno's generated uninstaller needs a local compile-time
 `DOCKERING_INNO_SIGNTOOL`; remote signing alone does not cover it.
 
-Updater keys: the **maintainer** runs `cargo xtask gen-update-keys <private-directory>` (no agent holds a private key); the current private key becomes
+Updater keys: the **maintainer** runs `cargo xtask gen-update-keys <private-directory>` (no agent holds a private key; the secret files are created with mode 0600
+and an existing key is never overwritten); the current private key becomes
 `UPDATE_SIGNING_KEY` and the reviewed **public** keys go into `crates/dk-update/src/keys.rs`
 ([key rotation](../crates/dk-update/keys/README.md)). The assembled manifest signature is verified
-against those keys before the draft is created.
+against those keys before the draft is created, and `cargo xtask verify-update-artifacts` (step 6 above) additionally
+requires that the **first** (current) key made it.
 
 Submit the first signed winget version manually, configure `WINGET_TOKEN`, then set
 `WINGET_ENABLED=true`. The workflow also requires published stable release metadata with a

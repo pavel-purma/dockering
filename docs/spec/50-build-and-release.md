@@ -26,7 +26,7 @@
 | `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
 | `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
 | `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux) | `cargo install cargo-packager --locked --version 0.11.8` |
-| PowerShell 7 (`pwsh`) (REL-018) | `scripts/verify-release.ps1`, which the `/release` skill runs against every draft | `winget install Microsoft.PowerShell` · preinstalled on GitHub runners |
+| PowerShell 7 (`pwsh`) (REL-018) | `scripts/verify-release.ps1`, which the `/release` skill runs against every draft next to `cargo xtask verify-update-artifacts` (REL-084; that command needs only cargo: minisign is a Rust crate). `scripts/tests/test_verify_release_wording.py` also runs the verifier on a fake bundle when `pwsh` exists and skips those tests without it | `winget install Microsoft.PowerShell` · preinstalled on GitHub runners |
 | `release-plz` (dormant; don't enable with the skill, REL-010) | Bot-driven release PRs, only if the skill is retired | `cargo install release-plz --locked` |
 | Inno Setup **6.3+** (`ISCC.exe`) (REL-020) | `cargo xtask package` on Windows | CI checks and installs it if needed · `winget install JRSoftware.InnoSetup` |
 
@@ -38,8 +38,8 @@ most three package attempts, and detaches only a reported disk whose image path 
 inside the current target distribution directory. Other failures retain their original exit status.
 
 **Release signing** is optional for the explicitly authorized unsigned releases (REL-016).
-Unsigned mode skips OS signing/notarization even when secrets exist. Planned independent
-`UPDATER=none|all` controls the updater on all six targets (REL-083), not OS signing.
+Unsigned mode skips OS signing/notarization even when secrets exist. The independent
+`UPDATER=none|all` gate controls the updater on all six targets (REL-083, implemented in `release.yml`; the updater's behaviour in the app is planned), not OS signing.
 Updater-enabled unsigned binaries still have a signed manifest. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
 expose an `unsigned` boolean defaulting to true. Public build-provenance attestations remain
 independent of signing. The signed channel (`PUBLIC_RELEASES=true`) supports `WINDOWS_SIGNING` =
@@ -50,7 +50,7 @@ SignPath: `SIGNPATH_API_TOKEN` and the variables `SIGNPATH_ORGANIZATION_ID`, `SI
 configurations are in `packaging/signpath/`.
 Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
-Updater: `UPDATE_SIGNING_KEY` (minisign), reviewed current/next public keys in `crates/dk-update/src/keys.rs`, and `UPDATER` (`none` | `all`, default none; REL-083). A manual run has the input `updater` = `inherit` (default) | `none` | `all`, so an unsigned or signed rehearsal can build the updater before the variable is set. Missing keys fail closed. Planned, not current workflow behaviour.
+Updater: `UPDATE_SIGNING_KEY` (minisign), reviewed current/next public keys in `crates/dk-update/src/keys.rs`, and `UPDATER` (`none` | `all`, default none; REL-083). A manual run has the input `updater` = `inherit` (default) | `none` | `all`, so an unsigned or signed rehearsal can build the updater before the variable is set. Missing keys fail closed. The manifest is signed when the updater is built or the build is OS-signed, and `cargo xtask verify-update-artifacts` (REL-084) requires the **first** key of `PUBLIC_KEYS` to have signed it. The workflow gate, the evidence files and that command are implemented; the updater's behaviour in the app is planned.
 
 ## Cargo profiles
 

@@ -6,9 +6,13 @@ description: Cut a Dockering release end to end. Writes the changelogs from the 
 # Release
 
 One command runs the whole release flow of spec `docs/spec/features/distribution.md`
-(REL-010…019, REL-030…034). The runbook for humans is `docs/release.md`; signing is
+(REL-010…019, REL-030…034, REL-083, REL-084). The runbook for humans is `docs/release.md`; signing is
 `docs/signing.md`. Supporting files, relative to this directory:
 [changelog.md](changelog.md) · [signing.md](signing.md) · [checklist-template.md](checklist-template.md).
+
+This file describes the current behaviour only. The channel has two independent parts: OS signing
+(`PUBLIC_RELEASES`, `-Expect Signed|Unsigned`) and the updater (`UPDATER=none|all`, `--updater` / `-Updater`). Neither is
+inferred from the other, and neither from whether a `.minisig` exists.
 
 | Invocation | Mode |
 |---|---|
@@ -25,7 +29,7 @@ Host tools: `AskUserQuestion` in Claude Code is `question` in OpenCode; `Task` i
 3. Never print, read back or store a secret or key. Pass secrets to `gh secret set NAME --env release < file`; never `cat` a key or token file, and never paste one into a command line.
 4. Never run `scripts/installer-smoke.ps1` on this machine: it uses the real installer `AppId`, and its uninstall step removes the maintainer's own installation. CI runs it.
 5. Never tick a checklist item that was not verified in this run. Leave unperformed manual checks unchecked.
-6. Never change `WINDOWS_SIGNING`, `MACOS_SIGNING`, `PUBLIC_RELEASES`, `WINDOWS_SIGNER_SUBJECT` or a secret while a release PR is open, a release run is active, or a draft exists.
+6. Never change `WINDOWS_SIGNING`, `MACOS_SIGNING`, `PUBLIC_RELEASES`, `UPDATER`, `WINDOWS_SIGNER_SUBJECT` or a secret while a release PR is open, a release run is active, or a draft exists.
 7. Never choose `1.0.0` yourself. Leaving `0.x` is the maintainer's explicit decision (`/release 1.0.0`).
 8. Never rerun a failed job or continue past a failed check without reading its log.
 9. Work in the scratch worktree (step 1). Never modify the maintainer's current checkout.
@@ -53,7 +57,12 @@ Each step first checks whether it is already done. `cargo xtask release-plan` sh
 - `git fetch origin --tags --prune`. Tools: `git`, `gh` (scopes `repo`, `workflow`), `cargo`, PowerShell 7 (`pwsh`), Python 3. Optional: `cargo-nextest`, `cargo-deny`, `cargo-about`, Inno Setup.
 - CI on `origin/main` HEAD is green: `gh run list --workflow ci.yml --branch main --limit 1 --json conclusion,status,headSha,databaseId`. If it is still running, wait. If it failed, read the failing job's log (`gh run view <id> --log-failed`) before deciding. A runner-acquisition failure ("The job was not acquired by Runner of type hosted even after multiple attempts") or the known flaky test `net_004_prune_unused_networks` failing **alone** allows one `gh run rerun <id> --failed`; report it as a flake in the PR body and the checklist, never as a pass. Any other failure: stop.
 - No open `chore(release)` PR, no active `release.yml` run, no draft release (unless resuming it).
-- **Channel**: signed when the repository variable `PUBLIC_RELEASES` is `true`, otherwise unsigned. `gh variable list` (variables) and `gh secret list --env release` (names only). A signed channel needs `WINDOWS_SIGNING` = `signpath` or `azure`, its secrets and variables, `UPDATE_SIGNING_KEY`, a public key in `crates/dk-update/src/keys.rs`, and for a tag, `WINDOWS_SIGNER_SUBJECT`. `MACOS_SIGNING=apple` additionally needs the Apple secrets. Stop if the configuration is incomplete, because the tag run would fail in `verify` after the PR is merged. Compare with the previous release's channel: it was signed when `gh release view <last-tag> --json assets` lists `dockering-update.json.minisig`.
+- **Channel** has two independent parts (REL-083). `gh variable list` (variables) and `gh secret list --env release` (names only):
+  - **OS signing**: signed when the repository variable `PUBLIC_RELEASES` is `true`, otherwise unsigned (this is what `-Expect Signed|Unsigned` means). A signed build needs `WINDOWS_SIGNING` = `signpath` or `azure`, its secrets and variables, and for a tag, `WINDOWS_SIGNER_SUBJECT`. `MACOS_SIGNING=apple` additionally needs the Apple secrets.
+  - **Updater**: `UPDATER` = `none` (default, also when unset) or `all` (this is what `--updater none|all` and `-Updater none|all` mean). A tag run uses the variable, nothing else. `all` builds every target with `--features updater`, **whether or not the build is OS-signed**, and signs the manifest.
+  - The manifest is signed (`sign_manifest`) when `UPDATER=all` **or** the build is OS-signed, so a `dockering-update.json.minisig` no longer says which part is on. Whenever it is signed the run needs `UPDATE_SIGNING_KEY` and a public key in `crates/dk-update/src/keys.rs`.
+
+  Stop if the configuration is incomplete, because the tag run would fail in `verify` after the PR is merged. Compare with the previous release's channel from its notes, never from its files: `gh release view <last-tag> --json body --jq .body` says whether it was OS-signed (**Signed release** or **Unsigned release**) and carries one sentence for the update channel (*Dockering checks for updates in these builds…* is `all`; *Automatic updates are not included in these builds; the update manifest is signed…* or *…has no signature* is `none`). Releases up to v0.3.0 predate this: unsigned, no updater, and the sentence *Automatic updates are disabled*.
 
 ### 1. Scratch worktree
 
@@ -71,7 +80,9 @@ git worktree add -b chore/release-tmp target/release-wt origin/main
 
 Write both with the rules in [changelog.md](changelog.md): the `CHANGELOG.md` section (user-facing prose) and the `docs/spec/CHANGELOG.md` lines for merged changes under `docs/spec/**`. Build the coverage table: every merged PR → its entry, or the reason it has none. Then derive the bump the written sections imply (Added, Removed or a breaking mark → minor in 0.x; only Changed/Deprecated/Fixed/Security → patch). It must equal `bump`; if it differs, fix the sections or the commit classification before going on.
 
-**First signed release** (the channel is signed and the previous release was unsigned): the signed notes link to the README's *Code signing policy*, so this release's PR also rewrites the README: the Download notice (`> Downloads are unsigned…`), the *Updates* paragraph and the status paragraph of *Code signing policy*, which then carries the attribution sentence SignPath requires ([signing.md](signing.md) phase 7). Show that diff at Gate 1. The changelog intro says that Windows files are signed, that updates are available, and that macOS stays unsigned while `MACOS_SIGNING` is `none`.
+**First OS-signed release** (`PUBLIC_RELEASES=true` and the previous release was unsigned): the signed notes link to the README's *Code signing policy*, so this release's PR also rewrites the README: the Download notice (`> Downloads are unsigned…`), the *Updates* paragraph and the status paragraph of *Code signing policy*, which then carries the attribution sentence SignPath requires ([signing.md](signing.md) phase 7). Show that diff at Gate 1. The changelog intro says that Windows files are signed and that macOS stays unsigned while `MACOS_SIGNING` is `none`. It says nothing about updates unless the updater channel also changes (below): OS signing no longer turns the updater on.
+
+**First updater release** (`UPDATER=all` and the previous release was `none`): the notes and the README's *Privacy & network* text must say that this build checks GitHub Releases for updates and how to turn that off; the changelog intro says that earlier releases have no updater, so the installed copy has to be updated by hand once. Show that diff at Gate 1. A release that switches the updater **off** again says so in the intro.
 
 ### 4. Local gate (pre-bump)
 
@@ -81,7 +92,7 @@ Run what CI's `lint` and `test` jobs run, on the scratch worktree: `cargo fmt --
 
 - Set `[workspace.package] version` in `Cargo.toml` to `next_version`, then `cargo update --workspace`. Only `version = ` lines of workspace crates may change in `Cargo.lock`: `git diff -U0 Cargo.lock | grep -E '^[+-][^+-]' | grep -vE '^[+-]version = '` must print nothing.
 - `cargo xtask release-verify --version X.Y.Z --remote` (version, lockfile, changelog heading, tag absent locally and on origin, version order).
-- `cargo build --release --locked -p dockering` (add `--features updater` on the signed channel), then require that `target/release/dockering --version` prints `dockering X.Y.Z` (the exe has the GUI subsystem: on Windows read it through a pipe, `& $exe --version | Out-String`). Then, without `--target` so that it packages that build for the host: `cargo xtask package` and `cargo xtask verify-assets --assets target/dist/<host triple> --target <host triple>`, when the platform tools exist (Inno Setup on Windows; `cargo-packager` on macOS and Linux).
+- `cargo build --release --locked -p dockering` (add `--features updater` exactly when the channel's `UPDATER` is `all`, with or without OS signing), then require that `target/release/dockering --version` prints `dockering X.Y.Z` (the exe has the GUI subsystem: on Windows read it through a pipe, `& $exe --version | Out-String`). Never add `--features update-e2e`: the test seam never ships (REL-086). Then, without `--target` so that it packages that build for the host: `cargo xtask package` and `cargo xtask verify-assets --assets target/dist/<host triple> --target <host triple>`, when the platform tools exist (Inno Setup on Windows; `cargo-packager` on macOS and Linux).
 
 ### 6. Gate 1, before anything is pushed
 
@@ -108,21 +119,32 @@ git push origin vX.Y.Z
 
 `gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId,status,conclusion,url`, then poll `gh run view <id> --json status,conclusion,jobs`. Never block longer than the host's command timeout; use a background command or wake-ups. It ends with a draft; a failed matrix job blocks assembly.
 
-On the signed channel each Windows job submits two SignPath signing requests (`dockering.exe`, then the installer): four per release, each needs the maintainer's approval in SignPath (Projects → Dockering → Signing requests; SignPath also sends an e-mail). Tell them when the run reaches the signing steps; the action waits up to an hour. A **rejected** or **timed out** request: stop and ask. Rerunning creates new requests that need approval again.
+On an OS-signed build each Windows job submits two SignPath signing requests (`dockering.exe`, then the installer): four per release, each needs the maintainer's approval in SignPath (Projects → Dockering → Signing requests; SignPath also sends an e-mail). Tell them when the run reaches the signing steps; the action waits up to an hour. A **rejected** or **timed out** request: stop and ask. Rerunning creates new requests that need approval again.
 
 ### 10. Verify the draft
 
+Read the channel **from the draft**, not from the files in it (`dockering-update.json.minisig` exists when `sign_manifest` is true: updater `all` or an OS-signed build). The tag's `release.yml` run uploads the artifact `updater-evidence-X.Y.Z` (six `updater-evidence-<target>.txt` files, one per target, written from the unpackaged binaries; they are workflow artifacts, never release assets), and the draft's `RELEASE_NOTES.md` carries the sentence for the channel:
+
+- `--updater all` / `-Updater all`: all six files say `updater=true`, and the notes say *Dockering checks for updates in these builds…*.
+- `--updater none` / `-Updater none`: all six say `updater=false`, and the notes say *Automatic updates are not included in these builds; the update manifest is signed…* or *…has no signature*.
+- `-Expect Signed|Unsigned` is the OS signing mode: **Signed release** or **Unsigned release** in the notes.
+- A mixed or incomplete set of evidence files, or a channel that disagrees with the notes or with the `UPDATER` value you recorded in step 0, is a failed gate: stop. (`assemble` rejects a mixed set, so this means the draft isn't the build step 9 reported.)
+
 ```sh
+run=$(gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId')
 gh release download vX.Y.Z --dir target/release-review/vX.Y.Z
+gh run download "$run" -n updater-evidence-X.Y.Z --dir target/release-review/evidence-X.Y.Z     # not into the release directory
+grep -H '^updater=\|^seam=' target/release-review/evidence-X.Y.Z/*/updater-evidence-*.txt        # six updater=<same>, six seam=false
 pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y.Z -Version X.Y.Z \
-  -Expect Unsigned|Signed -Changelog CHANGELOG.md -Attest -Commit <full 40-character merge-commit SHA> [-SignerSubject "<WINDOWS_SIGNER_SUBJECT>"] [-LaunchSmoke]
-cargo xtask verify-manifest --assets target/release-review/vX.Y.Z      # signed channel only
+  -Expect Unsigned|Signed -Updater none|all -Changelog CHANGELOG.md -Attest -Commit <full 40-character merge-commit SHA> [-SignerSubject "<WINDOWS_SIGNER_SUBJECT>"] [-LaunchSmoke]
+cargo xtask verify-update-artifacts --assets target/release-review/vX.Y.Z --version X.Y.Z --updater none|all
 ```
 
-- A signed draft can only be verified on Windows (Authenticode). Elsewhere stop and ask the maintainer to run the script on Windows.
+- `verify-release.ps1` has no cargo and no minisign: it checks the file set (the `.minisig` is required when `-Updater all` or `-Expect Signed`, forbidden otherwise) and that the notes carry the channel's sentence. `cargo xtask verify-update-artifacts` is the other half and **always runs next to it**, from the scratch worktree at the release commit so that `crates/dk-update/src/keys.rs` is the one the build embedded. It checks that the `.minisig` verifies against those keys **and was made by the first (current) key** (a secret set to the rotation key fails with "the secret `UPDATE_SIGNING_KEY` is not the current key"), that the manifest `version` is X.Y.Z, and that each of the six platform entries equals its asset in kind, URL, size and SHA-256. With `--updater none` and no `.minisig` it checks the entries and the version only. It supersedes `verify-manifest` for the draft.
+- An **OS-signed** draft (`-Expect Signed`) can only be verified on Windows (Authenticode). Elsewhere stop and ask the maintainer to run the script on Windows. An unsigned draft, with or without the updater, verifies anywhere with `pwsh`.
 - `-LaunchSmoke` starts the downloaded app on this machine's real profile (it backs the profile files up and restores them). Windows only, and only when no Dockering is running. Ask once before running it (unless `auto`). It is the check that would have caught the first 0.2.0 build.
 - Exact-commit CI must be green: `gh run list --workflow ci.yml --commit <merge-commit>`.
-- Any `[FAIL]` stops the release. Fix `main` through a PR and ship the next patch; never repair a tag.
+- Any `[FAIL]`, and any failure of `verify-update-artifacts`, stops the release. The draft is unpublished, so nothing is public yet: report the failed check and ask. A wrong update-key secret is the maintainer's to correct (rule 3); fix `main` through a PR and ship the next patch, and never repair a tag.
 
 **Draft gate (REL-079).** `verify-release.ps1` cannot start the Linux or macOS builds, and the first 0.2.0 build passed every check it has. The `Linux smoke` and `macOS smoke` workflows can, on the draft's own files, before anyone can download them. They need the id of the tag's `release.yml` run (step 9):
 
@@ -136,12 +158,12 @@ Find both runs with `gh run list --workflow <file> --limit 3` (the title reads `
 
 ### 11. Gate 2, before publishing
 
-Show: the `RESULT` line, the attestation count, the signer subject (signed), the launch check, exact-commit CI, the notes, the **draft gate** results (both workflows, run links, which legs passed), and the **manual checks not performed** (real-machine install and upgrade, WSL/WSLC walkthroughs, a real Docker connection on every platform). Say what the smoke tests cover and what they do not: clean containers on Linux and hosted runners on macOS, `--demo` or no engine, software rendering on Linux and the runner's GPU on macOS; a physical Linux or Mac machine stays manual. Ask: publish / stop and keep the draft. Then:
+Show: the `RESULT` line, the **channel** read from the draft (OS signed or not, `updater` none or all, and that the six evidence files and the notes agree), the `verify-update-artifacts` result (which public key signed, the version, six entries), the attestation count, the signer subject (signed), the launch check, exact-commit CI, the notes, the **draft gate** results (both workflows, run links, which legs passed), and the **manual checks not performed** (real-machine install and upgrade, WSL/WSLC walkthroughs, a real Docker connection on every platform). Say what the smoke tests cover and what they do not: clean containers on Linux and hosted runners on macOS, `--demo` or no engine, software rendering on Linux and the runner's GPU on macOS; a physical Linux or Mac machine stays manual. Ask: publish / stop and keep the draft. Then:
 
 ```sh
 gh release edit vX.Y.Z --title "Dockering X.Y.Z (unsigned)" --draft=false --latest    # signed: "Dockering X.Y.Z"
 gh release edit vX.Y.Z --draft=false                                                  # pre-release: no --latest
-pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y.Z -Version X.Y.Z -Expect <…> -Published
+pwsh -NoProfile -File scripts/verify-release.ps1 -Dir target/release-review/vX.Y.Z -Version X.Y.Z -Expect <…> -Updater <none|all> -Published
 ```
 
 Publishing starts the `winget` workflow; report its result (it is skipped while `WINGET_ENABLED` or `PUBLIC_RELEASES` is unset).
@@ -160,11 +182,11 @@ A docs PR `chore/record-vX.Y.Z`, titled `docs(release): record vX.Y.Z [REL-010, 
 
 ### Auto
 
-`auto` skips Gate 1 and Gate 2 only when all of these hold; otherwise ask as usual: the channel equals the previous release's, `release-plan` gave no warnings, every check passed, the launch check ran and passed, the draft gate passed on every leg of both platforms, and the previous release was not withdrawn. It never skips a failure.
+`auto` skips Gate 1 and Gate 2 only when all of these hold; otherwise ask as usual: the channel (OS signing **and** `UPDATER`) equals the previous release's, `release-plan` gave no warnings, every check passed, `verify-update-artifacts` passed, the launch check ran and passed, the draft gate passed on every leg of both platforms, and the previous release was not withdrawn. It never skips a failure.
 
 ## Mode: status
 
-Print a table: last release (tag, date, channel); unreleased commits (total, user-visible) and the computed `bump` and `next_version` from `cargo xtask release-plan`; open release PR, active run, draft; channel configuration (variables and secret **names** from `gh variable list` and `gh secret list --env release`; whether `keys.rs` holds a public key); and the signing phase reached ([signing.md](signing.md)). Change nothing.
+Print a table: last release (tag, date, channel: OS signed or not, updater `none` or `all`, read from its notes as in step 0); unreleased commits (total, user-visible) and the computed `bump` and `next_version` from `cargo xtask release-plan`; open release PR, active run, draft; channel configuration (variables, including `UPDATER`, and secret **names** from `gh variable list` and `gh secret list --env release`; whether `keys.rs` holds a public key); and the signing phase reached ([signing.md](signing.md)). Change nothing.
 
 ## Mode: signing
 

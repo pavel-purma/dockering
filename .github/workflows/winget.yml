@@ -36,9 +36,19 @@ jobs:
           $text = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json isDraft,isPrerelease,assets
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $release = $text | ConvertFrom-Json
+          # A .minisig only says the update manifest is signed (REL-083: it is also present on OS-unsigned
+          # builds with UPDATER=all), so the installer's own Authenticode signature decides (REL-041).
           $signed = @($release.assets | Where-Object { $_.name -eq 'dockering-update.json.minisig' }).Count -eq 1
+          if ($signed -and -not $release.isDraft -and -not $release.isPrerelease) {
+            gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern 'Dockering-Setup-x64.exe' --pattern 'Dockering-Setup-arm64.exe' --dir $env:RUNNER_TEMP --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            foreach ($name in 'Dockering-Setup-x64.exe', 'Dockering-Setup-arm64.exe') {
+              $status = (Get-AuthenticodeSignature -FilePath (Join-Path $env:RUNNER_TEMP $name)).Status
+              if ($status -ne 'Valid') { Write-Host "::notice::$name Authenticode status is $status"; $signed = $false }
+            }
+          }
           if ($release.isDraft -or $release.isPrerelease -or -not $signed) {
-            Write-Host '::notice::winget requires a published stable release with a signed update manifest'
+            Write-Host '::notice::winget requires a published stable release with a signed update manifest and Authenticode-signed installers'
             'eligible=false' >> $env:GITHUB_OUTPUT
           } else {
             'eligible=true' >> $env:GITHUB_OUTPUT

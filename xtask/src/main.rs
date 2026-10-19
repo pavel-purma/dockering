@@ -16,6 +16,8 @@ mod wslc_abi;
 // REL-086 scan test only; nothing to run.
 #[cfg(test)]
 mod app_version_scan;
+#[cfg(test)]
+mod relaunch_order_scan;
 
 use anyhow::bail;
 
@@ -37,6 +39,9 @@ commands:
   sign-manifest <file>                minisign-sign <file> with $UPDATE_SIGNING_KEY (UPD-003)
   verify-manifest --assets <dir> [--keys <file>]
                                       check <dir>/dockering-update.json.minisig against the app's keys (UPD-003)
+  verify-update-artifacts --assets <dir> --version <semver> [--keys <file>] [--updater none|all]
+                                      the draft gate's manifest checks: signed by the current key, version,
+                                      every platform entry equals its asset (REL-084)
   gen-update-keys <dir>               generate the current + next updater key pairs (UPD-003)
   checksums <dir>                     write <dir>/SHA256SUMS (REL-012)
   release-plan [--since <tag>] [--to <rev>] [--bump <patch|minor|major|X.Y.Z>] [--bodies]
@@ -62,6 +67,7 @@ fn main() -> anyhow::Result<()> {
         "verify-assets" => release::run_verify_assets(rest),
         "sign-manifest" => release::run_sign_manifest(rest),
         "verify-manifest" => release::run_verify_manifest(rest),
+        "verify-update-artifacts" => release::run_verify_update_artifacts(rest),
         "gen-update-keys" => release::run_gen_update_keys(rest),
         "checksums" => release::run_checksums(rest),
         "release-plan" => release_plan::run_release_plan(rest),

@@ -960,6 +960,16 @@ class ReleaseWorkflowStaticTests(unittest.TestCase):
         self.assertIn("UPDATER", header)
         self.assertIn("updater    inherit (default) | none | all", header)
 
+    def test_rel_041_winget_requires_authenticode_signed_installers(self):
+        # A .minisig is also shipped by OS-unsigned builds with UPDATER=all (REL-083), so it must not be
+        # winget's only signed-release test: the installers' own Authenticode signature decides.
+        text = (ROOT / ".github/workflows/winget.yml").read_text(encoding="utf-8")
+        self.assertIn("Get-AuthenticodeSignature", text)
+        self.assertIn("-ne 'Valid'", text)
+        for name in ("Dockering-Setup-x64.exe", "Dockering-Setup-arm64.exe"):
+            self.assertIn(name, text.split("Get-AuthenticodeSignature")[0])
+        self.assertIn("vars.PUBLIC_RELEASES == 'true'", text)
+
     def test_rel_086_release_workflow_lists_no_seam_feature(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         code = self.code(text.split("\n"))
