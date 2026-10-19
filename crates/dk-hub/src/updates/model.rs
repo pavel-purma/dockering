@@ -50,7 +50,9 @@ pub(crate) trait Host: Send + Sync {
     fn appimage_target(&self) -> Option<PathBuf>;
     /// The wall clock (freshness of the offer, `confirmed_at`, `last_check`).
     fn now(&self) -> SystemTime;
-    /// The Authenticode pin of `installer` against the running exe (UPD-003).
+    /// The Authenticode pin of a freshly downloaded `installer` against the running exe
+    /// (UPD-003). At the click the pin runs again inside `spawn_installer_locked`, through the
+    /// handle; the hub does not call this at apply.
     fn check_installer(&self, installer: &Path, running_exe: &Path) -> Result<(), UpdateError>;
 }
 
@@ -373,7 +375,7 @@ impl State {
             snapshot,
             source,
             host,
-            strategy: Arc::new(super::apply::SystemStrategy),
+            strategy: Arc::new(super::apply::SystemStrategy::production()),
             current: Version::parse(current).unwrap_or_else(|_| Version::new(0, 0, 0)),
             keys,
             running_exe: std::env::current_exe().ok(),

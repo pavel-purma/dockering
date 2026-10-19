@@ -4,7 +4,7 @@
 //! Sessions: a test can `shutdown` a hub and `launch` another one on the same fixture, which is
 //! what the next start of the app sees on disk.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use dk_core::EngineError;
@@ -17,27 +17,29 @@ use crate::UpdateStatus;
 use crate::config::Config;
 use crate::handle::HubHandle;
 use crate::hub::lock;
+use crate::updates::fakes::Call;
 use crate::updates::{ApplyResult, UpdateCheck};
 use crate::updates_tests::{
-    DAY, FILE, Fixture, SHORT, current, quiet, signed_manifest_for, until, updater_env_off,
+    DAY, FILE, Fixture, SHORT, current, quiet, sha2_hex, signed_manifest_for, until,
+    updater_env_off,
 };
 use crate::{ApplyOutcome, DisabledReason, OfferMode, OfferStage, UpdateOffer, UpdateSnapshot};
 
-fn available(version: &str) -> Result<UpdateCheck, EngineError> {
+pub(crate) fn available(version: &str) -> Result<UpdateCheck, EngineError> {
     Ok(UpdateCheck::Available {
         version: version.to_owned(),
     })
 }
 
-fn protocol(message: &str) -> EngineError {
+pub(crate) fn protocol(message: &str) -> EngineError {
     EngineError::protocol(message)
 }
 
-fn the_offer(snap: &UpdateSnapshot) -> UpdateOffer {
+pub(crate) fn the_offer(snap: &UpdateSnapshot) -> UpdateOffer {
     snap.offer.clone().expect("the snapshot has an offer")
 }
 
-fn is_ready(version: &'static str) -> impl Fn(&UpdateSnapshot) -> bool {
+pub(crate) fn is_ready(version: &'static str) -> impl Fn(&UpdateSnapshot) -> bool {
     move |s| {
         s.offer
             .as_ref()
@@ -46,7 +48,7 @@ fn is_ready(version: &'static str) -> impl Fn(&UpdateSnapshot) -> bool {
 }
 
 /// What `offer.json` says now.
-fn stored(f: &Fixture) -> Option<StoredOffer> {
+pub(crate) fn stored(f: &Fixture) -> Option<StoredOffer> {
     offer::read(&f.updates_dir()).expect("offer.json is readable")
 }
 
@@ -54,19 +56,19 @@ fn stored_version(f: &Fixture) -> Option<String> {
     stored(f).and_then(|o| o.version()).map(|v| v.to_string())
 }
 
-fn offer_json(f: &Fixture) -> Vec<u8> {
+pub(crate) fn offer_json(f: &Fixture) -> Vec<u8> {
     std::fs::read(f.updates_dir().join(OFFER_FILE)).expect("offer.json")
 }
 
 /// `latest` serves `version`; one manual check; waits until that version is *Ready*.
-async fn offered(f: &Fixture, hub: &HubHandle, version: &'static str) -> UpdateSnapshot {
+pub(crate) async fn offered(f: &Fixture, hub: &HubHandle, version: &'static str) -> UpdateSnapshot {
     f.publish(version);
     assert_eq!(hub.check_for_updates().await, available(version));
     until(hub, SHORT, is_ready(version)).await
 }
 
 /// Waits for the work the start of a hub (restore, cleanup) holds the check lock for.
-async fn settled(hub: &HubHandle) {
+pub(crate) async fn settled(hub: &HubHandle) {
     let updates = hub.inner.updates.as_ref().expect("updater");
     drop(updates.busy.lock().await);
 }
@@ -948,18 +950,33 @@ async fn upd_017_signed_exe_rejecting_installer_degrades_to_download() {
     assert_eq!(hub.check_for_updates().await, available("0.2.0"));
     assert_eq!(f.source.downloads(), 1);
 
-    // At the click: the verdict changed since the check.
+    // At the click: the verdict changed since the check. The pin runs inside the one locked
+    // call (through the handle), which gets the running exe; the hub checks nothing itself.
     let f = Fixture::new(InstallKind::InnoUser);
-    let hub = f.launch().signed_exe().go();
+    let hub = f.launch().signed_exe().system_on_fakes().go();
     offered(&f, &hub, "0.2.0").await;
-    *lock(&f.host.trust) = Some(UpdateError::UntrustedInstaller);
-    assert!(hub.apply_update().await.is_err());
-    assert_eq!(f.strategy.calls(), 0, "the installer never runs");
+    f.installers
+        .script_locked(Err(UpdateError::UntrustedInstaller));
+    assert_eq!(
+        hub.apply_update().await,
+        Err(protocol(&UpdateError::UntrustedInstaller.to_string()))
+    );
+    let calls = f.installers.calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "no retry for an untrusted installer: {calls:?}"
+    );
+    assert!(matches!(
+        &calls[0],
+        Call::Locked { running_exe: Some(exe), .. } if exe == Path::new("dockering.exe")
+    ));
     let offer = the_offer(&current(&hub).await);
     assert_eq!(
         (offer.mode, offer.install_failed),
         (OfferMode::Download, true)
     );
+    assert!(stored(&f).expect("offer.json").install_failed);
 }
 
 #[tokio::test(start_paused = true)]
@@ -967,18 +984,31 @@ async fn upd_017_changed_payload_degrades_to_download() {
     if updater_env_off() {
         return;
     }
+    // The file sits in a user-writable directory: it is verified again at the click, through the
+    // handle of the one locked call. A payload that changed is an `Integrity` error there.
     let f = Fixture::new(InstallKind::InnoUser);
-    let hub = f.start();
+    let hub = f.launch().system_on_fakes().go();
     offered(&f, &hub, "0.2.0").await;
-    // The file sits in a user-writable directory: it is verified again at the click.
-    std::fs::write(f.payload("0.2.0"), b"swapped after the check").expect("tamper");
-    assert!(hub.apply_update().await.is_err());
-    assert_eq!(f.strategy.calls(), 0);
+    f.installers.script_locked(Err(UpdateError::Integrity));
+    assert_eq!(
+        hub.apply_update().await,
+        Err(protocol(&UpdateError::Integrity.to_string()))
+    );
+    let calls = f.installers.calls();
+    assert_eq!(calls.len(), 1, "the hub doesn't hash on its own: {calls:?}");
+    assert!(matches!(
+        &calls[0],
+        Call::Locked { sha256, size, .. }
+            if sha256 == &sha2_hex(&f.file) && *size == f.file.len() as u64
+    ));
     let offer = the_offer(&current(&hub).await);
     assert_eq!(
         (offer.mode, offer.install_failed),
         (OfferMode::Download, true)
     );
+    // Not retried: the next click is refused without a call.
+    assert!(hub.apply_update().await.is_err());
+    assert_eq!(f.installers.calls().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

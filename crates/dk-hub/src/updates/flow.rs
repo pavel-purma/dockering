@@ -1,5 +1,6 @@
-//! The updater's work (UPD-001…012, UPD-017): start (restore before any network), the schedule,
-//! one check with its download, the retained offer's life cycle, and cleanup.
+//! The updater's work (UPD-001…012, UPD-017): start (restore before any network, the AppImage
+//! staging sweep), the schedule, one check with its download, the retained offer's life cycle,
+//! and cleanup.
 //!
 //! Every change to the retained offer goes through [`commit`]: it persists `offer.json` first,
 //! then swaps the in-memory offer, so a crash leaves the old or the new offer on disk (UPD-012).
@@ -14,7 +15,7 @@ use std::time::Duration;
 use dk_core::{EngineError, EngineResult};
 use dk_update::offer::{self, CheckOutcome, NewerManifest, OfferChange, OfferStage as Stored};
 use dk_update::source::release_asset_name;
-use dk_update::{PlatformAsset, UpdateError};
+use dk_update::{InstallKind, PlatformAsset, UpdateError};
 use futures::FutureExt;
 use tokio::sync::OwnedMutexGuard;
 use tokio_util::sync::CancellationToken;
@@ -90,9 +91,37 @@ async fn init(inner: Arc<HubInner>, busy: Option<OwnedMutexGuard<()>>) {
     };
     restore(&inner, u).await;
     cleanup(&inner, u).await;
+    sweep_staging(u).await;
     drop(busy);
     if current_disabled(&inner, u).is_none() {
         start_schedule(&inner);
+    }
+}
+
+/// An AppImage staging file older than this is a crash's leftover (UPD-012, UPD-014).
+const STAGING_MAX_AGE: Duration = Duration::from_secs(3600);
+
+/// UPD-012: an AppImage install removes its own stale staging files, `.dockering-update-*` older
+/// than one hour next to the AppImage. Only an AppImage install does anything: the kind and the
+/// file are probed here on a blocking worker, like at every check. Best effort: a failure is
+/// logged at debug level and never delays or fails the start.
+async fn sweep_staging(u: &State) {
+    let host = u.host.clone();
+    let swept = blocking(move || {
+        if host.install_kind() != InstallKind::AppImage {
+            return None;
+        }
+        let dir = host.appimage_target()?.parent()?.to_path_buf();
+        let removed = dk_update::apply::sweep_stale_staging(&dir, STAGING_MAX_AGE, host.now());
+        Some((dir, removed))
+    })
+    .await;
+    match swept {
+        Ok(Some((dir, removed))) => {
+            tracing::debug!(dir = %dir.display(), removed, "updater: swept stale AppImage staging files");
+        }
+        Ok(None) => {}
+        Err(error) => tracing::debug!(%error, "updater: the staging sweep didn't run"),
     }
 }
 

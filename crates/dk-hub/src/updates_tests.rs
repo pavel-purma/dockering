@@ -28,9 +28,11 @@ use crate::config::{Config, UiState};
 use crate::handle::{HubHandle, HubOptions};
 use crate::hub::{HubInner, lock};
 use crate::paths::Paths;
+use crate::updates::fakes::FakeInstallers;
 use crate::updates::{
     ApplyFailure, ApplyJob, ApplyResult, ApplyStrategy, FIRST_CHECK, Host, INTERVAL, JITTER_SECS,
-    OfferMode, State, UpdateCheck, UpdateSnapshot, UpdateStatus, UpdaterInit, next_delay,
+    OfferMode, State, SystemStrategy, UpdateCheck, UpdateSnapshot, UpdateStatus, UpdaterInit,
+    next_delay,
 };
 
 /// The installer every test release serves.
@@ -325,6 +327,11 @@ fn sign(kp: &minisign::KeyPair, json: &[u8]) -> String {
         .into_string()
 }
 
+/// The lowercase hex SHA-256 of `bytes`, as a manifest carries it.
+pub(crate) fn sha2_hex(bytes: &[u8]) -> String {
+    hex::encode(sha2::Sha256::digest(bytes))
+}
+
 /// A signed manifest with one entry, `platform` → `kind`.
 pub(crate) fn signed_manifest_for(
     kp: &minisign::KeyPair,
@@ -373,17 +380,27 @@ pub(crate) struct Fixture {
     pub(crate) source: Arc<GatedSource>,
     pub(crate) host: Arc<TestHost>,
     pub(crate) strategy: Arc<FakeStrategy>,
+    /// The `dk-update` calls of the real strategy, faked: for tests of `SystemStrategy`.
+    pub(crate) installers: Arc<FakeInstallers>,
+    /// The bytes every release serves as its asset.
+    pub(crate) file: Vec<u8>,
 }
 
 impl Fixture {
     /// An install of `kind`, serving nothing yet (call [`Fixture::publish`]).
     pub(crate) fn new(kind: InstallKind) -> Self {
+        Self::with_payload(kind, |_| FILE.to_vec())
+    }
+
+    /// [`Fixture::new`] whose releases serve the bytes `payload` makes from the temp directory.
+    pub(crate) fn with_payload(kind: InstallKind, payload: impl FnOnce(&Path) -> Vec<u8>) -> Self {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = payload(dir.path());
         let kp = minisign::KeyPair::generate_unencrypted_keypair().expect("keypair");
-        let (json, sig) = signed_manifest_for(&kp, "0.0.1", FILE, &platform_key(), "inno");
+        let (json, sig) = signed_manifest_for(&kp, "0.0.1", &file, &platform_key(), "inno");
         Self {
-            dir: tempfile::tempdir().expect("tempdir"),
             source: Arc::new(GatedSource {
-                inner: StaticSource::new(json, sig, FILE.to_vec()),
+                inner: StaticSource::new(json, sig, file.clone()),
                 manifest_gate: Mutex::new(None),
                 download_gate: Mutex::new(None),
                 download_error: Mutex::new(None),
@@ -391,6 +408,9 @@ impl Fixture {
             }),
             host: Arc::new(TestHost::new(kind)),
             strategy: Arc::new(FakeStrategy::new()),
+            installers: Arc::new(FakeInstallers::default()),
+            dir,
+            file,
             kp,
         }
     }
@@ -414,7 +434,7 @@ impl Fixture {
 
     /// `latest` becomes `version` with exactly one entry, `platform` → `kind`.
     pub(crate) fn publish_entry(&self, version: &str, platform: &str, kind: &str) {
-        let (json, sig) = signed_manifest_for(&self.kp, version, FILE, platform, kind);
+        let (json, sig) = signed_manifest_for(&self.kp, version, &self.file, platform, kind);
         *lock(&self.source.inner.manifest) = Ok((json, sig));
     }
 
@@ -431,6 +451,7 @@ impl Fixture {
             running: "0.1.0",
             keys: None,
             exe: None,
+            strategy: StrategyKind::Fake,
         }
     }
 
@@ -447,6 +468,17 @@ pub(crate) fn quiet() -> Config {
     config
 }
 
+/// Which strategy a launched hub applies with.
+#[derive(Clone, Copy)]
+enum StrategyKind {
+    /// [`FakeStrategy`]: the platform is out of the picture.
+    Fake,
+    /// The real [`SystemStrategy`] on the fixture's fake `dk-update` calls.
+    SystemOnFakes,
+    /// The real [`SystemStrategy`] on the real `dk-update` calls (Linux AppImage tests).
+    SystemOnReal,
+}
+
 pub(crate) struct Launch<'a> {
     fixture: &'a Fixture,
     config: Config,
@@ -454,6 +486,7 @@ pub(crate) struct Launch<'a> {
     running: &'static str,
     keys: Option<Vec<String>>,
     exe: Option<PathBuf>,
+    strategy: StrategyKind,
 }
 
 impl Launch<'_> {
@@ -480,6 +513,17 @@ impl Launch<'_> {
         self.exe = Some(PathBuf::from("dockering.exe"));
         self
     }
+    /// Apply with the real `SystemStrategy` on the fixture's fake `dk-update` calls.
+    pub(crate) fn system_on_fakes(mut self) -> Self {
+        self.strategy = StrategyKind::SystemOnFakes;
+        self
+    }
+    /// Apply with the real `SystemStrategy` on the real `dk-update` calls.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn system_on_real(mut self) -> Self {
+        self.strategy = StrategyKind::SystemOnReal;
+        self
+    }
     pub(crate) fn go(self) -> HubHandle {
         let f = self.fixture;
         let keys = self.keys.unwrap_or_else(|| vec![f.kp.pk.to_base64()]);
@@ -487,7 +531,11 @@ impl Launch<'_> {
         // The test binary and installer are unsigned: the Authenticode pin is skipped unless a
         // test gives the state a running exe (and the host a verdict).
         state.running_exe = self.exe;
-        state.strategy = f.strategy.clone();
+        state.strategy = match self.strategy {
+            StrategyKind::Fake => f.strategy.clone(),
+            StrategyKind::SystemOnFakes => Arc::new(SystemStrategy::with(f.installers.clone())),
+            StrategyKind::SystemOnReal => Arc::new(SystemStrategy::production()),
+        };
         launch(self.config, self.demo, f.dir.path(), state)
     }
 }

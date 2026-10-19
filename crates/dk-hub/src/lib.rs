@@ -21,6 +21,8 @@ mod version;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, feature = "updater"))]
+mod updates_apply_tests;
+#[cfg(all(test, feature = "updater"))]
 mod updates_offer_tests;
 #[cfg(all(test, feature = "updater"))]
 mod updates_tests;

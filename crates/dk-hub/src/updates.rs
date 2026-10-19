@@ -235,10 +235,13 @@ mod flow;
 #[cfg(feature = "updater")]
 mod model;
 
+#[cfg(all(feature = "updater", test))]
+pub(crate) use apply::fakes;
 #[cfg(feature = "updater")]
 #[allow(unused_imports)]
 pub(crate) use apply::{
-    ApplyFailure, ApplyJob, ApplyResult, ApplyStrategy, FailureKind, apply as apply_update,
+    ApplyFailure, ApplyJob, ApplyResult, ApplyStrategy, FailureKind, Installers, SystemStrategy,
+    apply as apply_update,
 };
 #[cfg(feature = "updater")]
 pub(crate) use flow::{check, settings_changed, start};
