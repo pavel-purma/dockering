@@ -6,12 +6,19 @@
 # makes a version visible to users, the in-app updater, and winget.
 #
 # Branch dispatches build all six targets and a complete review artifact; they never create a
-# release or tag. Tag runs create a DRAFT only. Unsigned mode explicitly disables signing and
-# the updater, even when credentials are configured (REL-016/017).
+# release or tag. Tag runs create a DRAFT only. Unsigned mode explicitly disables OS code
+# signing and notarisation, even when credentials are configured (REL-016/017); it does not
+# decide the updater. The updater is its own gate (REL-083): `verify` computes the outputs
+# `updater` (none|all), `unsigned` (OS signing) and `sign_manifest` (= updater is all, or the
+# build is OS-signed); `package` and `assemble` only read them.
 # Secrets live only in the GitHub environment `release` (restricted to main and v* refs).
 #
 # Repository variables:
-#   PUBLIC_RELEASES   'true' → signed channel; tags are signed          REL-031, UPD-005
+#   UPDATER           none | all (default none): the in-app updater in all six targets, and
+#                     a signed update manifest; needs UPDATE_SIGNING_KEY and a public
+#                     key in crates/dk-update/src/keys.rs when all            REL-083, UPD-005
+#   PUBLIC_RELEASES   'true' → OS-signed channel; tags are OS-signed. It does not
+#                     decide the updater                                  REL-031, REL-060
 #   WINDOWS_SIGNING   signpath | azure | none (default none)            REL-031
 #   MACOS_SIGNING     apple | none (default none), independent of Windows   REL-034
 #   SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG                      (signpath)
@@ -20,9 +27,18 @@
 #   SIGNPATH_API_TOKEN                                                   (signpath)
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
 #   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE    (azure)
-#   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)          UPD-003 manifest signature
+#   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)          UPD-003 manifest signature;
+#                                    required when sign_manifest is true (UPDATER=all or OS-signed)
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8                    (macOS, MACOS_SIGNING=apple)
+# Manual run inputs (a branch run is a rehearsal from main, REL-016):
+#   unsigned   true (default) | false: OS code signing only                REL-016
+#   updater    inherit (default) | none | all: on a branch the input wins unless it is
+#              `inherit`, which uses the UPDATER variable. On a v* tag it MUST be
+#              `inherit`, anything else fails the run                      REL-083
+# Every release binary is scanned (REL-084/086): `assemble` fails unless all six agree with
+# the `updater` output and none contains the test seam. The evidence stays in the workflow
+# artifacts; it is never a release asset.
 name: Release
 
 on:
@@ -31,10 +47,19 @@ on:
   workflow_dispatch:
     inputs:
       unsigned:
-        description: Build unsigned files without the updater (branch runs produce review artifacts only)
+        description: Build without OS code signing or notarisation (Authenticode, Developer ID). The updater is chosen by the updater input. Branch runs produce review artifacts only
         required: true
         default: true
         type: boolean
+      updater:
+        description: "Updater in the build: inherit (use the UPDATER variable), none or all. On a version tag only inherit is accepted"
+        required: false
+        default: inherit
+        type: choice
+        options:
+          - inherit
+          - none
+          - all
 
 permissions:
   contents: read
@@ -59,17 +84,21 @@ jobs:
       prerelease: ${{ steps.v.outputs.prerelease }}
       unsigned: ${{ steps.v.outputs.unsigned }}
       macos_signed: ${{ steps.v.outputs.macos_signed }}
+      updater: ${{ steps.v.outputs.updater }}
+      sign_manifest: ${{ steps.v.outputs.sign_manifest }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: v
-        name: Verify version, changelog, ref and release mode (REL-011/016)
+        name: Verify version, changelog, ref, release mode and update channel (REL-011/016/083)
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_UNSIGNED: ${{ inputs.unsigned }}
+          REQUESTED_UPDATER: ${{ inputs.updater }}
           PUBLIC_RELEASES: ${{ vars.PUBLIC_RELEASES }}
+          UPDATER: ${{ vars.UPDATER }}
           WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
           MACOS_SIGNING: ${{ vars.MACOS_SIGNING || 'none' }}
           WINDOWS_SIGNER_SUBJECT: ${{ vars.WINDOWS_SIGNER_SUBJECT }}
@@ -105,6 +134,34 @@ jobs:
           [[ "$unsigned" == true || "$unsigned" == false ]] \
             || { echo "::error::unsigned must be true or false"; exit 1; }
           echo "unsigned=$unsigned" >> "$GITHUB_OUTPUT"
+          # REL-083: the updater is its own gate, independent of OS signing (`unsigned`).
+          # The repository variable is none|all (empty = none); a manual run adds the input
+          # inherit|none|all. Any other value fails the run.
+          case "${UPDATER:-none}" in
+            none|all) variable_updater="${UPDATER:-none}" ;;
+            *) echo "::error::the repository variable UPDATER must be none or all (REL-083)"; exit 1 ;;
+          esac
+          # A push has no inputs (empty), which means inherit.
+          requested_updater="${REQUESTED_UPDATER:-inherit}"
+          case "$requested_updater" in
+            inherit|none|all) ;;
+            *) echo "::error::the updater input must be inherit, none or all (REL-083)"; exit 1 ;;
+          esac
+          # A tag (also a manual run on a tag) builds what the variable says; the input is for rehearsals.
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$requested_updater" != inherit ]]; then
+            echo "::error::the updater input must be 'inherit' on a version tag; set the UPDATER variable instead (REL-083)"
+            exit 1
+          fi
+          updater="$variable_updater"
+          if [[ "$requested_updater" != inherit ]]; then updater="$requested_updater"; fi
+          # The manifest is signed whenever the updater is built or the build is OS-signed.
+          sign_manifest=false
+          if [[ "$updater" == all || "$unsigned" == false ]]; then sign_manifest=true; fi
+          echo "updater=$updater" >> "$GITHUB_OUTPUT"
+          echo "sign_manifest=$sign_manifest" >> "$GITHUB_OUTPUT"
+          os_signed=false
+          if [[ "$unsigned" == false ]]; then os_signed=true; fi
+          echo "::notice::update channel: updater=$updater, sign_manifest=$sign_manifest, OS-signed=$os_signed"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             [[ "${GITHUB_REF_NAME#v}" == "$version" ]] || { echo "::error::tag $GITHUB_REF_NAME != workspace version $version"; exit 1; }
             # The tag must be on main or a release/* branch (REL-010).
@@ -130,19 +187,24 @@ jobs:
               none) ;;
               *) echo "::error::MACOS_SIGNING must be apple or none"; exit 1 ;;
             esac
-            [[ "$HAS_UPDATE_KEY" == true ]] || { echo "::error::signed mode requires UPDATE_SIGNING_KEY"; exit 1; }
-            python3 - <<'PY'
-          import re
+          fi
+          # Whenever the manifest is signed (updater=all, or OS-signed mode) the run needs the secret
+          # key and a compiled-in public key that can verify what it ships (UPD-003, REL-031/032/083).
+          if [[ "$sign_manifest" == true ]]; then
+            if [[ "$unsigned" == false ]]; then reason='signed mode'; else reason='UPDATER=all'; fi
+            [[ "$HAS_UPDATE_KEY" == true ]] || { echo "::error::$reason requires UPDATE_SIGNING_KEY"; exit 1; }
+            python3 - "$reason" <<'PY'
+          import re, sys
           source = open('crates/dk-update/src/keys.rs', encoding='utf-8').read()
           match = re.search(r'PUBLIC_KEYS[^=]*=\s*&\[(.*?)\];', source, re.S)
           body = re.sub(r'(?m)^\s*//.*$', '', match.group(1)) if match else ''
           if not re.search(r'"[^"]+"', body):
-              raise SystemExit('::error::signed mode requires a public key in crates/dk-update/src/keys.rs (UPD-003)')
+              raise SystemExit(f'::error::{sys.argv[1]} requires a public key in crates/dk-update/src/keys.rs (UPD-003)')
           PY
-            if [[ "$GITHUB_REF" == refs/tags/v* && -z "$WINDOWS_SIGNER_SUBJECT" ]]; then
-              echo "::error::signed tags require the variable WINDOWS_SIGNER_SUBJECT (REL-032)"
-              exit 1
-            fi
+          fi
+          if [[ "$unsigned" == false && "$GITHUB_REF" == refs/tags/v* && -z "$WINDOWS_SIGNER_SUBJECT" ]]; then
+            echo "::error::signed tags require the variable WINDOWS_SIGNER_SUBJECT (REL-032)"
+            exit 1
           fi
           echo "macos_signed=$macos_signed" >> "$GITHUB_OUTPUT"
       - name: Refuse to change an already published release
@@ -220,11 +282,22 @@ jobs:
 
       - name: cargo build --release
         shell: bash
+        env:
+          UPDATER: ${{ needs.verify.outputs.updater }}
         run: |
           features=()
-          # UPD-005/REL-016: unsigned builds never contain the updater.
-          if [[ "${{ needs.verify.outputs.unsigned }}" != true && "${{ vars.PUBLIC_RELEASES }}" == true ]]; then features=(--features updater); fi
+          # REL-083: the updater is built into every target exactly when `verify` says so,
+          # signed or not. PUBLIC_RELEASES and the `unsigned` input (OS signing) play no part.
+          if [[ "$UPDATER" == all ]]; then features=(--features updater); fi
           cargo build --release --locked -p dockering --target "$TARGET" "${features[@]}"
+      # REL-084/086: record what the UNPACKAGED binary contains, before signing and packaging touch it.
+      # `assemble` fails unless all six files agree with the `updater` output and none has the test seam.
+      - name: Record updater evidence from the release binary (REL-084, REL-086)
+        shell: bash
+        run: |
+          exe=dockering
+          if [[ "$RUNNER_OS" == Windows ]]; then exe=dockering.exe; fi
+          bash scripts/release-evidence.sh scan "target/$TARGET/release/$exe" "target/dist/$TARGET/updater-evidence-$TARGET.txt"
 
       # --- Windows, stage 1: sign dockering.exe before it goes into the installer and zip ---
       - name: Sign dockering.exe (Azure Artifact Signing)
@@ -417,6 +490,7 @@ jobs:
             target/dist/${{ matrix.target }}/Dockering-*.AppImage
             target/dist/${{ matrix.target }}/Dockering-*.deb
             target/dist/${{ matrix.target }}/Dockering-*.tar.gz
+            target/dist/${{ matrix.target }}/updater-evidence-${{ matrix.target }}.txt
             target/dist/${{ matrix.target }}/.signed
           include-hidden-files: true
           if-no-files-found: error
@@ -448,6 +522,22 @@ jobs:
             [[ ! -e "dist/$name" ]] || { echo "::error::duplicate release asset $name"; exit 1; }
             cp "$asset" "dist/$name"
           done < <(find artifacts -type f -name 'Dockering-*' -print0)
+      # REL-084/086: the evidence files stay in the per-target artifacts (and the separate evidence
+      # artifact below). They are not named Dockering-*, so the loop above never copies them into dist.
+      - name: Updater evidence agrees with the update channel (REL-084, REL-086)
+        shell: bash
+        env:
+          UPDATER: ${{ needs.verify.outputs.updater }}
+        run: bash scripts/release-evidence.sh check artifacts "$UPDATER"
+      # A separate artifact, not part of dist/: the draft job publishes everything in the review
+      # artifact, and the evidence must never become a release asset. Kept also when the check fails.
+      - name: Upload updater evidence (REL-084)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: updater-evidence-${{ needs.verify.outputs.version }}
+          path: artifacts/release-package-*/updater-evidence-*.txt
+          if-no-files-found: warn
       # PUBLIC_RELEASES denotes the signed channel, independently of repository visibility.
       - name: Stable public releases must be signed (REL-031)
         if: startsWith(github.ref, 'refs/tags/v') && needs.verify.outputs.unsigned != 'true' && needs.verify.outputs.prerelease != 'true' && vars.PUBLIC_RELEASES == 'true'
@@ -465,39 +555,54 @@ jobs:
         run: target/debug/xtask verify-assets --assets dist
       - name: Update manifest (UPD-002)
         run: target/debug/xtask update-manifest --assets dist --version "${{ needs.verify.outputs.version }}" --repo "$GITHUB_REPOSITORY"
+      # The manifest is signed whenever the updater is built or the build is OS-signed (REL-083),
+      # independently of OS signing; the key and public key were checked in `verify`.
       - name: Sign the update manifest (UPD-003)
-        if: needs.verify.outputs.unsigned != 'true'
+        if: needs.verify.outputs.sign_manifest == 'true'
         shell: bash
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
           UPDATE_SIGNING_KEY_PASSWORD: ${{ secrets.UPDATE_SIGNING_KEY_PASSWORD }}
         run: |
-          [[ -n "$UPDATE_SIGNING_KEY" ]] || { echo "::error::signed mode requires UPDATE_SIGNING_KEY"; exit 1; }
+          [[ -n "$UPDATE_SIGNING_KEY" ]] || { echo "::error::a signed update manifest requires UPDATE_SIGNING_KEY"; exit 1; }
           target/debug/xtask sign-manifest dist/dockering-update.json
       - name: Manifest signature verifies against the app's public keys (UPD-003)
-        if: needs.verify.outputs.unsigned != 'true'
+        if: needs.verify.outputs.sign_manifest == 'true'
         run: target/debug/xtask verify-manifest --assets dist
       - name: Release notes from CHANGELOG.md
         shell: bash
         env:
+          VERSION: ${{ needs.verify.outputs.version }}
           UNSIGNED: ${{ needs.verify.outputs.unsigned }}
           MACOS_SIGNED: ${{ needs.verify.outputs.macos_signed }}
+          UPDATER: ${{ needs.verify.outputs.updater }}
+          SIGN_MANIFEST: ${{ needs.verify.outputs.sign_manifest }}
           WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
           PUBLIC_REPOSITORY: ${{ github.event.repository.private != true }}
         run: |
-          version="${{ needs.verify.outputs.version }}"
+          version="$VERSION"
           awk -v v="$version" '
             $0 == "## [" v "]" || index($0, "## [" v "] - ") == 1 { on = 1; next }
             on && /^## \[/ { exit }
             on { print }
           ' CHANGELOG.md > dist/RELEASE_NOTES.md
           [[ -s dist/RELEASE_NOTES.md ]] || { echo "::error::release changelog section is empty"; exit 1; }
+          # REL-083: what the build contains, from the verified outputs (never from the OS signing mode).
+          case "$UPDATER:$SIGN_MANIFEST" in
+            all:true)
+              updates="Dockering checks for updates in these builds, and the update manifest is signed with the project's update key. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page." ;;
+            none:true)
+              updates="Automatic updates are not included in these builds; the update manifest is signed with the project's update key." ;;
+            none:false)
+              updates="Automatic updates are not included in these builds; the update manifest has no signature." ;;
+            *) echo "::error::inconsistent update channel (updater=$UPDATER, sign_manifest=$SIGN_MANIFEST)"; exit 1 ;;
+          esac
           policy="https://github.com/$GITHUB_REPOSITORY#code-signing-policy"
           {
             echo
             echo "---"
             if [[ "$UNSIGNED" == true ]]; then
-              echo "**Unsigned release:** Windows files are not Authenticode-signed; macOS files are not Developer ID-signed or notarised. Windows SmartScreen and macOS Gatekeeper may warn or block launch. Automatic updates are disabled in these builds; the update manifest has no signature."
+              echo "**Unsigned release:** Windows files are not Authenticode-signed; macOS files are not Developer ID-signed or notarised. Windows SmartScreen and macOS Gatekeeper may warn or block launch. $updates"
             else
               echo "**Signed release:** \`dockering.exe\` and the Windows installers are Authenticode-signed. See the [Code signing policy]($policy)."
               if [[ "$WINDOWS_SIGNING" == signpath ]]; then
@@ -506,6 +611,7 @@ jobs:
               if [[ "$MACOS_SIGNED" != true ]]; then
                 echo "macOS files are not Developer ID-signed or notarised; Gatekeeper may warn or block launch."
               fi
+              echo "$updates"
             fi
             if [[ "$PUBLIC_REPOSITORY" == true ]]; then
               echo "**Verify a download:** \`gh attestation verify <file> -R $GITHUB_REPOSITORY\` · checksums in \`SHA256SUMS\`."
@@ -528,6 +634,10 @@ jobs:
           name: release-review-${{ needs.verify.outputs.version }}
           path: dist/*
           if-no-files-found: error
+          # A branch rehearsal may carry a manifest signed for the next version with the production
+          # key (REL-083): keep that bundle short-lived. Tag bundles use the repository default (0),
+          # because the draft job and the maintainer's verification need them.
+          retention-days: ${{ startsWith(github.ref, 'refs/heads/') && '7' || '0' }}
 
   draft:
     name: create draft GitHub Release
