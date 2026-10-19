@@ -1056,6 +1056,8 @@ pub const UPD_POLICY: &str = "Updates are turned off by your administrator.";
 pub const UPD_UNAVAILABLE: &str = "Updates aren't available in this build.";
 pub const UPD_NOTHING_READY: &str = "No update is ready to install.";
 pub const UPD_APPLY_FAILED: &str = "Couldn't start the update";
+pub const UPD_INSTALLED_RESTART_MANUALLY: &str =
+    "Dockering was updated, but couldn't restart by itself. Restart it to finish.";
 pub const UPD_WHATS_NEW: &str = "What's new";
 pub const UPD_RESTART_NOW: &str = "Restart now";
 pub const RELEASES_URL: &str = "https://github.com/pavel-purma/dockering/releases";

@@ -6,8 +6,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use dk_core::{EngineId, EngineState};
-use dk_hub::{ThemeMode, UpdateStatus};
+use dk_core::{EngineError, EngineId, EngineState};
+use dk_hub::{ALREADY_APPLYING, ApplyOutcome, OfferMode, OfferStage, ThemeMode, UpdateStatus};
 use gpui_kit::component::ThemeStyled as _;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -370,11 +370,18 @@ impl AppShell {
         self.update_task = Some(cx.spawn_in(window, async move |_, cx| {
             let result = call.await;
             cx.update(|window, cx| match result {
-                // The installer waits for us to exit (AppMutex), then relaunches Dockering.
-                Ok(()) => {
+                // The installer waits for us to exit (AppMutex), then relaunches Dockering; on
+                // Linux the new process was started.
+                Ok(ApplyOutcome::Restarting) => {
                     crate::app::save_window_bounds(window, cx);
                     cx.quit();
                 }
+                // Installed, but the new process didn't start: the app keeps running.
+                Ok(ApplyOutcome::InstalledRestartManually) => {
+                    notify::info(window, cx, s::UPD_INSTALLED_RESTART_MANUALLY);
+                }
+                // A second click while one runs is ignored silently (UPD-011).
+                Err(EngineError::Protocol(m)) if m == ALREADY_APPLYING => {}
                 Err(e) => notify::engine_error(window, cx, s::UPD_APPLY_FAILED, &e),
             })
             .ok();
@@ -393,51 +400,57 @@ impl AppShell {
         cx.open_url(&url);
     }
 
-    /// Right-hand status-bar item (UPD-008). No focus ring (user preference).
+    /// Right-hand status-bar item (UPD-008). No focus ring (user preference). Transient activity
+    /// first (a download), then the retained offer, then a manual check's progress or error.
     fn render_update_item(&self, cx: &App) -> Option<gpui_kit::AnyElement> {
         let store = UpdateStore::global(cx)?;
         let store = store.read(cx);
         let manual_running = matches!(store.manual(), Some(ManualCheck::Running));
-        Some(match store.status() {
-            UpdateStatus::Downloading { done, total, .. } => {
-                let percent = if *total == 0 { 0 } else { done * 100 / total };
+        if let UpdateStatus::Downloading { done, total, .. } = store.status() {
+            let percent = if *total == 0 { 0 } else { done * 100 / total };
+            return Some(
                 h_flex()
                     .gap_1()
                     .items_center()
                     .child(Spinner::new().xsmall())
                     .child(div().text_xs().child(s::upd_downloading(percent)))
-                    .into_any_element()
+                    .into_any_element(),
+            );
+        }
+        if let Some(offer) = store.offer() {
+            match (offer.mode, offer.stage) {
+                (OfferMode::Install, OfferStage::Ready) => {
+                    return Some(
+                        Button::new("status-restart-to-update")
+                            .xsmall()
+                            .primary()
+                            .icon(IconName::Redo)
+                            .label(s::upd_restart(&offer.version, offer.needs_elevation))
+                            .tooltip_with_action(s::CMD_RESTART_TO_UPDATE, &RestartToUpdate, None)
+                            .on_click(dispatch::on_click(
+                                &self.status_focus,
+                                Box::new(RestartToUpdate),
+                            ))
+                            .into_any_element(),
+                    );
+                }
+                (OfferMode::Download, OfferStage::Ready) => {
+                    let url = offer.notes_url.clone();
+                    return Some(
+                        Button::new("status-update-available")
+                            .xsmall()
+                            .ghost()
+                            .icon(IconName::ExternalLink)
+                            .label(s::upd_available_short(&offer.version))
+                            .tooltip_with_action(s::CMD_VIEW_RELEASE_NOTES, &ViewReleaseNotes, None)
+                            .on_click(move |_, _, cx| cx.open_url(&url))
+                            .into_any_element(),
+                    );
+                }
+                _ => {}
             }
-            UpdateStatus::Ready {
-                version,
-                needs_elevation,
-                ..
-            } => Button::new("status-restart-to-update")
-                .xsmall()
-                .primary()
-                .icon(IconName::Redo)
-                .label(s::upd_restart(version, *needs_elevation))
-                .tooltip_with_action(s::CMD_RESTART_TO_UPDATE, &RestartToUpdate, None)
-                .on_click(dispatch::on_click(
-                    &self.status_focus,
-                    Box::new(RestartToUpdate),
-                ))
-                .into_any_element(),
-            UpdateStatus::Available {
-                version,
-                notes_url,
-                notify_only: true,
-            } => {
-                let url = notes_url.clone();
-                Button::new("status-update-available")
-                    .xsmall()
-                    .ghost()
-                    .icon(IconName::ExternalLink)
-                    .label(s::upd_available_short(version))
-                    .tooltip_with_action(s::CMD_VIEW_RELEASE_NOTES, &ViewReleaseNotes, None)
-                    .on_click(move |_, _, cx| cx.open_url(&url))
-                    .into_any_element()
-            }
+        }
+        Some(match store.status() {
             UpdateStatus::Checking if manual_running => div()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)

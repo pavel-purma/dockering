@@ -21,6 +21,8 @@ mod version;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, feature = "updater"))]
+mod updates_offer_tests;
+#[cfg(all(test, feature = "updater"))]
 mod updates_tests;
 
 pub use bridge::{Feed, HubCall, HubEvent, HubStream, STREAM_CAPACITY, TermCmd, TerminalHandle};
@@ -30,7 +32,10 @@ pub use handle::{ConfigHandle, HubHandle, HubOptions};
 pub use hub::EngineHub;
 pub use paths::Paths;
 pub use supervisor::backoff_delay;
-pub use updates::{DisabledReason, UpdateCheck, UpdateState, UpdateStatus};
+pub use updates::{
+    ALREADY_APPLYING, ApplyOutcome, DisabledReason, OfferMode, OfferStage, UpdateCheck,
+    UpdateOffer, UpdateSnapshot, UpdateState, UpdateStatus,
+};
 pub use version::app_version;
 
 /// The backend factories for this OS (spec 21 §8): Docker everywhere; WSL distro + WSLC on

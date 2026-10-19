@@ -2,7 +2,8 @@
 //!
 //! Public-API tests start the real runtime (`EngineHub::start`) from a plain `#[test]` and use
 //! short real waits. Timing logic (ping/backoff/linger/debounce) runs on a paused tokio clock
-//! via `HubInner::start_on` with the test runtime's handle.
+//! via `HubInner::start_for_test` with the test runtime's handle (no updater: nothing here may
+//! reach the network).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -294,10 +295,9 @@ fn opts(dir: &TempDir, f: Arc<TestFactory>, config: Config, ui_state: UiState) -
 /// Hub on the current (paused) test runtime.
 fn start_paused(f: Arc<TestFactory>, config: Config, ui_state: UiState) -> (HubHandle, TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let h = HubInner::start_on(
+    let h = HubInner::start_for_test(
         opts(&dir, f, config, ui_state),
         tokio::runtime::Handle::current(),
-        None,
     );
     (h, dir)
 }
@@ -1341,7 +1341,7 @@ async fn eng_104_test_engine_connects_without_registering() {
     let dir = tempfile::tempdir().unwrap();
     let mut o = opts(&dir, f.clone(), cfg, UiState::default());
     o.discover_on_start = false;
-    let hub = HubInner::start_on(o, tokio::runtime::Handle::current(), None);
+    let hub = HubInner::start_for_test(o, tokio::runtime::Handle::current());
     let info = hub.test_engine(sock_cfg("x")).await.unwrap();
     assert_eq!(info.server_version, "27.3.1");
     assert!(hub.engines().await.unwrap().is_empty());
@@ -1985,7 +1985,7 @@ async fn config_debounced_atomic_save() {
     let mut o = opts(&dir, f, Config::default(), UiState::default());
     o.discover_on_start = false;
     let paths = o.paths.clone();
-    let hub = HubInner::start_on(o, tokio::runtime::Handle::current(), None);
+    let hub = HubInner::start_for_test(o, tokio::runtime::Handle::current());
     let cfgh = hub.config();
     for i in 0..5u32 {
         cfgh.update(|c| c.logs.initial_tail = 100 + i);
@@ -2640,6 +2640,28 @@ async fn eng_138_start_failure_sets_failed_and_clears_connecting() {
     ));
     assert_eq!(hub.active_engine(), Some(EngineId::new("a")));
     hub.shutdown();
+}
+
+/// UPD-005, UPD-011: a hub with no updater (a build without the feature, demo mode, or a test
+/// hub) reports `Disabled { Unavailable }` with no offer, refuses to apply and never checks.
+#[tokio::test(start_paused = true)]
+async fn upd_005_hub_without_updater_is_unavailable_and_refuses_apply() {
+    let (hub, _dir) = start_paused(TestFactory::new(), Config::default(), UiState::default());
+    let first = hub
+        .update_status()
+        .next()
+        .await
+        .expect("a snapshot")
+        .expect("no error");
+    assert_eq!(first, crate::UpdateSnapshot::unavailable());
+    assert!(matches!(
+        hub.apply_update().await,
+        Err(EngineError::Protocol(_))
+    ));
+    assert_eq!(
+        hub.check_for_updates().await,
+        Ok(crate::UpdateCheck::Disabled)
+    );
 }
 
 #[tokio::test(start_paused = true)]

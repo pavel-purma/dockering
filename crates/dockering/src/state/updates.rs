@@ -1,9 +1,11 @@
-//! In-app updates, UI side (UPD-008, UPD-009): the latest `UpdateStatus` from the hub plus the
-//! manual check. The shell observes it for the status bar and notifications, Settings → Updates
-//! for its section.
+//! In-app updates, UI side (UPD-008, UPD-009): the latest `UpdateSnapshot` from the hub (the
+//! activity plus the retained offer) and the manual check. The shell observes it for the status
+//! bar and notifications, Settings → Updates for its section.
 
 use dk_core::EngineError;
-use dk_hub::{HubHandle, UpdateCheck, UpdateStatus};
+use dk_hub::{
+    HubHandle, OfferMode, OfferStage, UpdateCheck, UpdateOffer, UpdateSnapshot, UpdateStatus,
+};
 use futures::StreamExt;
 use gpui_kit::{App, AppContext, Context, Entity, Global, Task};
 
@@ -17,7 +19,8 @@ pub enum ManualCheck {
 
 pub struct UpdateStore {
     hub: HubHandle,
-    status: UpdateStatus,
+    /// The latest snapshot; an older one (lower `revision`) is dropped (NFR-005).
+    snapshot: UpdateSnapshot,
     manual: Option<ManualCheck>,
     /// Request id of the latest manual check; older results are dropped (NFR-005).
     request: u64,
@@ -34,16 +37,24 @@ impl UpdateStore {
             let mut stream = hub.update_status();
             UpdateStore {
                 hub,
-                status: UpdateStatus::Idle { last_check: None },
+                snapshot: UpdateSnapshot {
+                    status: UpdateStatus::Idle { last_check: None },
+                    offer: None,
+                    revision: 0,
+                },
                 manual: None,
                 request: 0,
                 _status_task: cx.spawn(async move |this, cx| {
                     while let Some(item) = stream.next().await {
-                        let Ok(status) = item else { continue };
+                        let Ok(snapshot) = item else { continue };
                         if this
                             .update(cx, |s, cx| {
-                                s.status = status;
-                                cx.notify();
+                                // The stream is ordered; the guard is for a replay racing a
+                                // newer value.
+                                if snapshot.revision >= s.snapshot.revision {
+                                    s.snapshot = snapshot;
+                                    cx.notify();
+                                }
                             })
                             .is_err()
                         {
@@ -62,30 +73,31 @@ impl UpdateStore {
         cx.try_global::<GlobalUpdates>().map(|g| g.0.clone())
     }
 
+    /// What the updater is doing (checking, downloading, off, failed); the offer is separate.
     pub fn status(&self) -> &UpdateStatus {
-        &self.status
+        &self.snapshot.status
+    }
+
+    /// The retained offer, if there is one (UPD-017).
+    pub fn offer(&self) -> Option<&UpdateOffer> {
+        self.snapshot.offer.as_ref()
     }
 
     pub fn manual(&self) -> Option<&ManualCheck> {
         self.manual.as_ref()
     }
 
-    /// The version that can be installed right now, if any.
+    /// The version that can be installed right now, if any: an install offer whose verified
+    /// payload is ready.
     pub fn ready_version(&self) -> Option<&str> {
-        match &self.status {
-            UpdateStatus::Ready { version, .. } => Some(version),
-            _ => None,
-        }
+        self.offer()
+            .filter(|o| o.mode == OfferMode::Install && o.stage == OfferStage::Ready)
+            .map(|o| o.version.as_str())
     }
 
     /// Release notes of the offered version, if there is one.
     pub fn notes_url(&self) -> Option<&str> {
-        match &self.status {
-            UpdateStatus::Ready { notes_url, .. } | UpdateStatus::Available { notes_url, .. } => {
-                Some(notes_url)
-            }
-            _ => None,
-        }
+        self.offer().map(|o| o.notes_url.as_str())
     }
 
     /// *Check now* (UPD-004: a manual check surfaces its errors).
@@ -114,8 +126,8 @@ impl UpdateStore {
     }
 
     #[cfg(test)]
-    pub fn set_status_for_test(&mut self, status: UpdateStatus, cx: &mut Context<Self>) {
-        self.status = status;
+    pub fn set_snapshot_for_test(&mut self, snapshot: UpdateSnapshot, cx: &mut Context<Self>) {
+        self.snapshot = snapshot;
         cx.notify();
     }
 }
