@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use dk_core::{EngineError, EngineId, EngineState};
-use dk_hub::{ALREADY_APPLYING, ApplyOutcome, OfferMode, OfferStage, ThemeMode, UpdateStatus};
+use dk_hub::{ALREADY_APPLYING, ApplyOutcome, OfferStage, ThemeMode, UpdateStatus};
 use gpui_kit::component::ThemeStyled as _;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -33,7 +33,7 @@ use super::regions::{Region, RegionSlot, Regions};
 use super::shortcuts::ShortcutList;
 use super::sidebar_nav::{NavItem, NavMenu};
 use super::switcher::{Choice, EngineSwitcher as SwitcherView, SwitcherEvent, kind_icon};
-use super::{ShellState, palette};
+use super::{ShellState, palette, update_button};
 use crate::actions::*;
 use crate::commands::CommandContext;
 use crate::keymap::ctx;
@@ -158,6 +158,9 @@ pub struct AppShell {
     status_focus: FocusHandle,
     switcher_btn_focus: FocusHandle,
     overflow_focus: FocusHandle,
+    /// The title-bar update button's focus handle (UPD-015); owned here so focus can return to
+    /// `title_focus` when the button disappears.
+    update_focus: FocusHandle,
     /// Painted bounds of the title-bar overflow button (its menu opens below it).
     overflow_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
     /// Painted bounds of the engine switcher button (the switcher opens below it).
@@ -201,6 +204,7 @@ impl AppShell {
         let status_focus = cx.focus_handle().tab_stop(true);
         let switcher_btn_focus = cx.focus_handle().tab_stop(true);
         let overflow_focus = cx.focus_handle().tab_stop(true);
+        let update_focus = cx.focus_handle().tab_stop(true);
         let regions = Regions::new(vec![
             RegionSlot {
                 region: Region::TitleBar,
@@ -273,6 +277,7 @@ impl AppShell {
             status_focus,
             switcher_btn_focus,
             overflow_focus,
+            update_focus,
             overflow_bounds: Default::default(),
             switcher_btn_bounds: Default::default(),
             sidebar_cursor: 0,
@@ -315,30 +320,28 @@ impl AppShell {
 
     // ── updates (UPD-007, UPD-008, KBD-076) ────────────────────────────────────────────
 
-    /// Status changed: re-render the status bar; once per version, announce a ready update.
+    /// The store changed: once per version, announce an actionable offer (UPD-008); the title
+    /// bar and the status bar re-render from the new snapshot (UPD-015).
     fn on_update_status(
         &mut self,
         updates: Entity<UpdateStore>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ready = updates.read(cx).ready_version().map(str::to_owned);
-        if let Some(version) = ready
-            && AppState::hub(cx).mark_update_notified(&version)
+        let notice = updates
+            .read(cx)
+            .actionable_offer()
+            .and_then(update_button::notice_for);
+        // `mark_update_notified` is atomic and persisted: a restart, an offline start or a
+        // restored offer of an announced version gets the button and no second toast.
+        if let Some(notice) = notice
+            && AppState::hub(cx).mark_update_notified(&notice.version)
         {
-            // One action button (GPUI Kit); clicking the toast body opens the release notes.
-            // Toasts render outside the shell: their clicks dispatch from the shell root.
-            let root = self.root_focus.clone();
-            let note = Notification::info(s::upd_ready(&version))
-                .on_click(dispatch::on_click(&root, Box::new(ViewReleaseNotes)))
-                .action(move |_, _, _| {
-                    Button::new("upd-restart-now")
-                        .small()
-                        .primary()
-                        .label(s::UPD_RESTART_NOW)
-                        .on_click(dispatch::on_click(&root, Box::new(RestartToUpdate)))
-                });
-            window.push_notification(note, cx);
+            update_button::push_notice(&notice, &self.root_focus, window, cx);
+        }
+        // The button vanished under focus (applied, withdrawn, expired): back to the title bar.
+        if self.update_focus.contains_focused(window, cx) && self.update_button(cx).is_none() {
+            window.focus(&self.title_focus, cx);
         }
         cx.notify();
     }
@@ -354,38 +357,62 @@ impl AppShell {
         }
     }
 
+    /// *Restart to update* (UPD-007, UPD-011, KBD-076): a *Ready* offer starts the install, an
+    /// *Installed, restart* one only retries starting the new process. A second request while
+    /// one runs, here or in the hub, is ignored silently.
     fn on_restart_to_update(
         &mut self,
         _: &RestartToUpdate,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ready =
-            UpdateStore::global(cx).and_then(|u| u.read(cx).ready_version().map(str::to_owned));
-        if ready.is_none() {
+        let Some(updates) = UpdateStore::global(cx) else {
+            return;
+        };
+        let (restartable, applying) = {
+            let store = updates.read(cx);
+            (
+                store.restartable_version().is_some(),
+                store
+                    .actionable_offer()
+                    .is_some_and(|o| o.stage == OfferStage::Applying),
+            )
+        };
+        if self.update_task.is_some() || applying {
+            return;
+        }
+        if !restartable {
             notify::info(window, cx, s::UPD_NOTHING_READY);
             return;
         }
-        let call = AppState::hub(cx).apply_update();
-        self.update_task = Some(cx.spawn_in(window, async move |_, cx| {
+        let call = updates.read(cx).apply();
+        self.update_task = Some(cx.spawn_in(window, async move |this, cx| {
             let result = call.await;
-            cx.update(|window, cx| match result {
-                // The installer waits for us to exit (AppMutex), then relaunches Dockering; on
-                // Linux the new process was started.
-                Ok(ApplyOutcome::Restarting) => {
-                    crate::app::save_window_bounds(window, cx);
-                    cx.quit();
+            // A failed update means the shell is gone: treat it as a cancel.
+            this.update_in(cx, |this, window, cx| {
+                // Free the slot first: after a failure the user can retry.
+                this.update_task = None;
+                match result {
+                    // The installer waits for us to exit (AppMutex), then relaunches
+                    // Dockering; on Linux the new process was started.
+                    Ok(ApplyOutcome::Restarting) => {
+                        crate::app::save_window_bounds(window, cx);
+                        cx.quit();
+                    }
+                    // Installed, but the new process didn't start: the app keeps running.
+                    Ok(ApplyOutcome::InstalledRestartManually) => {
+                        notify::info(window, cx, s::UPD_INSTALLED_RESTART_MANUALLY);
+                    }
+                    // A second click while one runs is ignored silently (UPD-011).
+                    Err(EngineError::Protocol(m)) if m == ALREADY_APPLYING => {}
+                    Err(e) => notify::engine_error(window, cx, s::UPD_APPLY_FAILED, &e),
                 }
-                // Installed, but the new process didn't start: the app keeps running.
-                Ok(ApplyOutcome::InstalledRestartManually) => {
-                    notify::info(window, cx, s::UPD_INSTALLED_RESTART_MANUALLY);
-                }
-                // A second click while one runs is ignored silently (UPD-011).
-                Err(EngineError::Protocol(m)) if m == ALREADY_APPLYING => {}
-                Err(e) => notify::engine_error(window, cx, s::UPD_APPLY_FAILED, &e),
+                cx.notify();
             })
             .ok();
         }));
+        // The button turns busy at once, before the hub's snapshot says *Applying* (SHL-001).
+        cx.notify();
     }
 
     fn on_view_release_notes(
@@ -400,8 +427,16 @@ impl AppShell {
         cx.open_url(&url);
     }
 
-    /// Right-hand status-bar item (UPD-008). No focus ring (user preference). Transient activity
-    /// first (a download), then the retained offer, then a manual check's progress or error.
+    /// The title-bar update button for the retained offer, if there is one to show (UPD-015).
+    pub(crate) fn update_button(&self, cx: &App) -> Option<update_button::ButtonSpec> {
+        let store = UpdateStore::global(cx)?;
+        let store = store.read(cx);
+        update_button::button_for(store.actionable_offer()?, self.update_task.is_some())
+    }
+
+    /// Right-hand status-bar item (UPD-008): only the transient items, a download's progress
+    /// and, during a manual check, *Checking…* or its error. The offer's own sign is the
+    /// title-bar button (UPD-015). No focus ring (KBD-003).
     fn render_update_item(&self, cx: &App) -> Option<gpui_kit::AnyElement> {
         let store = UpdateStore::global(cx)?;
         let store = store.read(cx);
@@ -417,39 +452,7 @@ impl AppShell {
                     .into_any_element(),
             );
         }
-        if let Some(offer) = store.offer() {
-            match (offer.mode, offer.stage) {
-                (OfferMode::Install, OfferStage::Ready) => {
-                    return Some(
-                        Button::new("status-restart-to-update")
-                            .xsmall()
-                            .primary()
-                            .icon(IconName::Redo)
-                            .label(s::upd_restart(&offer.version, offer.needs_elevation))
-                            .tooltip_with_action(s::CMD_RESTART_TO_UPDATE, &RestartToUpdate, None)
-                            .on_click(dispatch::on_click(
-                                &self.status_focus,
-                                Box::new(RestartToUpdate),
-                            ))
-                            .into_any_element(),
-                    );
-                }
-                (OfferMode::Download, OfferStage::Ready) => {
-                    let url = offer.notes_url.clone();
-                    return Some(
-                        Button::new("status-update-available")
-                            .xsmall()
-                            .ghost()
-                            .icon(IconName::ExternalLink)
-                            .label(s::upd_available_short(&offer.version))
-                            .tooltip_with_action(s::CMD_VIEW_RELEASE_NOTES, &ViewReleaseNotes, None)
-                            .on_click(move |_, _, cx| cx.open_url(&url))
-                            .into_any_element(),
-                    );
-                }
-                _ => {}
-            }
-        }
+        // The retained offer is not shown here: its sign is the title-bar button (UPD-015).
         Some(match store.status() {
             UpdateStatus::Checking if manual_running => div()
                 .text_xs()
@@ -478,6 +481,20 @@ impl AppShell {
     /// Whether the status bar currently shows an update item (UPD-008).
     pub fn has_update_item(&self, cx: &App) -> bool {
         self.render_update_item(cx).is_some()
+    }
+
+    /// The title region's focus handle (UPD-015: focus returns here when the update button
+    /// disappears under it).
+    pub fn title_focus(&self) -> &FocusHandle {
+        &self.title_focus
+    }
+    /// The title-bar update button's focus handle (UPD-015).
+    pub fn update_focus(&self) -> &FocusHandle {
+        &self.update_focus
+    }
+    /// The engine switcher button's focus handle (the title region's default).
+    pub fn switcher_button_focus(&self) -> &FocusHandle {
+        &self.switcher_btn_focus
     }
 
     pub fn route(&self) -> &Route {
@@ -1507,6 +1524,7 @@ impl AppShell {
         let insecure = status
             .as_ref()
             .is_some_and(|s| s.config.endpoint.is_insecure_tcp());
+        let update_button = self.update_button(cx);
         // The GPUI Kit `TitleBar` marks the whole bar as a window drag area. On Windows a
         // drag area under the pointer answers `WM_NCHITTEST` with `HTCAPTION`, which turns
         // the click into a window drag and never reaches our controls. Every interactive
@@ -1595,14 +1613,26 @@ impl AppShell {
                     .child(
                         h_flex()
                             .id("title-actions")
+                            .debug_selector(|| "title-actions".into())
                             .occlude()
                             .gap_2()
                             .items_center()
+                            // UPD-015: the first button of the group, left of *Refresh*, the same
+                            // on every OS; present only while the retained offer says so.
+                            .when_some(update_button, |this, spec| {
+                                this.child(update_button::render_button(
+                                    &spec,
+                                    &self.update_focus,
+                                    &self.title_focus,
+                                    cx,
+                                ))
+                            })
                             .child(
                                 Button::new("title-refresh")
                                     .ghost()
                                     .small()
                                     .icon(IconName::RefreshCw)
+                                    .debug_selector(|| "title-refresh".into())
                                     .tooltip_with_action(s::REFRESH, &Refresh, None)
                                     .on_click(dispatch::on_click(
                                         &self.title_focus,
@@ -1977,7 +2007,7 @@ impl AppShell {
                 page: self.history.current().page(),
                 on_detail: self.history.current().is_detail(),
                 update_ready: UpdateStore::global(cx)
-                    .is_some_and(|u| u.read(cx).ready_version().is_some()),
+                    .is_some_and(|u| u.read(cx).restartable_version().is_some()),
             };
             let shell = cx.entity().downgrade();
             let list_cap = cap - px(PALETTE_CHROME_H) * rem_scale(window);

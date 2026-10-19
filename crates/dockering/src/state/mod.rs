@@ -15,7 +15,7 @@ pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
 pub use terminals::{ParkedSessions, TerminalRegistry};
 pub use ticker::Ticker;
-pub use updates::{ManualCheck, UpdateStore};
+pub use updates::{ApplyCall, ManualCheck, UpdateStore};
 
 use dk_hub::{Config, HubHandle, UiState};
 use gpui_kit::{App, Global};

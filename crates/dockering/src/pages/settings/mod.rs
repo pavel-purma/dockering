@@ -36,7 +36,7 @@ pub use diagnostics::{copy_diagnostics, view_licenses};
 
 use crate::nav::SettingsSection;
 use crate::shell::shortcuts::ShortcutList;
-use crate::state::{AppState, EngineListStore};
+use crate::state::{AppState, EngineListStore, UpdateStore};
 use crate::strings as s;
 use crate::theme;
 use crate::ui::page::PageView;
@@ -84,6 +84,10 @@ impl SettingsPage {
         ];
         let mut inputs = HashMap::new();
         let mut selects = HashMap::new();
+        // The updater's snapshot (activity and the retained offer) feeds *Updates* (UPD-009).
+        if let Some(updates) = UpdateStore::global(cx) {
+            subs.push(cx.observe(&updates, |_, _, cx| cx.notify()));
+        }
         for section in SettingsSection::ALL {
             for &key in controls::keys_for(section) {
                 match controls::spec(key) {
