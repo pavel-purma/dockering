@@ -27,6 +27,16 @@ pub enum UpdateError {
     /// Updating this installation in place is not supported.
     #[error("updates aren't supported for this installation")]
     Unsupported,
+    /// Linux AppImage apply (UPD-014): the staged copy could not be written, flushed or put in
+    /// place (disk full, permission denied, `rename` failed). The old file is untouched and the
+    /// offer stays ready, so the user can retry.
+    #[error("couldn't write the update: {0}")]
+    Stage(String),
+    /// Linux AppImage apply (UPD-014): the new AppImage failed its `--version` self-test (wrong
+    /// output, non-zero exit, timeout, crash, or it could not be run). It was not installed and
+    /// the offer degrades to *Download* for that version.
+    #[error("the new version failed its self-test: {0}")]
+    SelfTest(String),
     /// The signed update manifest was malformed.
     #[error("invalid update manifest: {0}")]
     Manifest(String),

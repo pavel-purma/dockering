@@ -1,9 +1,20 @@
-//! Starting the verified installer (UPD-007).
+//! Applying a verified update: starting the Windows installer (UPD-007) and replacing a Linux
+//! AppImage in place (UPD-014, in [`appimage`]).
 
 use std::path::Path;
 
 use crate::UpdateError;
 use crate::install_kind::InstallKind;
+
+pub mod appimage;
+mod env;
+mod sweep;
+
+pub use appimage::{
+    AppImageJob, AppImageOutcome, RELAUNCH_FLAG, apply_appimage, restart_installed,
+};
+pub use env::{EnvPlan, current_env, scrubbed_env};
+pub use sweep::{STAGING_PREFIX, sweep_stale_staging};
 
 /// Inno Setup argv for an in-app update: progress window only (`/SILENT`, `/UPDATE`), no
 /// reboot, relaunch afterwards (`/RELAUNCH`, see `packaging/windows/dockering.iss`), same scope as
@@ -30,8 +41,12 @@ pub fn installer_args(kind: InstallKind) -> Vec<&'static str> {
 /// first. Returns once the installer has started (or the user declined elevation, which is an
 /// error, so the app keeps running). The caller then quits; the installer waits for it through
 /// `AppMutex` (REL-024).
+///
+/// Only the Inno kinds start an installer. [`InstallKind::AppImage`] also answers
+/// [`InstallKind::can_install`], but it is applied by [`apply_appimage`], never by running a
+/// downloaded file as an installer, so it is rejected here explicitly.
 pub fn spawn_installer(installer: &Path, kind: InstallKind) -> Result<(), UpdateError> {
-    if !kind.can_install() {
+    if !matches!(kind, InstallKind::InnoUser | InstallKind::InnoMachine) {
         return Err(UpdateError::Unsupported);
     }
     if !installer.is_absolute() || !installer.is_file() {
@@ -134,5 +149,27 @@ mod tests {
             spawn_installer(Path::new("relative.exe"), InstallKind::InnoUser),
             Err(UpdateError::Spawn(_))
         ));
+    }
+
+    /// UPD-007, UPD-014: an AppImage payload is never started as an installer, even though
+    /// `InstallKind::AppImage.can_install()` is true and the file exists.
+    #[test]
+    fn spawn_installer_rejects_non_inno_kinds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("payload");
+        std::fs::write(&file, b"not an installer").expect("write");
+        assert!(file.is_absolute() && file.is_file());
+        assert!(InstallKind::AppImage.can_install());
+        for kind in [
+            InstallKind::AppImage,
+            InstallKind::Portable,
+            InstallKind::Other,
+        ] {
+            assert_eq!(
+                spawn_installer(&file, kind),
+                Err(UpdateError::Unsupported),
+                "{kind:?}"
+            );
+        }
     }
 }

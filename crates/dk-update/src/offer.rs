@@ -7,7 +7,7 @@
 //! these functions from blocking workers and keeps the in-memory *Applying* stage to itself (it is
 //! never saved).
 //!
-//! - [`write`], [`read`], [`read_or_discard`], [`remove`], [`discard`]: the file store.
+//! - [`write()`], [`read`], [`read_or_discard`], [`remove`], [`discard`]: the file store.
 //! - [`restore`]: the start-up path (signature, version, platform entry, freshness).
 //! - [`is_fresh`], [`is_obsolete`]: the clock and version rules, evaluated on every read.
 //! - [`after_check`]: what a finished check does to the stored offer (UPD-017 (3), (4)).
@@ -28,7 +28,7 @@ use crate::verify::verify_manifest;
 
 /// The retained offer's file name inside the updates directory (UPD-012).
 pub const OFFER_FILE: &str = "offer.json";
-/// The temp file [`write`] renames over [`OFFER_FILE`]; cleanup removes a stale one.
+/// The temp file [`write()`] renames over [`OFFER_FILE`]; cleanup removes a stale one.
 pub const OFFER_TMP_FILE: &str = "offer.json.tmp";
 /// The only file format version this build reads and writes. Anything else is unreadable.
 pub const FILE_VERSION: u32 = 1;
