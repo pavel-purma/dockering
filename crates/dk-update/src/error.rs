@@ -24,6 +24,13 @@ pub enum UpdateError {
     /// The verified installer could not be started.
     #[error("couldn't start the installer: {0}")]
     Spawn(String),
+    /// Windows (UPD-007): the verified installer could not be held `FILE_SHARE_READ`-locked, or
+    /// it would not start while it is held (a sharing violation from the open, from the child
+    /// process or from `ShellExecuteExW`). Nothing was started. The hub decides with
+    /// [`crate::apply::locked_start_fallback`]: a per-user install retries once, an all-users
+    /// install degrades the offer to *Download* rather than elevating a file that isn't locked.
+    #[error("couldn't start the installer while it is locked: {0}")]
+    LockedStartFailed(String),
     /// Updating this installation in place is not supported.
     #[error("updates aren't supported for this installation")]
     Unsupported,
