@@ -112,7 +112,7 @@ fn write_crash_file(
         .unwrap_or(0);
     let path = dir.join(format!("crash-{ts}.txt"));
     let mut f = std::fs::File::create(&path)?;
-    writeln!(f, "Dockering {} crashed", env!("CARGO_PKG_VERSION"))?;
+    writeln!(f, "Dockering {} crashed", crate::app_version())?;
     writeln!(f, "os: {} {}", std::env::consts::OS, std::env::consts::ARCH)?;
     writeln!(f, "thread: {thread}")?;
     writeln!(f, "message: {msg}")?;

@@ -126,7 +126,7 @@ pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) ->
         div()
             .text_sm()
             .font_family(cx.theme().mono_font_family.clone())
-            .child(format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")))
+            .child(format!("{} {}", s::APP_NAME, dk_hub::app_version()))
             .into_any_element(),
         None,
         cx,

@@ -2040,7 +2040,7 @@ async fn save_file_launch_and_diagnostics() {
     );
 
     let d = hub.diagnostics().await.unwrap();
-    assert!(d.contains(env!("CARGO_PKG_VERSION")));
+    assert!(d.contains(crate::app_version()));
     assert!(d.contains(std::env::consts::OS));
     assert!(d.contains("- a [Docker]"), "{d}");
     assert!(d.contains("27.3.1") && d.contains("EVENTS"), "{d}");

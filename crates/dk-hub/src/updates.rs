@@ -174,6 +174,10 @@ mod service {
     pub(crate) const INTERVAL: Duration = Duration::from_secs(24 * 3600);
     pub(crate) const JITTER_SECS: u64 = 3600;
 
+    /// An environment lookup (name → value); `State::production` passes the process
+    /// environment (only for the `update-e2e` seam), tests pass a map (REL-086).
+    pub(crate) type EnvFn<'a> = &'a dyn Fn(&str) -> Option<String>;
+
     /// A downloaded, verified installer (UPD-007). Kept with its manifest entry so `apply` can
     /// verify the file again right before running it (the updates dir is user-writable).
     #[derive(Clone)]
@@ -201,6 +205,13 @@ mod service {
         pub(crate) busy: tokio::sync::Mutex<()>,
         /// Cancelled when updates get turned off at runtime.
         pub(crate) schedule: Mutex<Option<CancellationToken>>,
+        /// Delay before the first automatic check (UPD-004): [`FIRST_CHECK`] unless a test or
+        /// the `update-e2e` seam sets it.
+        pub(crate) first_check: Duration,
+        /// Time between automatic checks: [`INTERVAL`] by default.
+        pub(crate) interval: Duration,
+        /// The interval varies by ± this many seconds: [`JITTER_SECS`] by default.
+        pub(crate) jitter_secs: u64,
     }
 
     impl State {
@@ -223,20 +234,50 @@ mod service {
                 request: std::sync::atomic::AtomicU64::new(0),
                 busy: tokio::sync::Mutex::new(()),
                 schedule: Mutex::new(None),
+                first_check: FIRST_CHECK,
+                interval: INTERVAL,
+                jitter_secs: JITTER_SECS,
             }
         }
 
-        /// Production state: GitHub source, embedded keys, detected install kind.
+        /// Production state: GitHub source, embedded keys, detected install kind. Reads the
+        /// process environment only in a build with the `update-e2e` seam.
         pub(crate) fn production() -> Option<Self> {
-            let version = env!("CARGO_PKG_VERSION");
-            let source = match dk_update::GithubSource::new(version) {
+            #[cfg(feature = "update-e2e")]
+            let env = crate::e2e::seam::process_env;
+            #[cfg(not(feature = "update-e2e"))]
+            let env = |_: &str| -> Option<String> { None };
+            Self::production_with(&env)
+        }
+
+        /// [`State::production`] with an injected environment: the `update-e2e` seam (REL-086)
+        /// reads its `DOCKERING_UPDATE_E2E_*` variables from `env`; without the feature `env`
+        /// is never consulted.
+        pub(crate) fn production_with(env: EnvFn<'_>) -> Option<Self> {
+            let version = crate::app_version();
+            #[cfg(feature = "update-e2e")]
+            let seam = crate::e2e::seam::Seam::from_env(env);
+            #[cfg(not(feature = "update-e2e"))]
+            let _ = env;
+
+            #[cfg(feature = "update-e2e")]
+            let source = match seam.base_url.as_deref() {
+                // An explicit but unusable base fails closed (no updater), never falls back
+                // to GitHub.
+                Some(base) => dk_update::GithubSource::with_base(version, base),
+                None => dk_update::GithubSource::new(version),
+            };
+            #[cfg(not(feature = "update-e2e"))]
+            let source = dk_update::GithubSource::new(version);
+            let source = match source {
                 Ok(s) => Arc::new(s) as Arc<dyn UpdateSource>,
                 Err(e) => {
                     tracing::warn!(error = %e, "updater: HTTP client unavailable");
                     return None;
                 }
             };
-            Some(Self::new(
+            #[cfg_attr(not(feature = "update-e2e"), allow(unused_mut))]
+            let mut state = Self::new(
                 source,
                 dk_update::install_kind::detect_current(),
                 version,
@@ -244,12 +285,36 @@ mod service {
                     .iter()
                     .map(|k| (*k).to_owned())
                     .collect(),
-            ))
+            );
+            #[cfg(feature = "update-e2e")]
+            {
+                if let Some(key) = seam.key {
+                    state.keys = vec![key];
+                }
+                if let Some(first_check) = seam.first_check {
+                    state.first_check = first_check;
+                }
+                if let Some(interval) = seam.interval {
+                    state.interval = interval;
+                    // A seconds-scale interval can't carry an hour of jitter.
+                    state.jitter_secs = 0;
+                }
+            }
+            Some(state)
         }
 
         pub(crate) fn set(&self, status: UpdateStatus) {
             self.status.send_replace(status);
         }
+    }
+
+    /// Delay until the next automatic check: `interval` ± `jitter_secs`, picked by the random
+    /// number `r` (UPD-004). Never panics, whatever the inputs.
+    pub(crate) fn next_delay(interval: Duration, jitter_secs: u64, r: u64) -> Duration {
+        let offset = r % jitter_secs.saturating_mul(2).saturating_add(1);
+        interval
+            .saturating_add(Duration::from_secs(offset))
+            .saturating_sub(Duration::from_secs(jitter_secs))
     }
 
     fn engine_err(e: UpdateError) -> EngineError {
@@ -342,7 +407,13 @@ mod service {
 
     async fn schedule(inner: Arc<HubInner>, token: CancellationToken) {
         restore_pending(inner.clone()).await;
-        let mut delay = FIRST_CHECK;
+        let Some((mut delay, interval, jitter_secs)) = inner
+            .updates
+            .as_ref()
+            .map(|u| (u.first_check, u.interval, u.jitter_secs))
+        else {
+            return;
+        };
         loop {
             tokio::select! {
                 _ = token.cancelled() => return,
@@ -351,8 +422,7 @@ mod service {
             if let Err(e) = check(&inner, false).await {
                 tracing::info!(error = %e, "automatic update check failed");
             }
-            let jitter = rand::random::<u64>() % (2 * JITTER_SECS + 1);
-            delay = INTERVAL + Duration::from_secs(jitter) - Duration::from_secs(JITTER_SECS);
+            delay = next_delay(interval, jitter_secs, rand::random());
         }
     }
 

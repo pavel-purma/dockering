@@ -41,7 +41,7 @@ fn main() -> ExitCode {
     if args.version {
         say(
             &mut std::io::stdout(),
-            &format!("dockering {}", env!("CARGO_PKG_VERSION")),
+            &format!("dockering {}", dk_hub::app_version()),
         );
         return ExitCode::SUCCESS;
     }
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
     let (config, ui_state) = dk_hub::load_config(&paths);
     let _logging = dk_hub::logging::init(&paths, config.diagnostics.log_level);
     tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
+        version = dk_hub::app_version(),
         demo = args.demo,
         "starting"
     );
@@ -126,6 +126,11 @@ fn main() -> ExitCode {
         instance,
         demo: args.demo,
     });
+    // REL-086 test seam, a no-op without the `update-e2e` feature and its variable: linger
+    // here, once `run()` has returned (the hub and the single-instance guard were moved into
+    // it), so a relaunch that only works when this process exits quickly fails the
+    // end-to-end test. The sleep itself lives in dk-hub (NFR-001).
+    dk_hub::e2e_quit_delay();
     ExitCode::SUCCESS
 }
 

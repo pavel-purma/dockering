@@ -13,6 +13,10 @@ mod release_plan;
 mod util;
 mod wslc_abi;
 
+// REL-086 scan test only; nothing to run.
+#[cfg(test)]
+mod app_version_scan;
+
 use anyhow::bail;
 
 const USAGE: &str = "\

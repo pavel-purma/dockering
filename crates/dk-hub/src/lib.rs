@@ -4,6 +4,7 @@
 pub mod bridge;
 pub mod config;
 pub mod console;
+mod e2e;
 mod events;
 mod handle;
 mod hub;
@@ -15,6 +16,7 @@ mod stats_service;
 mod supervisor;
 mod terminal;
 pub mod updates;
+mod version;
 
 #[cfg(test)]
 mod tests;
@@ -23,11 +25,13 @@ mod updates_tests;
 
 pub use bridge::{Feed, HubCall, HubEvent, HubStream, STREAM_CAPACITY, TermCmd, TerminalHandle};
 pub use config::{Config, ThemeMode, UiState, UpdateSettings};
+pub use e2e::e2e_quit_delay;
 pub use handle::{ConfigHandle, HubHandle, HubOptions};
 pub use hub::EngineHub;
 pub use paths::Paths;
 pub use supervisor::backoff_delay;
 pub use updates::{DisabledReason, UpdateCheck, UpdateState, UpdateStatus};
+pub use version::app_version;
 
 /// The backend factories for this OS (spec 21 §8): Docker everywhere; WSL distro + WSLC on
 /// Windows (their crates compile everywhere and discover nothing elsewhere).

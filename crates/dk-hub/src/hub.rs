@@ -966,7 +966,7 @@ pub(crate) fn diagnostics_text(inner: &HubInner) -> String {
     use std::fmt::Write as _;
     let reg = lock(&inner.reg);
     let mut out = String::new();
-    let _ = writeln!(out, "Dockering {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(out, "Dockering {}", crate::app_version());
     let _ = writeln!(
         out,
         "OS: {} {}",
@@ -1160,7 +1160,7 @@ pub(crate) fn apply_update(h: &HubHandle) -> HubCall<()> {
 }
 
 pub(crate) fn take_previous_version(h: &HubHandle) -> Option<String> {
-    let current = env!("CARGO_PKG_VERSION");
+    let current = crate::app_version();
     let previous = h.inner.ui_state().updates.last_run_version;
     if previous.as_deref() == Some(current) {
         return None;

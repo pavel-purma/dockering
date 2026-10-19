@@ -295,7 +295,7 @@ impl AppShell {
         // UPD-008: first launch after an update.
         if AppState::hub(cx).take_previous_version().is_some() {
             window.defer(cx, |window, cx| {
-                let version = env!("CARGO_PKG_VERSION");
+                let version = dk_hub::app_version();
                 let url = s::release_notes_url(version);
                 let note = Notification::info(s::upd_updated(version)).action(move |_, _, _| {
                     let url = url.clone();
@@ -389,7 +389,7 @@ impl AppShell {
     ) {
         let url = UpdateStore::global(cx)
             .and_then(|u| u.read(cx).notes_url().map(str::to_owned))
-            .unwrap_or_else(|| s::release_notes_url(env!("CARGO_PKG_VERSION")));
+            .unwrap_or_else(|| s::release_notes_url(dk_hub::app_version()));
         cx.open_url(&url);
     }
 
@@ -1113,7 +1113,7 @@ impl AppShell {
         notify::info(
             window,
             cx,
-            format!("{} {}", s::APP_NAME, env!("CARGO_PKG_VERSION")),
+            format!("{} {}", s::APP_NAME, dk_hub::app_version()),
         );
     }
 

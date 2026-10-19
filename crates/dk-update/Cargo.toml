@@ -10,6 +10,9 @@ publish.workspace = true
 [features]
 default = []
 test-support = []
+# REL-086 test seam: `GithubSource::with_base` points every fetch at a loopback server. Never in
+# default features and never in a shipped build; `dk-hub` and `dockering` forward it.
+update-e2e = []
 
 [dependencies]
 reqwest.workspace = true
