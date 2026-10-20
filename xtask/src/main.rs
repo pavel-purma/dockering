@@ -10,8 +10,15 @@ mod icons;
 mod package;
 mod release;
 mod release_plan;
+mod update_e2e;
 mod util;
 mod wslc_abi;
+
+// REL-086 scan test only; nothing to run.
+#[cfg(test)]
+mod app_version_scan;
+#[cfg(test)]
+mod relaunch_order_scan;
 
 use anyhow::bail;
 
@@ -33,7 +40,13 @@ commands:
   sign-manifest <file>                minisign-sign <file> with $UPDATE_SIGNING_KEY (UPD-003)
   verify-manifest --assets <dir> [--keys <file>]
                                       check <dir>/dockering-update.json.minisig against the app's keys (UPD-003)
+  verify-update-artifacts --assets <dir> --version <semver> [--keys <file>] [--updater none|all]
+                                      the draft gate's manifest checks: signed by the current key, version,
+                                      every platform entry equals its asset (REL-084)
   gen-update-keys <dir>               generate the current + next updater key pairs (UPD-003)
+  update-e2e-fixture --out <dir> --appimage <file> --version <semver> [--arch <x86_64|aarch64>] [--claimed-version <semver>]
+                                      throwaway key, signed manifest and a GitHub-shaped server root for the Linux
+                                      update end-to-end test; writes files only (REL-085)
   checksums <dir>                     write <dir>/SHA256SUMS (REL-012)
   release-plan [--since <tag>] [--to <rev>] [--bump <patch|minor|major|X.Y.Z>] [--bodies]
                                       commits since the last release, the bump and next version as JSON (REL-011)
@@ -58,7 +71,9 @@ fn main() -> anyhow::Result<()> {
         "verify-assets" => release::run_verify_assets(rest),
         "sign-manifest" => release::run_sign_manifest(rest),
         "verify-manifest" => release::run_verify_manifest(rest),
+        "verify-update-artifacts" => release::run_verify_update_artifacts(rest),
         "gen-update-keys" => release::run_gen_update_keys(rest),
+        "update-e2e-fixture" => update_e2e::run(rest),
         "checksums" => release::run_checksums(rest),
         "release-plan" => release_plan::run_release_plan(rest),
         "release-verify" => release_plan::run_release_verify(rest),

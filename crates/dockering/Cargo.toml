@@ -22,6 +22,9 @@ demo = ["dk-core/test-support"]
 # In-app updates (UPD-001…012). Off by default; release.yml enables it for public releases
 # (UPD-005). The UI is the same either way: without it the hub reports updates as disabled.
 updater = ["dk-hub/updater"]
+# REL-086 test seam for the Linux update end-to-end test (REL-085). Never in default features
+# and never in a release build.
+update-e2e = ["updater", "dk-hub/update-e2e"]
 
 [dependencies]
 dk-core.workspace = true

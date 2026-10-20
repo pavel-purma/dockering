@@ -24,6 +24,9 @@
 #   lognoise    the real application, then a WARN line that is known noise                  -> (nothing)
 #   lognoisetrap  the real application, then a WARN inside the portal span with another message -> log_clean
 set -u
+# the wrapper modes run the real application: it must not check for updates (REL-085, plan §3 decision 14), however this
+# script was started
+export DOCKERING_DISABLE_UPDATES=1
 APP_ID=dev.dockering.Dockering
 REAL=/usr/bin/dockering
 MODE="${SMOKE_STUB:?set SMOKE_STUB}"
@@ -118,7 +121,7 @@ await() {
 }
 # the real application with the arguments of the launch; its status is kept in rc
 real() {
-  "$REAL" "$@"
+  DOCKERING_DISABLE_UPDATES=1 "$REAL" "$@"
   rc=$?
 }
 

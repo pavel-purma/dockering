@@ -1,4 +1,5 @@
-//! Dockering updater primitives (UPD-001…003, UPD-006, UPD-007, UPD-010, UPD-012).
+//! Dockering updater primitives (UPD-001…003, UPD-006, UPD-007, UPD-010, UPD-012, UPD-013,
+//! UPD-017).
 //!
 //! No UI and no runtime of its own: async operations run on the caller's Tokio runtime (the
 //! hub's, via `dk-hub`'s `UpdateService`). See `docs/spec/features/distribution.md` §7.
@@ -12,6 +13,7 @@ pub mod error;
 pub mod install_kind;
 pub mod keys;
 pub mod manifest;
+pub mod offer;
 pub mod policy;
 pub mod source;
 pub mod verify;

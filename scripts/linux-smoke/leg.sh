@@ -74,6 +74,6 @@ echo "leg.sh: $slug runs on $ref (${digest:-no repo digest})" >&2
 
 docker run --rm --name "smoke-$slug-$$" --shm-size=512m \
   -v "$(host_path "$pkg_dir"):/pkg:ro" -v "$(host_path "$here"):/scripts:ro" -v "$(host_path "$out_dir"):/out" \
-  -e "EXPECTED_VERSION=$version" -e "LEG=$slug" -e SMOKE_LIBC_FLOOR -e SMOKE_SELFTEST_ONLY \
+  -e "EXPECTED_VERSION=$version" -e "LEG=$slug" -e DOCKERING_DISABLE_UPDATES=1 -e SMOKE_LIBC_FLOOR -e SMOKE_SELFTEST_ONLY \
   "$ref" bash "/scripts/$entry" "$kind" 2>&1 | tee "$out_dir/leg.log"
 exit "${PIPESTATUS[0]}"

@@ -1,14 +1,22 @@
-//! In-app updates (UPD-001…012, spec `features/distribution.md` §7): the hub-side
-//! `UpdateService`. It checks the latest GitHub Release on a schedule, downloads and verifies the
-//! installer, and starts it on request.
+//! In-app updates (UPD-001…017, spec `features/distribution.md` §7): the hub-side coordinator.
+//! It checks the latest GitHub Release on a schedule, keeps the retained offer (UPD-017),
+//! downloads and verifies the payload of installs that can update themselves, and applies it on
+//! request.
 //!
 //! The DTOs below are always compiled, so the UI builds the same either way. The network side
-//! (`dk-update`) only exists with the `updater` feature; without it the status is
-//! `Disabled { reason: Unavailable }` and nothing touches the network (UPD-005).
+//! (`dk-update`) only exists with the `updater` feature; without it the snapshot is
+//! `Disabled { reason: Unavailable }` with no offer and nothing touches the network (UPD-005).
+//!
+//! Layout of the feature-gated part:
+//!
+//! - `model`: the state, the retained offer, the pure snapshot builder and the host seam;
+//! - `flow`: start (restore before any network), schedule, check, download, commit, cleanup;
+//! - `apply`: the apply flag, the failure classification and the platform strategy seam.
 
 use serde::{Deserialize, Serialize};
 
-/// What the UI shows (UPD-008). `update_status()` replays the current value first.
+/// What the updater is *doing* (UPD-008). The retained offer is separate
+/// ([`UpdateSnapshot::offer`]), so checking or a failed check never hides it (UPD-017).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStatus {
     /// Updates are off; `reason` says why (UPD-005, UPD-009).
@@ -19,24 +27,11 @@ pub enum UpdateStatus {
         last_check: Option<String>,
     },
     Checking,
-    /// A newer version exists. `notify_only`: the app can't install it itself (portable zip,
-    /// macOS, Linux) and offers a link to the release page instead (UPD-006).
-    Available {
-        version: String,
-        notes_url: String,
-        notify_only: bool,
-    },
+    /// A payload is being downloaded.
     Downloading {
         version: String,
         done: u64,
         total: u64,
-    },
-    /// Verified installer on disk; *Restart to update* (UPD-007). `needs_elevation` for
-    /// all-users installs (the label says a UAC prompt follows).
-    Ready {
-        version: String,
-        notes_url: String,
-        needs_elevation: bool,
     },
     /// The last check or download failed. Only manual checks surface this (UPD-004).
     Error {
@@ -44,16 +39,100 @@ pub enum UpdateStatus {
     },
 }
 
+/// What *Restart to update* did (UPD-011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyOutcome {
+    /// The installer or the new process was started: the UI saves its state and quits.
+    Restarting,
+    /// An AppImage was replaced but the new process couldn't be started; the app keeps running
+    /// and the offer is in its *Installed, restart* stage.
+    InstalledRestartManually,
+}
+
+/// What the offer's button does (UPD-006).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferMode {
+    /// *Restart to update*: this installation can install the update itself.
+    Install,
+    /// *Download*: open the release page. Nothing is downloaded and no install is ever reported.
+    Download,
+}
+
+/// Where the offer is in its life (UPD-017). `Applying` exists in memory only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OfferStage {
+    /// The install payload is being fetched or verified: no button yet.
+    Downloading,
+    /// Actionable: the verified payload is ready (install) or the offer is a *Download* one.
+    Ready,
+    /// *Restart to update* is running (memory only; a second click is ignored).
+    Applying,
+    /// The new version is installed but the new process didn't start; a click retries the start.
+    InstalledRestart,
+}
+
+/// The retained update offer as the UI sees it (UPD-015, UPD-009).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateOffer {
+    /// The offered version (SemVer text).
+    pub version: String,
+    /// The release notes page of that version.
+    pub notes_url: String,
+    pub mode: OfferMode,
+    pub stage: OfferStage,
+    /// An all-users Windows install: a UAC prompt follows *Restart to update*.
+    pub needs_elevation: bool,
+    /// Installing this version failed: it stays a *Download* offer until a newer one arrives.
+    pub install_failed: bool,
+}
+
+/// Activity plus the retained offer, replayed first by `update_status()` (UPD-008, UPD-011).
+/// `revision` increases on every change, so a UI can drop a stale snapshot (NFR-005).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateSnapshot {
+    pub status: UpdateStatus,
+    pub offer: Option<UpdateOffer>,
+    pub revision: u64,
+}
+
+impl UpdateSnapshot {
+    /// The snapshot of a build or a state with no updater: disabled, no offer.
+    #[must_use]
+    pub fn unavailable() -> Self {
+        Self {
+            status: UpdateStatus::Disabled {
+                reason: DisabledReason::Unavailable,
+            },
+            offer: None,
+            revision: 0,
+        }
+    }
+}
+
 /// Why updates are off (UPD-005). Settings shows a different note for each (UPD-009).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisabledReason {
     /// An administrator policy (`DisableUpdates`): everything off, *Check now* hidden.
     Policy,
-    /// The user turned automatic checks off; *Check now* still works.
+    /// The user turned automatic checks off; *Check now* and the retained offer still work.
     Setting,
-    /// Not in this build (no `updater` feature), `DOCKERING_DISABLE_UPDATES`, or demo mode.
+    /// Not in this build (no `updater` feature), `DOCKERING_DISABLE_UPDATES`, demo mode, or no
+    /// trust keys.
     Unavailable,
 }
+
+impl DisabledReason {
+    /// Policy, env, demo, no feature and no keys suppress every action and the button but keep
+    /// the retained file (UPD-017 (8)); only the setting leaves explicit actions alone.
+    #[must_use]
+    pub fn is_hard(self) -> bool {
+        !matches!(self, Self::Setting)
+    }
+}
+
+/// The `Protocol` error text of a second `apply_update()` while one runs (UPD-011); the UI
+/// ignores that error silently.
+pub const ALREADY_APPLYING: &str = "already being applied";
 
 /// Result of a manual `check_for_updates()`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +142,8 @@ pub enum UpdateCheck {
     Disabled,
 }
 
-/// Persisted updater state (`state.json` → `updates`, UPD-012).
+/// Persisted updater state (`state.json` → `updates`, UPD-012). The retained offer lives in
+/// `<data-local>/updates/offer.json`, not here.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UpdateState {
@@ -75,8 +155,6 @@ pub struct UpdateState {
     pub last_run_version: Option<String>,
     /// Version whose "ready to install" notification was already shown (once per version).
     pub notified_version: Option<String>,
-    /// Version whose installer is downloaded and verified, kept across restarts (UPD-007).
-    pub pending_version: Option<String>,
 }
 
 /// Environment switch that turns updates off (UPD-005).
@@ -151,400 +229,32 @@ pub(crate) fn older(a: &str, b: &str) -> bool {
 }
 
 #[cfg(feature = "updater")]
-pub(crate) use service::*;
-
+mod apply;
 #[cfg(feature = "updater")]
-mod service {
-    use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+mod flow;
+#[cfg(feature = "updater")]
+mod model;
 
-    use dk_core::{EngineError, EngineResult};
-    use dk_update::source::release_asset_name;
-    use dk_update::{InstallKind, PlatformAsset, UpdateError, UpdateSource};
-    use tokio::sync::watch;
-    use tokio_util::sync::CancellationToken;
-
-    use super::*;
-    use crate::hub::{HubInner, lock};
-
-    /// First automatic check after startup (UPD-004).
-    pub(crate) const FIRST_CHECK: Duration = Duration::from_secs(30);
-    /// Then daily, ± 1 h jitter.
-    pub(crate) const INTERVAL: Duration = Duration::from_secs(24 * 3600);
-    pub(crate) const JITTER_SECS: u64 = 3600;
-
-    /// A downloaded, verified installer (UPD-007). Kept with its manifest entry so `apply` can
-    /// verify the file again right before running it (the updates dir is user-writable).
-    #[derive(Clone)]
-    pub(crate) struct Pending {
-        pub(crate) path: PathBuf,
-        pub(crate) version: String,
-        pub(crate) notes_url: String,
-        pub(crate) asset: PlatformAsset,
-    }
-
-    /// Hub-owned updater state.
-    pub(crate) struct State {
-        pub(crate) status: watch::Sender<UpdateStatus>,
-        pub(crate) source: Arc<dyn UpdateSource>,
-        pub(crate) kind: InstallKind,
-        pub(crate) current: semver::Version,
-        pub(crate) keys: Vec<String>,
-        pub(crate) running_exe: Option<PathBuf>,
-        /// Verified installer waiting for *Restart to update*.
-        pub(crate) ready: Mutex<Option<Pending>>,
-        /// Id of the latest *manual* check; a manual check superseded by a newer one returns
-        /// `Cancelled` (UPD-011). Automatic checks don't touch it.
-        pub(crate) request: std::sync::atomic::AtomicU64,
-        /// Serialises check + download.
-        pub(crate) busy: tokio::sync::Mutex<()>,
-        /// Cancelled when updates get turned off at runtime.
-        pub(crate) schedule: Mutex<Option<CancellationToken>>,
-    }
-
-    impl State {
-        pub(crate) fn new(
-            source: Arc<dyn UpdateSource>,
-            kind: InstallKind,
-            current: &str,
-            keys: Vec<String>,
-        ) -> Self {
-            let (status, _) = watch::channel(UpdateStatus::Idle { last_check: None });
-            Self {
-                status,
-                source,
-                kind,
-                current: semver::Version::parse(current)
-                    .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
-                keys,
-                running_exe: std::env::current_exe().ok(),
-                ready: Mutex::new(None),
-                request: std::sync::atomic::AtomicU64::new(0),
-                busy: tokio::sync::Mutex::new(()),
-                schedule: Mutex::new(None),
-            }
-        }
-
-        /// Production state: GitHub source, embedded keys, detected install kind.
-        pub(crate) fn production() -> Option<Self> {
-            let version = env!("CARGO_PKG_VERSION");
-            let source = match dk_update::GithubSource::new(version) {
-                Ok(s) => Arc::new(s) as Arc<dyn UpdateSource>,
-                Err(e) => {
-                    tracing::warn!(error = %e, "updater: HTTP client unavailable");
-                    return None;
-                }
-            };
-            Some(Self::new(
-                source,
-                dk_update::install_kind::detect_current(),
-                version,
-                dk_update::keys::PUBLIC_KEYS
-                    .iter()
-                    .map(|k| (*k).to_owned())
-                    .collect(),
-            ))
-        }
-
-        pub(crate) fn set(&self, status: UpdateStatus) {
-            self.status.send_replace(status);
-        }
-    }
-
-    fn engine_err(e: UpdateError) -> EngineError {
-        EngineError::protocol(e.to_string())
-    }
-
-    /// `<data-local>/updates` (UPD-012): next to the logs, never in the roaming profile.
-    fn updates_dir(inner: &HubInner) -> PathBuf {
-        inner.paths.log_dir.parent().map_or_else(
-            || inner.paths.data_dir.join("updates"),
-            |p| p.join("updates"),
-        )
-    }
-
-    fn ready_status(u: &State, p: &Pending) -> UpdateStatus {
-        UpdateStatus::Ready {
-            version: p.version.clone(),
-            notes_url: p.notes_url.clone(),
-            needs_elevation: u.kind == InstallKind::InnoMachine,
-        }
-    }
-
-    fn now_rfc3339() -> Option<String> {
-        time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .ok()
-    }
-
-    fn idle_status(inner: &HubInner) -> UpdateStatus {
-        UpdateStatus::Idle {
-            last_check: inner.ui_state().updates.last_check,
-        }
-    }
-
-    /// Called from `HubInner::start_on`: cleanup, the "updated to" marker, and the schedule.
-    pub(crate) fn start(inner: &Arc<HubInner>) {
-        let Some(u) = inner.updates.as_ref() else {
-            return;
-        };
-        let setting = lock(&inner.config).updates.check;
-        if let Some(reason) = disabled_reason(true, inner.demo, setting) {
-            if reason != DisabledReason::Setting || lock(&u.ready).is_none() {
-                u.set(UpdateStatus::Disabled { reason });
-            }
-            // Policy, env, or demo: no network, and nothing pending is kept.
-            if reason != DisabledReason::Setting {
-                return;
-            }
-            // Only the setting is off: no schedule, but restore a pending update.
-            inner.handle.spawn(restore_pending(inner.clone()));
-            return;
-        }
-        if lock(&u.ready).is_none() {
-            u.set(idle_status(inner));
-        }
-        let token = inner.shutdown.child_token();
-        *lock(&u.schedule) = Some(token.clone());
-        inner.handle.spawn(schedule(inner.clone(), token));
-    }
-
-    /// UPD-007: a downloaded update stays offered across restarts. The pending version is in
-    /// `state.json`; its file is only trusted again after a fresh signed-manifest check, so here
-    /// we only keep the file (cleanup) and let the next check pick it up without downloading.
-    async fn restore_pending(inner: Arc<HubInner>) {
-        let pending = inner.ui_state().updates.pending_version;
-        dk_update::cleanup::cleanup(&updates_dir(&inner), pending.as_deref()).await;
-    }
-
-    /// Re-evaluates the gates after a Settings change (`[updates] check`).
-    pub(crate) fn settings_changed(inner: &Arc<HubInner>) {
-        let Some(u) = inner.updates.as_ref() else {
-            return;
-        };
-        let setting = lock(&inner.config).updates.check;
-        let running = lock(&u.schedule).is_some();
-        match disabled_reason(true, inner.demo, setting) {
-            Some(reason) => {
-                if let Some(t) = lock(&u.schedule).take() {
-                    t.cancel();
-                }
-                // An already verified update stays installable (it was the user's choice).
-                if reason != DisabledReason::Setting || lock(&u.ready).is_none() {
-                    u.set(UpdateStatus::Disabled { reason });
-                }
-            }
-            None if !running => start(inner),
-            None => {}
-        }
-    }
-
-    async fn schedule(inner: Arc<HubInner>, token: CancellationToken) {
-        restore_pending(inner.clone()).await;
-        let mut delay = FIRST_CHECK;
-        loop {
-            tokio::select! {
-                _ = token.cancelled() => return,
-                _ = tokio::time::sleep(delay) => {}
-            }
-            if let Err(e) = check(&inner, false).await {
-                tracing::info!(error = %e, "automatic update check failed");
-            }
-            let jitter = rand::random::<u64>() % (2 * JITTER_SECS + 1);
-            delay = INTERVAL + Duration::from_secs(jitter) - Duration::from_secs(JITTER_SECS);
-        }
-    }
-
-    /// One check (+ download when the install kind supports it). `manual` surfaces errors.
-    pub(crate) async fn check(inner: &Arc<HubInner>, manual: bool) -> EngineResult<UpdateCheck> {
-        let Some(u) = inner.updates.as_ref() else {
-            return Ok(UpdateCheck::Disabled);
-        };
-        let setting = lock(&inner.config).updates.check;
-        if let Some(reason) = disabled_reason(true, inner.demo, setting) {
-            // A manual check while only the setting is off still runs (Settings → *Check
-            // now*), but never against policy, env, or demo.
-            if reason != DisabledReason::Setting || !manual {
-                return Ok(UpdateCheck::Disabled);
-            }
-        }
-        use std::sync::atomic::Ordering::SeqCst;
-        let request = manual.then(|| u.request.fetch_add(1, SeqCst) + 1);
-        let superseded = || request.is_some_and(|r| u.request.load(SeqCst) != r);
-        let _busy = u.busy.lock().await;
-        if superseded() {
-            // A newer manual check superseded this one (UPD-011).
-            return Err(EngineError::Cancelled);
-        }
-        if !manual && lock(&u.schedule).as_ref().is_none_or(|t| t.is_cancelled()) {
-            // Turned off while this automatic check waited.
-            return Ok(UpdateCheck::Disabled);
-        }
-        let had_ready = lock(&u.ready).clone();
-        if had_ready.is_none() {
-            u.set(UpdateStatus::Checking);
-        }
-        let result = check_inner(inner, u).await;
-        let stale = superseded();
-        let summary = match &result {
-            Ok(UpdateCheck::UpToDate) => "up to date".to_owned(),
-            Ok(UpdateCheck::Available { version }) => format!("{version} available"),
-            Ok(UpdateCheck::Disabled) => "disabled".to_owned(),
-            Err(e) => e.to_string(),
-        };
-        let checked_at = now_rfc3339();
-        inner.update_ui_state(|s| {
-            s.updates.last_check = checked_at.clone();
-            s.updates.last_result = Some(summary);
-        });
-        // `Checking`/`Downloading` never outlive the check (a failed download must not leave
-        // "Downloading… n%" behind). `Available`/`Ready` set by `check_inner` stay.
-        let in_flight = matches!(
-            *u.status.borrow(),
-            UpdateStatus::Checking | UpdateStatus::Downloading { .. }
-        );
-        let ready_now = lock(&u.ready).clone();
-        match (&result, ready_now) {
-            // A failed re-check never hides an update that is already verified on disk.
-            (Err(_), Some(p)) => u.set(ready_status(u, &p)),
-            (Err(e), None) if manual && !stale && in_flight => u.set(UpdateStatus::Error {
-                message: e.to_string(),
-            }),
-            (_, None) if in_flight => u.set(UpdateStatus::Idle {
-                last_check: checked_at,
-            }),
-            _ => {}
-        }
-        let _ = had_ready;
-        if stale {
-            return Err(EngineError::Cancelled);
-        }
-        result.map_err(engine_err)
-    }
-
-    async fn check_inner(inner: &Arc<HubInner>, u: &State) -> Result<UpdateCheck, UpdateError> {
-        let (json, sig) = u.source.fetch_manifest().await?;
-        let keys: Vec<&str> = u.keys.iter().map(String::as_str).collect();
-        dk_update::verify::verify_manifest(&json, &sig, &keys)?;
-        let Some((manifest, asset)) =
-            dk_update::manifest::evaluate(&json, &u.current, &dk_update::manifest::platform_key())?
-        else {
-            // E.g. the pending release was pulled: forget it.
-            *lock(&u.ready) = None;
-            inner.update_ui_state(|s| s.updates.pending_version = None);
-            return Ok(UpdateCheck::UpToDate);
-        };
-        let version = manifest.version.to_string();
-        if let Some(p) = lock(&u.ready).clone()
-            && p.version == version
-            && p.asset == asset
-        {
-            u.set(ready_status(u, &p));
-            return Ok(UpdateCheck::Available { version });
-        }
-        if !u.kind.can_install() {
-            u.set(UpdateStatus::Available {
-                version: version.clone(),
-                notes_url: manifest.notes_url.clone(),
-                notify_only: true,
-            });
-            return Ok(UpdateCheck::Available { version });
-        }
-        let path = download(inner, u, &version, &asset).await?;
-        if let Some(exe) = u.running_exe.clone() {
-            // WinVerifyTrust blocks (and may build a certificate chain): keep it off the
-            // runtime's worker threads.
-            let installer = path.clone();
-            let trust = tokio::task::spawn_blocking(move || {
-                dk_update::authenticode::check_installer(&installer, &exe)
-            })
-            .await
-            .map_err(|e| UpdateError::Io(e.to_string()))?;
-            if let Err(e) = trust {
-                let _ = tokio::fs::remove_file(&path).await;
-                return Err(e);
-            }
-        }
-        let pending = Pending {
-            path,
-            version: version.clone(),
-            notes_url: manifest.notes_url,
-            asset,
-        };
-        u.set(ready_status(u, &pending));
-        *lock(&u.ready) = Some(pending);
-        inner.update_ui_state(|s| s.updates.pending_version = Some(version.clone()));
-        Ok(UpdateCheck::Available { version })
-    }
-
-    async fn download(
-        inner: &Arc<HubInner>,
-        u: &State,
-        version: &str,
-        asset: &PlatformAsset,
-    ) -> Result<PathBuf, UpdateError> {
-        let root = updates_dir(inner);
-        dk_update::cleanup::cleanup(&root, Some(version)).await;
-        let dir = root.join(version);
-        let name = release_asset_name(&asset.url, version)?;
-        let existing = dir.join(&name);
-        if dk_update::verify::verify_file(&existing, &asset.sha256, asset.size)
-            .await
-            .is_ok()
-        {
-            return Ok(existing);
-        }
-        let status = u.status.clone();
-        let v = version.to_owned();
-        status.send_replace(UpdateStatus::Downloading {
-            version: v.clone(),
-            done: 0,
-            total: asset.size,
-        });
-        u.source
-            .download(
-                asset,
-                &dir,
-                &name,
-                Box::new(move |done, total| {
-                    status.send_replace(UpdateStatus::Downloading {
-                        version: v.clone(),
-                        done,
-                        total,
-                    });
-                }),
-            )
-            .await
-    }
-
-    /// Starts the verified installer (UPD-007). The UI quits right after this resolves.
-    pub(crate) fn apply(inner: &Arc<HubInner>) -> EngineResult<()> {
-        let Some(u) = inner.updates.as_ref() else {
-            return Err(EngineError::protocol("updates are disabled"));
-        };
-        let Some(p) = lock(&u.ready).clone() else {
-            return Err(EngineError::protocol("no update is ready to install"));
-        };
-        // UPD-003: the file sits in a user-writable dir and may have been verified days ago.
-        // Check it again right before running it (this runs on a blocking thread).
-        let verified = futures::executor::block_on(dk_update::verify::verify_file(
-            &p.path,
-            &p.asset.sha256,
-            p.asset.size,
-        ));
-        let trusted = verified.and_then(|()| match &u.running_exe {
-            Some(exe) => dk_update::authenticode::check_installer(&p.path, exe).map(drop),
-            None => Ok(()),
-        });
-        if let Err(e) = trusted {
-            *lock(&u.ready) = None;
-            u.set(idle_status(inner));
-            return Err(engine_err(e));
-        }
-        dk_update::apply::spawn_installer(&p.path, u.kind).map_err(engine_err)
-    }
-}
+#[cfg(all(feature = "updater", test))]
+pub(crate) use apply::fakes;
+// Tier 1 of the update end-to-end plan (REL-085): the whole mechanism below the UI over real
+// HTTP on loopback. Wired from here (the file sits next to the other `updates_*_tests.rs`).
+#[cfg(all(feature = "updater", test))]
+#[path = "updates_http_tests.rs"]
+mod updates_http_tests;
+#[cfg(feature = "updater")]
+#[allow(unused_imports)]
+pub(crate) use apply::{
+    ApplyFailure, ApplyJob, ApplyResult, ApplyStrategy, FailureKind, Installers, SystemStrategy,
+    apply as apply_update,
+};
+#[cfg(feature = "updater")]
+pub(crate) use flow::{check, settings_changed, start};
+#[cfg(feature = "updater")]
+#[allow(unused_imports)]
+pub(crate) use model::{
+    EnvFn, FIRST_CHECK, Host, INTERVAL, JITTER_SECS, State, UpdaterInit, next_delay,
+};
 
 #[cfg(test)]
 mod tests {
@@ -576,5 +286,57 @@ mod tests {
             );
             assert_eq!(disabled_reason(true, false, true), None);
         }
+    }
+
+    #[test]
+    fn upd_005_only_the_setting_is_a_soft_disable() {
+        assert!(DisabledReason::Policy.is_hard());
+        assert!(DisabledReason::Unavailable.is_hard());
+        assert!(!DisabledReason::Setting.is_hard());
+    }
+
+    #[test]
+    fn upd_011_unavailable_snapshot_has_no_offer() {
+        let s = UpdateSnapshot::unavailable();
+        assert_eq!(
+            s.status,
+            UpdateStatus::Disabled {
+                reason: DisabledReason::Unavailable
+            }
+        );
+        assert_eq!((s.offer, s.revision), (None, 0));
+    }
+
+    /// UPD-012: `state.json` keeps only four fields; a file written by an older build that
+    /// still has `pending_version` loads (the field is ignored), and it isn't written back.
+    #[test]
+    fn upd_012_old_state_json_with_pending_version_loads() {
+        let old = r#"{
+            "last_check": "2026-10-03T08:15:42Z",
+            "last_result": "up to date",
+            "last_run_version": "0.3.0",
+            "notified_version": "0.3.0",
+            "pending_version": "0.4.0"
+        }"#;
+        let state: UpdateState = serde_json::from_str(old).expect("old file loads");
+        assert_eq!(state.last_check.as_deref(), Some("2026-10-03T08:15:42Z"));
+        assert_eq!(state.last_run_version.as_deref(), Some("0.3.0"));
+        assert_eq!(state.notified_version.as_deref(), Some("0.3.0"));
+        let written = serde_json::to_value(&state).expect("serialise");
+        let keys: std::collections::BTreeSet<&str> = written
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from([
+                "last_check",
+                "last_result",
+                "last_run_version",
+                "notified_version"
+            ])
+        );
     }
 }

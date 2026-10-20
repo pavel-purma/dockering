@@ -25,8 +25,8 @@
 | `cargo-nextest` | `cargo nextest run` | `cargo install cargo-nextest --locked` |
 | `cargo-deny` | REL-003 checks (`deny.toml`) | `cargo install cargo-deny --locked` |
 | `cargo-about` | Regenerating `THIRD_PARTY_LICENSES.html` (REL-002; CI fails if it's stale) | `cargo install cargo-about --locked --features cli` |
-| `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux) | `cargo install cargo-packager --locked --version 0.11.8` |
-| PowerShell 7 (`pwsh`) (REL-018) | `scripts/verify-release.ps1`, which the `/release` skill runs against every draft | `winget install Microsoft.PowerShell` · preinstalled on GitHub runners |
+| `cargo-packager` **0.11.8** (pinned; `packaging/packager.toml` is checked against its schema) | `cargo xtask package` / `dist` (macOS, Linux), and `scripts/linux-update/build-appimages.sh` (REL-085: the two AppImages of the update end-to-end test; Linux host, several GB of disk below the target directory, so not a small tmpfs; the script sets `NO_STRIP=1` for linuxdeploy, whose bundled `strip` aborts on the `.relr.dyn` sections of current distributions' libraries, seen on Arch) | `cargo install cargo-packager --locked --version 0.11.8` |
+| PowerShell 7 (`pwsh`) (REL-018) | `scripts/verify-release.ps1`, which the `/release` skill runs against every draft next to `cargo xtask verify-update-artifacts` (REL-084; that command needs only cargo: minisign is a Rust crate). `scripts/tests/test_verify_release_wording.py` also runs the verifier on a fake bundle when `pwsh` exists and skips those tests without it | `winget install Microsoft.PowerShell` · preinstalled on GitHub runners |
 | `release-plz` (dormant; don't enable with the skill, REL-010) | Bot-driven release PRs, only if the skill is retired | `cargo install release-plz --locked` |
 | Inno Setup **6.3+** (`ISCC.exe`) (REL-020) | `cargo xtask package` on Windows | CI checks and installs it if needed · `winget install JRSoftware.InnoSetup` |
 
@@ -38,8 +38,9 @@ most three package attempts, and detaches only a reported disk whose image path 
 inside the current target distribution directory. Other failures retain their original exit status.
 
 **Release signing** is optional for the explicitly authorized unsigned releases (REL-016).
-Unsigned mode skips signing and notarization even when secrets exist and builds without the
-updater. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
+Unsigned mode skips OS signing/notarization even when secrets exist. The independent
+`UPDATER=none|all` gate controls the updater on all six targets (REL-083, implemented in `release.yml`; the updater's behaviour in the app is planned), not OS signing.
+Updater-enabled unsigned binaries still have a signed manifest. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
 expose an `unsigned` boolean defaulting to true. Public build-provenance attestations remain
 independent of signing. The signed channel (`PUBLIC_RELEASES=true`) supports `WINDOWS_SIGNING` =
 `signpath` | `azure` and, independently, `MACOS_SIGNING` = `apple` | `none` (REL-034); its secrets live
@@ -49,7 +50,7 @@ SignPath: `SIGNPATH_API_TOKEN` and the variables `SIGNPATH_ORGANIZATION_ID`, `SI
 configurations are in `packaging/signpath/`.
 Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
-Updater: `UPDATE_SIGNING_KEY` (minisign), with the public keys in `crates/dk-update/src/keys.rs`.
+Updater: `UPDATE_SIGNING_KEY` (minisign), reviewed current/next public keys in `crates/dk-update/src/keys.rs`, and `UPDATER` (`none` | `all`, default none; REL-083). A manual run has the input `updater` = `inherit` (default) | `none` | `all`, so an unsigned or signed rehearsal can build the updater before the variable is set. Missing keys fail closed. The manifest is signed when the updater is built or the build is OS-signed, and `cargo xtask verify-update-artifacts` (REL-084) requires the **first** key of `PUBLIC_KEYS` to have signed it. The workflow gate, the evidence files and that command are implemented; the updater's behaviour in the app is planned.
 
 ## Cargo profiles
 
@@ -68,13 +69,15 @@ Updater: `UPDATE_SIGNING_KEY` (minisign), with the public keys in `crates/dk-upd
 | `integration-docker` | ubuntu-24.04 (Docker preinstalled) | `cargo nextest run -p dk-engine-docker --features it` against the real dockerd |
 | `build` | x86_64 + aarch64 for Linux (`ubuntu-24.04`, `ubuntu-24.04-arm`), Windows (`windows-2025`, `windows-11-arm`), macOS (`macos-15` arm64, `macos-15-intel`/cross) | `cargo build --release` + package (on `main`). On Windows, every push and PR also builds the Inno installer (x64, arm64) and runs silent install → `--version` → uninstall (REL-014) |
 | `gate` (`CI gate`) *(REL-081)* | ubuntu-24.04, `if: always()` | Succeeds only if `lint`, `test`, `integration-docker` and `build` all succeeded. The one `ci.yml` check the ruleset requires (REL-080). |
-| `release` | on `v*` tags or manual dispatch; 6 targets | Verify version/changelog/channel configuration → package six targets (signed channel: Windows files go through the signing provider; macOS per `MACOS_SIGNING`) → require all 12 distributions → manifest (signed and checked against the app's public keys in the signed channel), notes, SHA256SUMS → public provenance → review artifact; tag runs create a draft. Explicit unsigned mode (REL-016); complete-asset validation (REL-017). |
+| `release` | on `v*` tags or manual dispatch; 6 targets | Verify independent signing/updater gates → package six targets → require all 12 distributions → manifest (signature required with updater=all OR signed OS mode; REL-083/084), notes, SHA256SUMS → public provenance → review artifact; tags create drafts only. Native installation claims require REL-087. Gate revision planned, not yet implemented. |
 | `winget` *(planned)* | `release: published` (stable only) | Open a `microsoft/winget-pkgs` PR (REL-041) |
 | `release-plz` *(dormant)* | push to `main` / `release/*` | Skips without the release-bot secrets. Not used while the `/release` skill cuts releases (REL-010) |
 | `pr-title` | pull_request | The PR title is a conventional commit (it becomes the squash-commit message that `cargo xtask release-plan` classifies, REL-011). Required by the ruleset (REL-080). |
 | Dependabot | weekly (Mondays), `.github/dependabot.yml` | Version-update PRs for `cargo` and `github-actions`, titled `chore(deps): …`. Minor/patch bumps grouped per ecosystem; majors separate. Security updates are on too. |
 | `wslc-abi-watch` | weekly schedule, ubuntu-24.04 | `cargo xtask wslc-abi-check latest`. If the latest `microsoft/WSL` release changed `wslc.idl`, open an issue (20 §5.7). |
 | `linux-smoke` *(REL-070…077, REL-079; release and schedule triggers not yet exercised)* | `release: published`, weekly, manual, PRs touching it; ubuntu-24.04 runner, four distribution containers | Installs the published Linux x86_64 packages into Ubuntu 24.04/26.04, Fedora and Arch containers, launches the app on Xvfb and headless sway, walks the pages, quits, keeps screenshots. See [distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079). |
+| `linux-update-e2e` *(REL-085/086; planned)* | weekly, manual, relevant PRs; Linux runner, `contents: read`, no secrets; not a required check | One seam-enabled old AppImage and one release-shaped new AppImage; scenarios S1 (FUSE and extract-and-run) to S4; screenshots and request log. [Distribution §9](features/distribution.md#9-cross-platform-update-gate-and-native-tests-rel-083087). |
+| Windows updater acceptance *(REL-087; planned)* | `installer-smoke.ps1` update leg on Windows x64/ARM64 runners; spike W1 on a real machine | The installer started with the updater's argv replaces the files and relaunches; unsigned trust, share-locked start and UAC checks are manual. macOS has no installation (UPD-016). Linux runs cannot complete these gates. |
 | `macos-smoke` *(REL-078, REL-079; green for a pull request, release and schedule triggers not yet exercised)* | `release: published`, weekly, manual (tag or draft run), PRs touching it; hosted macOS 15 arm64, macOS 15 Intel and macOS 26 arm64 runners | Installs the published `.dmg` of the runner's architecture, launches the app with `--demo` and on an upgrade profile, walks the pages through System Events, quits, checks Gatekeeper's behaviour on a quarantined copy, keeps screenshots. See [distribution §8](features/distribution.md#8-install-and-launch-smoke-test-linux-and-macos-rel-070079). |
 
 Caching: `Swatinem/rust-cache`, saved from `main` only (also when a test fails) and restored by PRs. Dev/test builds carry no debuginfo (`CARGO_PROFILE_DEV_DEBUG=0`). The Windows `test` job builds on a trusted ReFS Dev Drive. Linux runners install the prerequisites above.
@@ -115,7 +118,7 @@ The macOS `.dmg` is built by cargo-packager's pinned `create-dmg` script, which 
 
 Releases go out through GitHub Releases and OS package managers (winget; Homebrew cask and Flathub post-v1).
 
-[distribution.md](features/distribution.md) UPD-001…012, ADR-0006: an opt-out updater, compiled into the signed/updater channel only (`--features updater` when `PUBLIC_RELEASES=true` and unsigned mode is false). It reads a minisign-signed `dockering-update.json` from the latest GitHub Release. Windows installs get *Restart to update*; portable zip, macOS, and Linux get a notification only. The release flow standard is REL-010.
+[distribution.md](features/distribution.md) UPD-001…017 and [ADR-0007](../plan/adr/0007-cross-platform-updater.md): a shared opt-out updater on Windows, macOS and Linux (schedule, manual checks, signed-manifest trust, one notification per version, title-bar button, retained offer, Settings). `UPDATER=none|all` is independent of OS signing and a signed manifest stays mandatory; updates install without OS code signing. Only the install strategy differs: the Inno installer (Windows) and an in-place AppImage swap (Linux) install; macOS (in-app install deferred, UPD-016) and every other install show *Download*, never install-success. Gate and artifact checks: REL-083/084/087. Release flow: REL-010.
 
 ## Versioning
 

@@ -71,6 +71,9 @@ caption_frames() {
 trap caption_frames EXIT
 
 export LANG=C.UTF-8 HOME=/root XDG_RUNTIME_DIR=/tmp/xdg-runtime
+# no launch of the app under test checks for updates: with the updater built in (UPDATER=all) a real-mode launch would
+# fetch GitHub 30 s in, which is noise in REL-075 and unrelated to what this test proves (REL-085, plan §3 decision 14)
+export DOCKERING_DISABLE_UPDATES=1
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 rm -rf "$HOME/.config/dockering" "$HOME/.local/share/dockering" /tmp/dockering-demo-*
 
@@ -268,7 +271,7 @@ crash=""
 
 # ---- launch ---------------------------------------------------------------------------------------
 step "launch ${BIN[*]} ${ARGS[*]} on $DISPLAY_KIND"
-RUST_LOG=info "${BIN[@]}" "${ARGS[@]}" >"$OUT/app.stdout" 2>"$OUT/app.stderr" &
+DOCKERING_DISABLE_UPDATES=1 RUST_LOG=info "${BIN[@]}" "${ARGS[@]}" >"$OUT/app.stdout" 2>"$OUT/app.stderr" &
 APP=$!
 tw=$(date +%s.%N)
 wid=""

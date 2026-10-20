@@ -10,7 +10,7 @@ Running a release: [release.md](release.md) or the `/release` skill.
 |---|---|---|---|
 | `dockering.exe` (Windows x64, ARM64) | Authenticode, SHA-256, RFC 3161 timestamp | SignPath Foundation | `release.yml`, `scripts/verify-release.ps1`, the app's updater (UPD-003) |
 | `Dockering-Setup-<arch>.exe` | the same | the same | the same |
-| `dockering-update.json` | minisign (Ed25519) → `dockering-update.json.minisig` | the Dockering update key | `cargo xtask verify-manifest`, the app |
+| `dockering-update.json` | minisign (Ed25519) → `dockering-update.json.minisig`, whenever `sign_manifest` is true: `UPDATER=all` **or** an OS-signed build (REL-083) | the Dockering update key (the **first** key of `PUBLIC_KEYS`) | `cargo xtask verify-update-artifacts` (REL-084; `verify-manifest` is its narrower form), the app |
 | every release file | GitHub build-provenance attestation | GitHub Actions | `gh attestation verify` |
 | macOS DMGs | Developer ID + notarisation, only when `MACOS_SIGNING=apple` (REL-034) | not set up | `codesign`, `spctl` |
 | Portable zips | the `dockering.exe` inside is signed; the zip itself is not | | `SHA256SUMS`, attestations |
@@ -107,16 +107,16 @@ gh secret set SIGNPATH_API_TOKEN --env release        # paste the token at the p
 `PUBLIC_RELEASES` stays unset until phase 7: a branch rehearsal needs no tag, and tags stay unsigned
 until then.
 
-### Phase 4: update-manifest key (agent + you)
+### Phase 4: update-manifest key (you; the agent only receives the public keys)
 
 The updater accepts only a manifest signed with a key whose public half is compiled into the app
 (UPD-003). Until then `PUBLIC_KEYS` in `crates/dk-update/src/keys.rs` is empty and updates fail
-closed. The agent:
+closed. This phase needs no OS code signing. No agent generates, sees or stores a private key, so **you**:
 
-1. runs `cargo xtask gen-update-keys <temporary directory outside the repo>` (it writes `current.key`, `next.key` and the `.pub` files, and prints only the public keys);
-2. sets the secret straight from the file, so the key never appears in a command line or the chat: `gh secret set UPDATE_SIGNING_KEY --env release < <dir>/current.key`;
-3. puts both **public** keys into `keys.rs` (`current` first) in a PR titled `chore(update): add the update manifest public keys [UPD-003]` (not user-visible by itself; the updater only exists in signed builds, and the first signed release's notes announce it);
-4. hands you `next.key` to store offline in a password manager (it is the rotation key: if both private keys are lost, installed copies can't update themselves again), then deletes the temporary directory.
+1. run `cargo xtask gen-update-keys <temporary directory outside the repo>` (it writes `current.key`, `next.key` and the `.pub` files, and prints only the public keys; the secret files are created with mode 0600 on Unix, and the command refuses to overwrite an existing key);
+2. set the secret straight from the file, so the key never appears in a command line or a chat: `gh secret set UPDATE_SIGNING_KEY --env release < <dir>/current.key`;
+3. store `next.key` offline in a password manager (it is the rotation key: if both private keys are lost, installed copies can't update themselves again), then delete the temporary directory;
+4. give the agent the two **public** key lines (`current` first); it puts them into `keys.rs` in a reviewed PR titled `chore(update): add the update manifest public keys [UPD-003]`. Updater inclusion is decided by `UPDATER=none|all` ([plan](plan/features/linux-appimage-updates.md), REL-083), not by OS signing, and the manifest signature is mandatory even for OS-unsigned binaries.
 
 ### Phase 5: rehearsal (agent + you)
 
@@ -128,14 +128,29 @@ gh workflow run release.yml --ref main -f unsigned=false
 
 The run builds all six targets and, for each Windows job, submits two signing requests; approve all
 four in SignPath (they appear under the project's *Signing requests*, and SignPath e-mails you).
-The rehearsal binaries don't contain the updater unless `PUBLIC_RELEASES` is already `true`; the
-signature checks don't depend on it. Then the agent downloads the `release-review-<version>`
-artifact and runs:
+The updater is its own switch (REL-083, implemented in `release.yml`), independent of OS signing: the run's
+`update channel:` notice and its `updater` output say what it built. This `-f unsigned=false` rehearsal builds the
+updater only when the `UPDATER` variable is `all`, unless you add `-f updater=none|all` (a branch run's input wins). A rehearsal
+from `main` with `-f updater=all` builds the updater into all six targets whether or not OS signing is used, and
+`-f unsigned=true -f updater=all` needs no SignPath at all; that run, with the update key from Phase 4, is the rehearsal
+required before you set `UPDATER=all`. Because it signs the manifest of the *next* version with the production
+key, its review artifact is kept 7 days. The updater's behaviour in the app (title-bar button, in-app AppImage
+install, retained offer) is still planned: don't set `UPDATER=all` until it lands.
+Then the agent downloads the `release-review-<version>`
+artifact and runs, with `-Expect` for the OS signing mode of that run and `-Updater` for its `updater` output:
 
 ```sh
-pwsh -NoProfile -File scripts/verify-release.ps1 -Dir <dir> -Version <version> -Expect Signed
-cargo xtask verify-manifest --assets <dir>
+pwsh -NoProfile -File scripts/verify-release.ps1 -Dir <dir> -Version <version> -Expect Signed|Unsigned -Updater none|all
+cargo xtask verify-update-artifacts --assets <dir> --version <version> --updater none|all
 ```
+
+`verify-release.ps1` has no cargo and no minisign: it checks the file set (the `.minisig` is required when
+`-Updater all` or `-Expect Signed`, forbidden otherwise) and the notes' update sentence. `verify-update-artifacts` is
+the other half and runs next to it: the `.minisig` must verify against the keys in `keys.rs` **and** have been made by the
+first (current) key, so a `UPDATE_SIGNING_KEY` set to `next.key` fails with "the secret `UPDATE_SIGNING_KEY` is not the
+current key"; the manifest `version` must be `<version>`; and every one of the six platform entries must equal its
+asset's kind, URL, size and SHA-256. The `updater-evidence-<version>` artifact of the run lists, per target, whether the
+unpackaged binary contains the updater (`updater=`) and the test seam (`seam=`, always `false`).
 
 It reports the signer **subject** and **issuer** it observed. Nothing downloaded from a rehearsal is published.
 
@@ -155,8 +170,13 @@ A tag run without it fails in `verify` (REL-032), so a certificate swap can't pa
 gh variable set PUBLIC_RELEASES --body true
 ```
 
-The next `/release` creates the first signed release: tag builds are signed and contain the updater,
-the notes say *Signed release* with the SignPath attribution and, while `MACOS_SIGNING` is `none`,
+`PUBLIC_RELEASES` controls OS signing only (REL-083, implemented in `release.yml`): the next `/release`
+creates the first OS-signed release, with the updater as the `UPDATER` variable says. `UPDATER=all` separately
+turns the updater on everywhere (after the REL-060/084/087 checks, and not before the app side lands: it is planned). An OS-unsigned build with the updater
+still has a signed manifest; an unsigned Windows installer installs on manifest and hash trust, a signed
+Windows exe also pins the installer's subject and issuer, and macOS offers *Download*.
+Developer ID/hardened runtime/notarization and native bundle replacement gate macOS install,
+never discovery on other targets. The notes of an OS-signed release say *Signed release* with the SignPath attribution and, while `MACOS_SIGNING` is `none`,
 that macOS files aren't signed. Because those notes link to the README's *Code signing policy*,
 that release's PR (not the record PR after it) also rewrites the README: the Download notice, the
 *Updates* paragraph and the status paragraph of *Code signing policy*, which gains the attribution
@@ -181,7 +201,7 @@ SmartScreen warnings at once: reputation builds with downloads of that signed fi
 ## Operations
 
 - **Certificate renewal.** When the signing certificate is renewed or replaced, check that `verify-release.ps1` shows the same subject and issuer as the previous release. The updater accepts an installer only when its signer's subject **and issuer** equal those of the running `dockering.exe` (`dk-update/src/authenticode.rs`). If either changed, installed copies reject the update: say so in the release notes, tell users to reinstall, and update `WINDOWS_SIGNER_SUBJECT` before the tag.
-- **Rotating the update key.** `crates/dk-update/keys/README.md`. Installed builds trust the *current* and the *next* key, so rotate to `next` before `current` is lost or exposed.
+- **Rotating the update key.** `crates/dk-update/keys/README.md`. Installed builds trust the *current* and the *next* key, so rotate to `next` before `current` is lost or exposed. The release gate (REL-084) requires the manifest to be signed by the **first** key of `PUBLIC_KEYS`: change the secret and the order of `PUBLIC_KEYS` (`[next, new]`) in the same release, or `cargo xtask verify-update-artifacts` fails.
 - **Key or token exposure.** Revoke the SignPath API token and create another. If the update key leaked, rotate it at once (the old public keys stay compiled into old builds, so also publish a release signed with `next`) and treat releases signed since the exposure as suspect.
-- **SignPath unavailable or the request rejected.** The tag run fails at the signing step and no draft is created. Rerun the failed Windows jobs after the service is back (new requests, new approvals). Only in an emergency, and only with the maintainer's explicit agreement, dispatch the tag with `-f unsigned=true` to ship unsigned and say so in the notes: such a release has no manifest signature, so installed copies won't update to it and users must download it by hand.
+- **SignPath unavailable or the request rejected.** The tag run fails at the signing step and no draft is created. Rerun the failed Windows jobs after the service is back (new requests, new approvals). Only in an emergency, and only with the maintainer's explicit agreement, dispatch the tag with `-f unsigned=true` to ship unsigned and say so in the notes: such a release is not OS-signed, so users must download it by hand (a signed, installed Windows copy refuses an unsigned installer and offers *Download* instead; with `UPDATER=all` the manifest is still signed, and unsigned installs update normally).
 - **Leaving the Foundation, or switching to Azure.** Set `WINDOWS_SIGNING`, its variables and secrets, and `WINDOWS_SIGNER_SUBJECT` to the new signer in one step *before* a release. Installed copies pin the old signer, so they reject the update to the first release signed by the new one; treat it like a certificate change above.

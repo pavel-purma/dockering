@@ -1,8 +1,16 @@
 #Requires -Version 7.3
-# Release verifier (REL-018, REL-032): checks a downloaded release against what release.yml promises.
+# Release verifier (REL-018, REL-032, REL-084): checks a downloaded release against what release.yml promises.
 # Usage: pwsh -NoProfile -File scripts/verify-release.ps1 -Dir <dir> -Version <semver> -Expect Signed|Unsigned
-#          [-Changelog <CHANGELOG.md>] [-Provider signpath|azure] [-SignerSubject <subject DN>] [-Repo owner/name]
-#          [-Attest -Commit <sha> [-SourceRef <ref>]] [-Published] [-LaunchSmoke]
+#          [-Updater none|all] [-Changelog <CHANGELOG.md>] [-Provider signpath|azure] [-SignerSubject <subject DN>]
+#          [-Repo owner/name] [-Attest -Commit <sha> [-SourceRef <ref>]] [-Published] [-LaunchSmoke]
+# -Expect is the OS code-signing mode (Authenticode, certificate tables, the Signed/Unsigned notes). -Updater (default none) is the
+#   update channel the draft was built for (REL-083, the `updater` output of release.yml's verify job), independent of -Expect: the
+#   manifest is signed (sign_manifest) when -Updater is all OR -Expect is Signed, and then dockering-update.json.minisig is
+#   required in the file set; otherwise it is forbidden. The notes must carry the one update sentence of release.yml's notes step
+#   for the case: updater all, updater none with a signed manifest, or updater none with an unsigned one.
+# This script has no cargo and no minisign. `cargo xtask verify-update-artifacts --assets <dir> --version <semver> --updater <none|all>`
+#   runs next to it (the /release skill and the signing rehearsal run both): it verifies the .minisig against the app's compiled-in
+#   keys and that the FIRST (current) key made it, the manifest version, and every platform entry's kind, URL, size and SHA-256 (REL-084).
 # One line per check: [PASS] / [FAIL] / [SKIP] <id>  <detail>, then RESULT. Exit 0 = no FAIL, 1 = a FAIL, 2 = usage error.
 #
 # Check ids: files.set · checksums.format|coverage|match · manifest.schema|version|notes_url|platforms|platform.<key>
@@ -14,6 +22,7 @@ param(
     [string] $Dir,
     [string] $Version,
     [string] $Expect,
+    [string] $Updater = 'none',
     [string] $Changelog,
     [string] $Provider = 'signpath',
     [string] $SignerSubject,
@@ -51,6 +60,14 @@ $LinuxArchs = @(
 )
 $DigestSha256 = '2.16.840.1.101.3.4.2.1'
 $AttributionLine = 'Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)'
+# The one sentence about updates that release.yml's "Release notes from CHANGELOG.md" step writes into the notes (REL-083), by
+# channel: the updater is built ('all'), or not, with a signed ('none-signed') or an unsigned ('none-unsigned') manifest.
+# scripts/tests/test_verify_release_wording.py fails when these and the workflow's sentences differ.
+$UpdateNotes = [ordered]@{
+    'all'           = "Dockering checks for updates in these builds, and the update manifest is signed with the project's update key. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page."
+    'none-signed'   = "Automatic updates are not included in these builds; the update manifest is signed with the project's update key."
+    'none-unsigned' = "Automatic updates are not included in these builds; the update manifest has no signature."
+}
 
 $script:Results = [System.Collections.Generic.List[object]]::new()
 $script:Hashes = @{}
@@ -219,9 +236,19 @@ function Get-ChangelogSection([string] $Text, [string] $Version) {
     ($body -join "`n").Trim()
 }
 
+function Get-UpdaterChannel {
+    # Same formula as release.yml: sign_manifest = (updater == all) or the build is OS-signed (REL-083).
+    if ($script:Ctx.Updater -ceq 'all') { return 'all' }
+    if ($script:Ctx.Expect -eq 'Signed') { return 'none-signed' }
+    'none-unsigned'
+}
+
+# dockering-update.json.minisig is shipped exactly when sign_manifest is true (REL-017, REL-083).
+function Test-ManifestSigned { (Get-UpdaterChannel) -cne 'none-unsigned' }
+
 function Get-ExpectedFiles {
     $names = @($Distributions) + @($Metadata)
-    if ($script:Ctx.Expect -eq 'Signed') { $names += 'dockering-update.json.minisig' }
+    if (Test-ManifestSigned) { $names += 'dockering-update.json.minisig' }
     $names
 }
 
@@ -240,7 +267,9 @@ function Test-FileSet {
     foreach ($item in $actual) {
         if ($expected -cnotcontains $item.Name) { $problems.Add("unexpected $($item.Name)") }
     }
-    if ($script:Ctx.Expect -eq 'Unsigned' -and ($actual.Name -contains 'dockering-update.json.minisig')) { $problems.Add('an unsigned release must not ship a .minisig') }
+    if (-not (Test-ManifestSigned) -and ($actual.Name -contains 'dockering-update.json.minisig')) {
+        $problems.Add('-Updater none with -Expect Unsigned means an unsigned manifest: it must not ship a .minisig')
+    }
     Assert-That 'files.set' ($problems.Count -eq 0) "$($expected.Count) expected files, none missing, empty or extra" ($problems -join '; ')
 }
 
@@ -313,15 +342,22 @@ function Test-Notes {
     $problems = [System.Collections.Generic.List[string]]::new()
     if ($ctx.Expect -eq 'Unsigned') {
         if (-not $notes.Contains('**Unsigned release:**')) { $problems.Add('no **Unsigned release:** note') }
-        if (-not $notes.Contains('Automatic updates are disabled')) { $problems.Add('does not say that automatic updates are disabled') }
     } else {
         if (-not $notes.Contains('**Signed release:**')) { $problems.Add('no **Signed release:** note') }
         if ($notes.Contains('**Unsigned release:**')) { $problems.Add('has the unsigned note') }
         if (-not $notes.Contains('#code-signing-policy')) { $problems.Add('no link to the code signing policy') }
         if ($ctx.Provider -eq 'signpath' -and -not $notes.Contains($AttributionLine)) { $problems.Add('no SignPath attribution') }
     }
+    # REL-083: the notes say what the build contains, by update channel and independently of the OS signing mode.
+    $channel = Get-UpdaterChannel
+    if (-not $notes.Contains($UpdateNotes[$channel])) {
+        $problems.Add("the notes do not carry the update sentence for -Updater $($ctx.Updater) ($channel): $($UpdateNotes[$channel])")
+    }
+    foreach ($other in @($UpdateNotes.Keys | Where-Object { $_ -cne $channel })) {
+        if ($notes.Contains($UpdateNotes[$other])) { $problems.Add("the notes carry the update sentence of another channel ($other)") }
+    }
     if (-not $notes.Contains('**Verify a download:**')) { $problems.Add('no **Verify a download:** note') }
-    Assert-That 'notes.footer' ($problems.Count -eq 0) "$($ctx.Expect) footer" ($problems -join '; ')
+    Assert-That 'notes.footer' ($problems.Count -eq 0) "$($ctx.Expect) footer, updater $($ctx.Updater)" ($problems -join '; ')
 }
 
 # ── checks: Windows ─────────────────────────────────────────────────────────────────────────
@@ -723,6 +759,7 @@ function Test-Usage {
     if (-not $Dir -or -not (Test-Path -LiteralPath $Dir -PathType Container)) { $problems.Add('-Dir must be an existing directory') }
     if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$') { $problems.Add('-Version must be a SemVer version without build metadata') }
     if ($Expect -cnotin 'Signed', 'Unsigned') { $problems.Add('-Expect must be Signed or Unsigned') }
+    if ($Updater -cnotin 'none', 'all') { $problems.Add('-Updater must be none or all') }
     if ($Provider -cnotin 'signpath', 'azure') { $problems.Add('-Provider must be signpath or azure') }
     if ($Repo -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') { $problems.Add('-Repo must be owner/name') }
     if ($Changelog -and -not (Test-Path -LiteralPath $Changelog -PathType Leaf)) { $problems.Add('-Changelog must be an existing file') }
@@ -740,7 +777,7 @@ function Invoke-Main {
         return
     }
     $script:Ctx = [pscustomobject]@{
-        Dir = (Resolve-Path -LiteralPath $Dir).Path; Version = $Version; Expect = $Expect; Changelog = $Changelog
+        Dir = (Resolve-Path -LiteralPath $Dir).Path; Version = $Version; Expect = $Expect; Updater = $Updater; Changelog = $Changelog
         Provider = $Provider; SignerSubject = $SignerSubject; Repo = $Repo; Commit = $Commit; SourceRef = $SourceRef
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem

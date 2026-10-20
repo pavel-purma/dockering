@@ -6,6 +6,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::UpdateError;
+use crate::source::{REPO, release_asset_name};
 
 /// The signed update manifest published with the latest stable GitHub Release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,6 +74,18 @@ pub fn evaluate(
     current: &Version,
     key: &str,
 ) -> Result<Option<(UpdateManifest, PlatformAsset)>, UpdateError> {
+    // UPD-002: an unknown schema means "no update", whatever else is in the file: a newer manifest
+    // shape must not make an old client fail, so `schema` is read before anything else is.
+    #[derive(Deserialize)]
+    struct SchemaProbe {
+        schema: Option<serde_json::Value>,
+    }
+    let probe: SchemaProbe =
+        serde_json::from_slice(json).map_err(|error| UpdateError::Manifest(error.to_string()))?;
+    if probe.schema.as_ref().is_some_and(|s| s.as_u64() != Some(1)) {
+        return Ok(None);
+    }
+
     let manifest: UpdateManifest =
         serde_json::from_slice(json).map_err(|error| UpdateError::Manifest(error.to_string()))?;
 
@@ -86,6 +99,21 @@ pub fn evaluate(
     let Some(asset) = manifest.platforms.get(key).cloned() else {
         return Ok(None);
     };
+
+    // UPD-001: the asset must be this project's release download for exactly this version, so a
+    // signed manifest can't point anywhere else; checked here so no offer (and no Download
+    // fallback) ever exists for a rejected manifest.
+    release_asset_name(&asset.url, &manifest.version.to_string())?;
+    // The release notes open in the user's browser: this project's releases only.
+    if !manifest
+        .notes_url
+        .starts_with(&format!("https://github.com/{REPO}/releases/"))
+    {
+        return Err(UpdateError::Manifest(format!(
+            "unexpected release notes URL {}",
+            manifest.notes_url
+        )));
+    }
 
     Ok(Some((manifest, asset)))
 }
@@ -107,7 +135,7 @@ mod tests {
             "platforms": {
                 "windows-x86_64": {
                     "kind": "inno",
-                    "url": "https://github.com/pavel-purma/dockering/releases/download/v1.2.3/Dockering-Setup-x64.exe",
+                    "url": format!("https://github.com/pavel-purma/dockering/releases/download/v{version}/Dockering-Setup-x64.exe"),
                     "sha256": "00",
                     "size": 1,
                     "future_asset_field": 42
@@ -143,6 +171,102 @@ mod tests {
     }
 
     #[test]
+    fn upd_002_unknown_schema_with_a_new_shape_is_no_update() {
+        // A future manifest may look nothing like schema 1: an old client still reads it as
+        // "no update", never as an error (UPD-002).
+        let current = Version::parse("1.0.0").expect("valid test version");
+        for value in [
+            json!({ "schema": 2, "release": { "version": "9.0.0" }, "assets": [ { "os": "linux" } ] }),
+            json!({ "schema": 2, "version": 9, "platforms": ["linux-x86_64"] }),
+            json!({ "schema": 2 }),
+            json!({ "schema": "2" }),
+            json!({ "schema": 0 }),
+        ] {
+            let bytes = serde_json::to_vec(&value).expect("serializable");
+            assert_eq!(
+                evaluate(&bytes, &current, "windows-x86_64")
+                    .unwrap_or_else(|e| panic!("{value}: {e}")),
+                None,
+                "{value}"
+            );
+        }
+        // No schema at all is not "unknown": it is a malformed manifest.
+        let bytes = serde_json::to_vec(&json!({ "version": "9.0.0" })).expect("serializable");
+        assert!(matches!(
+            evaluate(&bytes, &current, "windows-x86_64"),
+            Err(UpdateError::Manifest(_))
+        ));
+        assert!(matches!(
+            evaluate(b"not json", &current, "windows-x86_64"),
+            Err(UpdateError::Manifest(_))
+        ));
+    }
+
+    #[test]
+    fn upd_001_asset_url_outside_the_pinned_release_is_rejected() {
+        let current = Version::parse("1.0.0").expect("valid test version");
+        let good = "https://github.com/pavel-purma/dockering/releases/download/v1.2.3/Dockering-Setup-x64.exe";
+        for url in [
+            "https://evil.example/pavel-purma/dockering/releases/download/v1.2.3/Dockering-Setup-x64.exe",
+            "https://github.com/someone-else/dockering/releases/download/v1.2.3/Dockering-Setup-x64.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v1.2.4/Dockering-Setup-x64.exe",
+            "http://github.com/pavel-purma/dockering/releases/download/v1.2.3/Dockering-Setup-x64.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v1.2.3/../Dockering-Setup-x64.exe",
+            "https://github.com/pavel-purma/dockering/releases/download/v1.2.3/",
+        ] {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&manifest_json(1, "1.2.3")).expect("json");
+            value["platforms"]["windows-x86_64"]["url"] = json!(url);
+            let bytes = serde_json::to_vec(&value).expect("serializable");
+            assert!(
+                matches!(
+                    evaluate(&bytes, &current, "windows-x86_64"),
+                    Err(UpdateError::Manifest(_))
+                ),
+                "{url}"
+            );
+        }
+        // The pinned URL is accepted, and an entry for another platform is never looked at.
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&manifest_json(1, "1.2.3")).expect("json");
+        assert_eq!(value["platforms"]["windows-x86_64"]["url"], json!(good));
+        value["platforms"]["macos-aarch64"] = value["platforms"]["windows-x86_64"].clone();
+        value["platforms"]["macos-aarch64"]["url"] = json!("https://evil.example/x");
+        let bytes = serde_json::to_vec(&value).expect("serializable");
+        assert!(
+            evaluate(&bytes, &current, "windows-x86_64")
+                .expect("valid")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn upd_001_release_notes_url_outside_the_project_is_rejected() {
+        let current = Version::parse("1.0.0").expect("valid test version");
+        for url in [
+            "https://evil.example/pavel-purma/dockering/releases/tag/v1.2.3",
+            "https://github.com/someone-else/dockering/releases/tag/v1.2.3",
+            "http://github.com/pavel-purma/dockering/releases/tag/v1.2.3",
+            "https://github.com/pavel-purma/dockering/issues/1",
+            "https://github.com.evil.example/pavel-purma/dockering/releases/tag/v1.2.3",
+            "javascript:alert(1)",
+            "",
+        ] {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&manifest_json(1, "1.2.3")).expect("json");
+            value["notes_url"] = json!(url);
+            let bytes = serde_json::to_vec(&value).expect("serializable");
+            assert!(
+                matches!(
+                    evaluate(&bytes, &current, "windows-x86_64"),
+                    Err(UpdateError::Manifest(_))
+                ),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
     fn upd_004_no_downgrade_or_prerelease() {
         let stable = Version::parse("1.2.3").expect("valid test version");
         for version in ["1.2.3", "1.2.2", "2.0.0-rc.1"] {
@@ -174,7 +298,7 @@ mod tests {
       "size": 11703661,
       "url": "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-Setup-x64.exe"
     },
-    "linux-x86_64": { "kind": "appimage", "sha256": "00", "size": 1, "url": "https://github.com/x" }
+    "linux-x86_64": { "kind": "appimage", "sha256": "00", "size": 1, "url": "https://github.com/pavel-purma/dockering/releases/download/v0.2.0/Dockering-x86_64.AppImage" }
   },
   "pub_date": "2026-10-03T00:12:41.1367851Z",
   "schema": 1,

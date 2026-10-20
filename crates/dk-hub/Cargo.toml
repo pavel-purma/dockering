@@ -12,6 +12,9 @@ test-support = ["dk-core/test-support"]
 # In-app updates from GitHub Releases (UPD-001…012). Off by default: dev and distro builds make
 # no update requests; release.yml enables it for public releases (UPD-005).
 updater = ["dep:dk-update", "dep:semver"]
+# REL-086 test seam (loopback update server, test key, short schedule, quit delay, build-time
+# version, marker string). Off by default and never part of a shipped build.
+update-e2e = ["updater", "dk-update/update-e2e"]
 
 [dependencies]
 dk-core.workspace = true

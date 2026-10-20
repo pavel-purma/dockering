@@ -34,7 +34,8 @@ Public GitHub release builds generate build-provenance attestations: `gh attesta
 
 > Downloads are unsigned. Windows may show SmartScreen prompts; macOS builds
 > are not notarized and may require approval in Privacy & Security. See [installation details](docs/release.md#unsigned-installation).
-> Automatic updates and winget are deferred until a signed release.
+> Automatic updates and winget are not available yet: the current release is updated by hand, and the
+> [planned updater](docs/plan/features/linux-appimage-updates.md) needs no code signing.
 
 ### Install on Windows
 
@@ -96,16 +97,18 @@ release, an automated test installs the x86_64 packages on Ubuntu, Fedora, and A
 
 The first unsigned release uses manual updates from the [Releases page](https://github.com/pavel-purma/dockering/releases).
 
-Future builds with the updater enabled check GitHub Releases for a new version once a day. Installed Windows copies
-download it in the background and show **Restart to update** in the status bar. Nothing is
-installed until you click it. Portable, macOS, and Linux builds only tell you that a new version
-is out.
+The [planned updater](docs/plan/features/linux-appimage-updates.md) (not shipped yet) works the same
+on Windows, macOS and Linux and needs no OS code signing: once a day it checks the latest release's signed
+manifest, shows one notification per version and a button in the title bar, and Settings shows the offer.
+On Windows (installer) and on a Linux AppImage in a writable place, **Restart to update** installs it; on
+macOS and every other install the button opens the release page (**Download**). Nothing installs without
+your click. Existing releases still need manual updates.
 
 ## Privacy & network
 
 Dockering talks only to the engines you configure and, through them, to registries. The one
 other request, in future builds with the updater enabled, is the update check: an anonymous HTTPS
-GET of the latest release manifest from `github.com`, with no ids or cookies.
+GET of the latest release manifest from `github.com`, with no ids or cookies. On installs that can update themselves (the Windows installer, a Linux AppImage), a newer version is also downloaded in the background from GitHub's release assets, again anonymously, and is never installed without your click.
 
 You can turn the update check off three ways:
 

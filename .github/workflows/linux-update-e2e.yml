@@ -1,0 +1,111 @@
+# Linux update end-to-end test (REL-085, REL-086). Plan: docs/plan/features/linux-appimage-updates.md §6.5.
+# Two AppImages are built from this tree (the OLD one with the `update-e2e` test seam and the version 0.0.1, the NEW one exactly
+# like a release), then scripts/linux-update/run.sh installs the old one like a user would, in a clean Ubuntu container as an
+# unprivileged user, and drives scenarios S1-S4 through a loopback server and the accessibility tree. The AppImages are artifacts
+# of this run only: they are never release assets, never signed with a real key, and the only key involved is a throwaway one.
+# Not a required check (REL-080): it needs Docker, FUSE and a 20-minute cold build.
+name: Linux update e2e
+run-name: Linux update e2e (${{ github.event_name }}${{ inputs.scenario && format(', {0}', inputs.scenario) || '' }})
+
+on:
+  pull_request:
+    paths:
+      - "crates/dk-update/**"
+      - "crates/dk-hub/src/updates.rs"
+      - "crates/dk-hub/src/updates/**"
+      - "crates/dk-hub/src/updates_*.rs"
+      - "crates/dk-hub/src/single_instance.rs"
+      - "crates/dk-hub/src/e2e.rs"
+      - "crates/dk-hub/src/version.rs"
+      - "crates/dockering/src/shell/**"
+      - "crates/dockering/src/state/updates.rs"
+      - "crates/dockering/src/pages/settings/updates.rs"
+      - "scripts/linux-update/**"
+      - "xtask/src/**"
+      - ".github/workflows/linux-update-e2e.yml"
+  schedule:
+    - cron: "17 4 * * 2" # Tuesdays 04:17 UTC, so a new Ubuntu image or runner change shows up within a week
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run (s1 runs both the extract and the FUSE leg; all runs s1 to s4)"
+        type: choice
+        options: [all, s1, s2, s3, s4]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-update-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep in sync with rust-toolchain.toml (ci.yml checks it) and with release.yml.
+  RUST_TOOLCHAIN: "1.98"
+  PACKAGER_VERSION: "0.11.8"
+  # The image the app runs in. A registry mirror, like the smoke test: an anonymous Docker Hub pull can be rate limited.
+  # The AppImages are built on the runner (Ubuntu 24.04, glibc 2.39), so this image's glibc is enough for them.
+  E2E_IMAGE: mirror.gcr.io/library/ubuntu:24.04
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+jobs:
+  e2e:
+    name: update e2e (S1-S4, Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Linux prerequisites (GPUI Kit)
+        run: bash scripts/bootstrap.sh
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-update-e2e
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version "$PACKAGER_VERSION"
+      - name: Build the old (seam) and the new (release-shaped) AppImage
+        run: |
+          cargo build -p xtask
+          # Two release builds of the whole app: the longest step. build-appimages.sh checks the seam marker (old only) and
+          # `--version` of both AppImages, so a mis-built pair fails here, not as a confusing scenario failure later.
+          bash scripts/linux-update/build-appimages.sh "$RUNNER_TEMP/appimages" --source current
+      - name: FUSE for the mounted leg
+        run: ls -l /dev/fuse
+      - name: Run the scenarios in Docker
+        env:
+          SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.scenario || 'all' }}
+        run: |
+          bash scripts/linux-update/run.sh "$E2E_IMAGE" \
+            --old "$RUNNER_TEMP/appimages/Dockering-old-x86_64.AppImage" \
+            --new "$RUNNER_TEMP/appimages/Dockering-x86_64.AppImage" \
+            --scenario "$SCENARIO" --out "$RUNNER_TEMP/e2e-out"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Linux update e2e'
+            echo '```'
+            cat "$RUNNER_TEMP"/e2e-out/image.txt 2>/dev/null || true
+            for results in "$RUNNER_TEMP"/e2e-out/*/results.txt; do
+              [ -f "$results" ] || continue
+              echo "== ${results#"$RUNNER_TEMP"/e2e-out/}"
+              cat "$results"
+            done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Screenshots, accessibility trees, the request log, the app's log and every scenario's results. The throwaway secret key
+      # is deleted by run.sh before the container starts, and the AppImages are not uploaded.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: linux-update-e2e
+          path: ${{ runner.temp }}/e2e-out
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,6 +1,6 @@
 # Writing the changelogs (REL-011, REL-019)
 
-Both changelogs are written only by the release skill, in the release PR (step 3). Feature PRs
+This file describes the current behaviour only. Both changelogs are written only by the release skill, in the release PR (step 3). Feature PRs
 never touch them. The input is `cargo xtask release-plan` (add `--bodies` for the commit bodies)
 plus, for each commit with a PR, `gh pr view <n> --json title,body,files`. Read the PR text and, if
 it is unclear what a user sees, the diff.
@@ -29,7 +29,7 @@ before and after:
 ```
 
 - **Date:** the current UTC date. The record PR (step 12) corrects it if the publication lands on a later UTC date.
-- **Intro:** only when users need it: the channel (*Downloads are unsigned, as in <previous release>.*, repeating *Automatic updates and winget remain deferred.* while that is true; the first signed release says that Windows files are signed and that macOS stays unsigned), a withdrawn build this one replaces, or an upgrade note.
+- **Intro:** only when users need it: the channel, a withdrawn build this one replaces, or an upgrade note. The channel has two independent parts, so state each only when it is news or when the previous release said it. *OS signing:* *Downloads are unsigned, as in <previous release>.* while `PUBLIC_RELEASES` is not `true`; the first OS-signed release says that Windows files are signed and that macOS stays unsigned while `MACOS_SIGNING` is `none`. *Updater* (`UPDATER`, REL-083; never infer it from the signing): while it is `none`, repeat *Automatic updates and winget remain deferred.* as long as that is true; the first release with `UPDATER=all` says that this build checks GitHub Releases for updates and can be switched off in Settings, and that earlier releases have no updater, so the installed copy is updated by hand once; a release that turns it off again says so. An OS-unsigned build can have the updater, and an OS-signed build can lack it.
 - **Sections** (use only those that have entries, in this order): *Added* (`feat`), *Changed* (`perf`, `refactor`, `revert`, other user-visible commits), *Deprecated*, *Removed*, *Fixed* (`fix`), *Security*. A breaking change starts with `**Breaking:**` in the section it belongs to.
 - **Entries:** one per user-visible change, in the user's words ("The status bar names the active engine"), not the commit's. Describe the difference from the previous *published* release, never text that no release showed. Present tense. One commit can give several entries (a repair PR often fixes several visible things); several commits that make one change give one. Name the platform or engine when it matters (*Windows:*, *WSLC:*). Hardening users can't observe (cancellation, cleanup) gets one combined entry per PR. Don't claim more than the spec does: read the requirement before listing what is or isn't retried. No commit hashes, PR numbers or requirement IDs. Wrap at about 100 columns with two-space continuation indents, like the existing sections.
 - **Skip** `docs`, `test`, `chore`, `ci`, `style` and `build` commits and commits scoped `ci`, `release`, `docs`, `spec` or `deps`, unless the change is visible in the app or the downloads (then it is a normal entry).

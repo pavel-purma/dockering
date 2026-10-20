@@ -5,6 +5,13 @@
 //!
 //! Windows also holds the named mutex `dev.dockering.Dockering` (session-local) for the primary's
 //! lifetime. The Inno Setup installer uses it as `AppMutex` to detect a running Dockering (REL-024).
+//!
+//! The one exception to "a second launch focuses and exits" is the Linux AppImage update relaunch
+//! (UPD-014, UPD-017): the new process is started with [`RELAUNCH_FLAG`] and a piped stdin and
+//! first waits here ([`wait_for_predecessor`]) until the old process is gone, so it becomes the
+//! primary instead of focusing the one that is quitting.
+
+use std::time::Duration;
 
 use futures::channel::mpsc;
 
@@ -80,6 +87,200 @@ fn imp_acquire(_paths: &Paths) -> Instance {
 fn imp_acquire(_paths: &Paths) -> Instance {
     Instance::Primary(InstanceGuard::detached())
 }
+
+/// The only argument the Linux AppImage updater starts the new process with (UPD-014 step 5).
+/// **Frozen from the first updater release** (UPD-017): an old binary starts a new one, so the
+/// flag and the behaviour behind it never change.
+pub const RELAUNCH_FLAG: &str = "--update-relaunch=1";
+
+/// How long a relaunched process waits for its predecessor to exit (UPD-017).
+pub const RELAUNCH_WAIT: Duration = Duration::from_secs(30);
+
+/// Whether `args` (the command line without the program name) carry [`RELAUNCH_FLAG`].
+///
+/// An exact match only: `--update-relaunch=2`, `--update-relaunch` and the like are unknown
+/// arguments and are ignored, like every other unknown argument (UPD-017).
+pub fn is_relaunch(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == RELAUNCH_FLAG)
+}
+
+/// Why [`wait_for_predecessor`] returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitOutcome {
+    /// No `--update-relaunch=1`, or a platform without the handshake: nothing was waited for.
+    NotRequested,
+    /// The flag was given but stdin is a terminal (a person ran it by hand): nothing to wait for.
+    StdinIsTerminal,
+    /// stdin reached end-of-file: the predecessor exited or crashed and the kernel closed the pipe.
+    Eof,
+    /// Reading stdin failed. Handled like `Eof`: the predecessor can no longer be reached. Also
+    /// reported when the helper thread could not be started or died, so the launch goes on.
+    ReadError,
+    /// 30 s (or the given timeout) passed with the pipe still open. The launch goes on as a
+    /// normal one and the single-instance rule (SHL-022) applies.
+    TimedOut,
+}
+
+impl WaitOutcome {
+    /// The predecessor is gone (`Eof` and `ReadError` mean the same thing).
+    pub fn predecessor_gone(self) -> bool {
+        matches!(self, Self::Eof | Self::ReadError)
+    }
+}
+
+/// What the relaunch wait did, for the log once logging is up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaitResult {
+    /// Wall-clock milliseconds spent waiting (0 when nothing was waited for).
+    pub waited_ms: u64,
+    /// `outcome == WaitOutcome::TimedOut`.
+    pub timed_out: bool,
+    pub outcome: WaitOutcome,
+}
+
+impl WaitResult {
+    fn new(outcome: WaitOutcome, waited: Duration) -> Self {
+        Self {
+            waited_ms: u64::try_from(waited.as_millis()).unwrap_or(u64::MAX),
+            timed_out: outcome == WaitOutcome::TimedOut,
+            outcome,
+        }
+    }
+
+    /// An outcome decided without waiting.
+    fn immediate(outcome: WaitOutcome) -> Self {
+        Self::new(outcome, Duration::ZERO)
+    }
+}
+
+/// Blocks until `reader` reaches end-of-file or fails, or until `timeout` has passed (UPD-017).
+///
+/// The updater starts the new process with a piped stdin whose write end the old process keeps
+/// until it exits, so end-of-file on that pipe means "the predecessor is gone": no PID to reuse
+/// and no `/proc` to read. A read error counts as end-of-file. Anything the reader yields is
+/// discarded (the predecessor never writes).
+///
+/// The read runs on a helper thread and the caller waits with `recv_timeout`, because a blocking
+/// `read` on a pipe cannot be interrupted. **After a timeout the helper stays blocked in
+/// `read`, and that is fine:** it holds only the reader and a sender nobody listens to, takes no
+/// lock the app uses, touches no file, and ends by itself when the pipe closes or with the process
+/// (a blocked thread doesn't keep `main` from returning). The cost is one parked thread.
+///
+/// Startup only, before the config is loaded; never call it from the UI thread once the window
+/// exists. A platform without the handshake returns [`WaitOutcome::NotRequested`] at once.
+#[cfg(unix)]
+pub fn wait_for_predecessor(
+    reader: impl std::io::Read + Send + 'static,
+    timeout: Duration,
+) -> WaitResult {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    let started = std::time::Instant::now();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("dk-relaunch-wait".into())
+        .spawn(move || {
+            // The receiver is gone after a timeout; the late result is dropped.
+            let _ = tx.send(drain(reader));
+        });
+    let outcome = match spawned {
+        Ok(_) => match rx.recv_timeout(timeout) {
+            Ok(outcome) => outcome,
+            Err(RecvTimeoutError::Timeout) => WaitOutcome::TimedOut,
+            // The helper died without a result (a panicking reader).
+            Err(RecvTimeoutError::Disconnected) => WaitOutcome::ReadError,
+        },
+        Err(e) => {
+            tracing::warn!(error = %e, "relaunch wait: could not start the helper thread");
+            WaitOutcome::ReadError
+        }
+    };
+    WaitResult::new(outcome, started.elapsed())
+}
+
+/// Reads `reader` to its end. Never returns [`WaitOutcome::TimedOut`] or the `Not…` outcomes.
+#[cfg(unix)]
+fn drain(mut reader: impl std::io::Read) -> WaitOutcome {
+    let mut buf = [0u8; 256];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return WaitOutcome::Eof,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return WaitOutcome::ReadError,
+        }
+    }
+}
+
+/// The relaunch handshake only exists for the Linux AppImage update; on other platforms there is
+/// nothing to wait for, and the reader is not touched.
+#[cfg(not(unix))]
+pub fn wait_for_predecessor(
+    _reader: impl std::io::Read + Send + 'static,
+    _timeout: Duration,
+) -> WaitResult {
+    WaitResult::immediate(WaitOutcome::NotRequested)
+}
+
+/// The call `main()` makes, first thing after the panic hook and before the config is read.
+///
+/// `args` is the command line without the program name. Does nothing ([`WaitOutcome::NotRequested`])
+/// unless it carries [`RELAUNCH_FLAG`], so an ordinary desktop launch, whose stdin is often
+/// `/dev/null` and would read end-of-file at once, never waits. A terminal stdin
+/// ([`WaitOutcome::StdinIsTerminal`]) returns at once too. Otherwise it waits on the real stdin
+/// for [`RELAUNCH_WAIT`].
+#[cfg(unix)]
+pub fn wait_for_predecessor_from_args(args: &[String]) -> WaitResult {
+    use std::io::IsTerminal;
+
+    wait_when_relaunched(
+        args,
+        || std::io::stdin().is_terminal(),
+        real_stdin,
+        RELAUNCH_WAIT,
+    )
+}
+
+/// See the Unix version: no handshake on this platform.
+#[cfg(not(unix))]
+pub fn wait_for_predecessor_from_args(_args: &[String]) -> WaitResult {
+    WaitResult::immediate(WaitOutcome::NotRequested)
+}
+
+/// The decision behind [`wait_for_predecessor_from_args`], with the two process-global inputs
+/// (is stdin a terminal, and the reader on it) injected so tests don't depend on the test
+/// runner's stdin. `open_stdin` runs only when there is something to wait for.
+#[cfg(unix)]
+fn wait_when_relaunched<R: std::io::Read + Send + 'static>(
+    args: &[String],
+    stdin_is_terminal: impl FnOnce() -> bool,
+    open_stdin: impl FnOnce() -> R,
+    timeout: Duration,
+) -> WaitResult {
+    if !is_relaunch(args) {
+        return WaitResult::immediate(WaitOutcome::NotRequested);
+    }
+    if stdin_is_terminal() {
+        return WaitResult::immediate(WaitOutcome::StdinIsTerminal);
+    }
+    wait_for_predecessor(open_stdin(), timeout)
+}
+
+/// A private duplicate of file descriptor 0, read without `Stdin`'s buffer. A helper thread left
+/// blocked after a timeout then holds no lock on the process-wide `Stdin`. Falls back to
+/// `Stdin` itself when the descriptor can't be duplicated (a closed stdin reads as end-of-file).
+#[cfg(unix)]
+fn real_stdin() -> Box<dyn std::io::Read + Send> {
+    use std::os::fd::AsFd;
+
+    match std::io::stdin().as_fd().try_clone_to_owned() {
+        Ok(fd) => Box::new(std::fs::File::from(fd)),
+        Err(_) => Box::new(std::io::stdin()),
+    }
+}
+
+#[cfg(test)]
+mod relaunch_tests;
 
 #[cfg(unix)]
 mod unix {

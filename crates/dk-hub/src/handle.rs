@@ -15,7 +15,7 @@ use futures::Stream;
 use crate::bridge::{Feed, HubCall, HubEvent, HubStream, TerminalHandle};
 use crate::config::{Config, UiState};
 use crate::paths::Paths;
-use crate::updates::{UpdateCheck, UpdateStatus};
+use crate::updates::{ApplyOutcome, UpdateCheck, UpdateSnapshot};
 
 /// Options for `EngineHub::start`.
 pub struct HubOptions {
@@ -142,16 +142,21 @@ impl HubHandle {
 
     // ── updates (UPD-*) ───────────────────────────────────────────────────────────────────
 
-    /// Current updater status first, then every change (UPD-008).
-    pub fn update_status(&self) -> HubStream<UpdateStatus> {
+    /// The updater's activity plus the retained offer and a revision, current snapshot first,
+    /// then every change (UPD-008, UPD-011, UPD-017). Checking never hides the offer.
+    pub fn update_status(&self) -> HubStream<UpdateSnapshot> {
         crate::hub::update_status(self)
     }
     /// Manual check (+ download when the install supports it). Errors surface (UPD-004).
     pub fn check_for_updates(&self) -> HubCall<UpdateCheck> {
         crate::hub::check_for_updates(self)
     }
-    /// Starts the verified installer; the UI quits right after (UPD-007).
-    pub fn apply_update(&self) -> HubCall<()> {
+    /// *Restart to update* (UPD-011). `Ok(Restarting)`: the installer or the new process was
+    /// started and the UI quits right after. `Ok(InstalledRestartManually)`: installed, but the
+    /// new process couldn't be started; the app keeps running. A second call while one runs
+    /// fails with 'already being applied' (the UI ignores that error); an expired offer is
+    /// refused with 'Check for updates first'.
+    pub fn apply_update(&self) -> HubCall<ApplyOutcome> {
         crate::hub::apply_update(self)
     }
     /// The version that ran before this one, if older (once per upgrade; "Updated to X.Y.Z").

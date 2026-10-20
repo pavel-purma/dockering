@@ -4,6 +4,80 @@ Use the exact release commit. Record run URLs and tested platforms; leave unavai
 checks unchecked. Each release has its own section, newest first. The `/release` skill copies the
 [template](../../.agents/skills/release/checklist-template.md) for the next release; ticks only what it verified.
 
+## Planned updater gates (not executed)
+
+Draft [plan](features/linux-appimage-updates.md), REL-083…087 / UPD-013…017.
+These unchecked gates do not alter any historical release result below.
+
+- [x] Approve the revised plan and ADR-0007 (shared updater, installs without OS signing, macOS *Download* only): approved 2026-10-19.
+- [ ] Maintainer: update keys per signing.md Phase 4 (no agent holds a private key); public keys committed.
+- [ ] Gate: `updater` / `sign_manifest` truth table; a rehearsal from `main` with `updater=all` (unsigned is enough) builds
+  all six targets with the updater, `updater-evidence-*.txt` agree, no seam, `.minisig` made by the current key,
+  manifest URL/kind/hash/size/version match the draft.
+- [ ] Shared on all three OSes (view tests in CI): one notification per version, title-bar button from the offer,
+  retention through re-checks and offline start, withdrawal of a pulled release, Settings offer row.
+- [x] Windows x64/ARM64, CI (REL-087 b): the `installer-smoke.ps1` update leg (`-UpdateFrom` / `-UpdateFromSums`; build step
+  *Update leg, last release to this build*) is green on `windows-2025` and `windows-11-arm`: the last stable release's installer,
+  checked against its `SHA256SUMS`, installed per user; the installer under test run with exactly the updater's argv; version,
+  files and a `/RELAUNCH` process from the install dir checked; silent uninstall leaves nothing. Record the run, the commit, the
+  old and the new version and which mode ran: strict (a version bump) or `-AllowSameVersion` (the last release has this
+  version, so the version change itself is not asserted; the step prints a `SKIP` line). A skipped step (no release, no GitHub)
+  is not a pass. A CI run is not a W1 result and proves none of the rows below. **Green 2026-10-20 on both architectures:** [run 39393494930](https://github.com/pavel-purma/dockering/actions/runs/39393494930), commit `2ab9bec` (pull request #54), `Dockering-Setup-x64.exe` and `Dockering-Setup-arm64.exe` of v0.3.0 over a build that also reports 0.3.0, so the mode was `-AllowSameVersion` and the step printed its `SKIP` line (the version change is not asserted until a newer build exists, so the next release's PR is the first strict run). The installer under test ran with `/SILENT /SUPPRESSMSGBOXES /NORESTART /SP- /UPDATE /RELAUNCH /CURRENTUSER` and exited 0, `/RELAUNCH` started `dockering.exe`, the uninstall was clean.
+- [ ] Windows, **spike W1, manual** (REL-087 a): the maintainer on a real Windows 10/11 machine, with a throwaway per-user
+  profile or VM for the all-users rows. Record per row: pass or fail, Windows build and architecture, the commit, the installer's
+  artifact name and SHA-256, and a screenshot for UAC and SmartScreen. A Linux run, a mock or a CI runner completes none of
+  them. Nothing below is checked, and the plan's expectations stay expectations until it is:
+  - [ ] **Mark-of-the-Web / SmartScreen:** an installer written by the app's own HTTP client has no `Zone.Identifier` stream
+    (`Get-Item -Stream * <installer>` lists only `:$DATA`), and SmartScreen does not intervene when the app starts it. Compare
+    with the same installer saved from a browser.
+  - [ ] **Defender and Smart App Control:** an unsigned app starting an unsigned installer is not blocked or quarantined, with
+    Smart App Control on and off. If either blocks it: the offer must become *Download* with the reason (UPD-007), and the
+    finding is recorded.
+  - [ ] **UAC text:** the prompt for an **all-users** unsigned install says *Unknown publisher* (screenshot). Declining it shows
+    *Couldn't start the update* and leaves the app running with the same offer.
+  - [ ] **Share-locked start:** Inno starts while the app holds the installer `FILE_SHARE_READ`-locked, per user and all users.
+    If it does not: a per-user install retries once after another hash check, an all-users install falls back to *Download*
+    rather than elevating an unlocked file. Record which of the three happened.
+  - [ ] **Cancel:** cancelling the installer (close the progress window, or end the process) leaves the old app installed and
+    working, and the next launch shows the same offer again.
+  - [ ] **Relaunch:** after an all-users update the new Dockering is started by Explorer and is **not elevated** (Task Manager,
+    *Elevated* column); after a per-user update it starts as the user. The window appears (the CI leg asserts only the process).
+  - [ ] **`WinVerifyTrust` for an unsigned PE:** on the Windows machine run
+    `cargo test -p dk-update --lib -- _w1 --nocapture` (the three tests below are `#[cfg(windows)]` and not `#[ignore]`d, so this
+    filter selects exactly them; on Linux and macOS it lists 0 tests; CI's `test (windows-2025)` job runs them too, on a hosted
+    runner, which is CI evidence only). `upd_003_windows_unsigned_exe_is_no_signature_w1`
+    passes only if the unsigned test binary maps to *no signature*, that is, the status is in `NO_SIGNATURE_STATUSES`
+    (today only `TRUST_E_NOSIGNATURE`, `0x800B0100`); on failure its message carries `WinVerifyTrust status 0x…`: record that
+    value, and widen the list only from a recorded result. It prints no status on success. Cross-check the released installer
+    with `(Get-AuthenticodeSignature .\Dockering-Setup-x64.exe).Status` (expected `NotSigned`).
+  - [ ] **`upd_003_windows_open_handle_verdict_matches_path_w1`** passes: the verdict through an open handle equals the verdict by
+    path, for the unsigned test binary and, where they exist, `C:\Program Files\PowerShell\7\pwsh.exe` and
+    `C:\Program Files\Git\cmd\git.exe` (install both at those paths so the signed-file half runs).
+  - [ ] **`upd_007_locked_per_user_start_works_w1`** passes: a per-user start of a `FILE_SHARE_READ`-locked image (a copy of
+    `hostname.exe`). If it fails with `LockedStartFailed`, Windows refuses such a start and the UPD-007 fallbacks apply.
+- [x] Linux, end-to-end (REL-085, REL-087 c): `linux-update-e2e.yml` (a green pull-request run on `ubuntu-24.04`, with its
+  `linux-update-e2e` artifact) runs S1 (extract-and-run and FUSE legs) to S4. **Green 2026-10-20:** [run 39393495043](https://github.com/pavel-purma/dockering/actions/runs/39393495043) on commit `2ab9bec` (pull request #54), image `mirror.gcr.io/library/ubuntu:24.04` digest `sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac`, 16 minutes with the build; S1 extract 23, S1 FUSE 23, S2 24, S3 19, S4 24 checks, no FAIL or SKIP; the artifact has no AppImage and no key. *Before that, run locally 2026-10-20 through `scripts/linux-update/run.sh` on `ghcr.io/archlinux/archlinux:latest`
+  (glibc 2.44, the build host's): `--scenario all` passed S1 in both legs (23 of 23 checks) and S2, S3 and S4 in the extract leg (24, 19 and 24 checks). The same
+  AppImages built on the Arch host are rejected on Ubuntu 24.04 by the loader (`GLIBC_2.44 not found`), which is expected: the CI builds its own on the Ubuntu runner.*
+  - [ ] **This machine, by hand** (the maintainer's desktop; real display, real FUSE; use a scratch `HOME` or back up
+    `~/.local/share/dockering` first, because the old build in this test overwrites `state.json` and `offer.json`):
+    1. Build the pair: `scripts/linux-update/build-appimages.sh ~/dk-e2e --source worktree`, then `cargo xtask update-e2e-fixture
+       --out ~/dk-e2e/fixture --appimage ~/dk-e2e/Dockering-x86_64.AppImage --version <its version>` and serve
+       `~/dk-e2e/fixture/root` with `python3 scripts/linux-update/serve.py --root ~/dk-e2e/fixture/root --port 8099 --log ~/dk-e2e/req.jsonl`.
+    2. Install the OLD AppImage as `~/.local/bin/dockering` and start it **from the launcher** (the `.desktop` entry's `Exec`,
+       not a terminal) with `DOCKERING_UPDATE_E2E_URL=http://127.0.0.1:8099`, `DOCKERING_UPDATE_E2E_KEY=$(tr -d '\n' < ~/dk-e2e/fixture/public-key.txt)` and `DOCKERING_UPDATE_E2E_FIRST_CHECK_SECS=5` in the environment the launcher gives it.
+    3. Within seconds: one notification with *Restart now*, and the same icon in the title bar next to the other icons
+       (screenshot). Close and reopen the window: the icon is still there and there is no second notification.
+    4. *Restart now*: the window closes and the new version opens by itself (screenshot of 'Updated to …'), the icon is gone,
+       `sha256sum ~/.local/bin/dockering` equals the new AppImage's, and `pgrep -a dockering` shows no process of the old mount.
+    5. Repeat with `~/.local/bin/dockering` a **symlink** to an AppImage in another directory: the target is replaced, the link
+       stays a link. Repeat with the directory not writable (`chmod a-w ~/.local/bin`): a *Download* offer, no asset request.
+    6. Record the Hyprland and runtime versions, the commit, and attach the screenshots.
+- [ ] Linux, `.deb` and tarball installs: the offer is *Download* (UPD-006). *Covered by Tier 1 tests; not run on a real `.deb`.*
+- [ ] macOS: the update shows a *Download* offer (no in-app install; UPD-016 is deferred).
+- [ ] Attach exact commit, artifact, OS and architecture to each result. Linux runs and mocks do not complete the Windows items.
+- [ ] First updater release installed by hand, then a second release updates it by itself.
+
 ## v0.3.0 (unsigned)
 
 Released from `main` at `7bef9c1` as workspace version `0.3.0`: three `feat` commits since `v0.2.0` (keyboard navigation polish, Combined grouping, the WSLC start page) make this a minor bump under REL-011.

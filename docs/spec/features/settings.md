@@ -1,6 +1,6 @@
 # Feature: Settings
 
-- **Status:** implemented (2026-10-02; *Combined* default and the always-shown, prefilled group label key, SET-020 changed, implemented 2026-10-11)
+- **Status:** implemented (2026-10-02; SET-020 implemented 2026-10-11); shared cross-platform updater Settings/retained offer revision **planned** (2026-10-18, SET-090, UPD-009/017; draft [plan](../../plan/features/linux-appimage-updates.md))
 - **Requirement prefix:** SET
 - **Plan:** no per-feature plan; built in milestone M9 of the [v1 plan](../../plan/README.md)
 
@@ -26,7 +26,7 @@ per row.
 | Stats | SET-050 | History window (default 15 min, 1–60) · CPU % relative to all cores |
 | Diagnostics | SET-060 | Log level (Info/Debug; **applies on restart**, because the tracing filter is installed once at startup; `RUST_LOG` overrides it) · Open logs folder · Copy diagnostics · per-engine transport, version, and a short note when notable (ENG-110) · Version / licences (REL-002) |
 | Navigation | SET-080 | On a Settings route the app sidebar shows a *Back to <Page>* item (returns to the last non-Settings route; the start page if none) followed by one item per section, rendered with the same nav item component as the main menu (hover tint, accent active item, count-less); the sections sit under a *Settings* heading. After an engine switch *Back* points at the parent list of a detail route; when the Networks page is hidden it falls back to Containers. Opening Settings focuses the sidebar with the cursor on the active section. `↑/↓/Home/End` move the cursor and show that section in place (no history entry); `Enter`/`Space` on a section enter its first control, on *Back* they navigate. A click on a section pushes its route. |
-| Updates | SET-090 | *Check for updates automatically* (default on) · current version · last checked + result · *Check now* (inline result) · *View release notes*. Disabled with a note when a policy or `DOCKERING_DISABLE_UPDATES` turns updates off. In builds without the `updater` feature the section says *Updates aren't available in this build* and *Check now* is disabled. See [distribution.md](distribution.md) UPD-009. |
+| Updates | SET-090 | Same Windows/macOS/Linux section: automatic-check switch (default on), current version, last check/result, *Check now* progress/error, *View release notes*, retained offer and *Restart to update* or *Download* with install/fallback reason. Setting-only opt-out permits manual checks/apply; policy (a Windows-only store) disables switch/hides Check now; env/dev/demo/no-feature/no-trust-keys disable actions with truthful reason. Checking/errors do not replace the offer. See [distribution.md](distribution.md) UPD-005/009/017 (planned). |
 | Keyboard | SET-070 | Read-only keymap view (the same as the shortcut reference, KBD-022). Rebinding is reserved for post-v1 (KBD-081). |
 
 ## Verification (2026-10-02)

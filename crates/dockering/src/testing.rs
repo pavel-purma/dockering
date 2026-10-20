@@ -260,6 +260,18 @@ impl Harness {
         .expect("window alive");
         cx.run_until_parked();
     }
+
+    /// Lets `ms` milliseconds of real time and of GPUI test-clock time pass, drawing as it goes.
+    /// For animations (a toast sliding in) that follow both clocks.
+    pub fn pump(&self, cx: &mut TestAppContext, ms: u64) {
+        let deadline = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < deadline {
+            self.draw(cx);
+            std::thread::sleep(Duration::from_millis(5)); // nfr-001-allow: test harness only
+            cx.executor().advance_clock(Duration::from_millis(20));
+        }
+        self.draw(cx);
+    }
 }
 
 // ── M6 helpers (Images, Volumes, Networks) ──────────────────────────────────────────────

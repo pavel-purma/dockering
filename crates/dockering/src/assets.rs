@@ -10,8 +10,19 @@ pub use gpui_kit::assets::IconName as Lucide;
 gpui_kit::assets::icon_assets!(
     ExtraIcons,
     [
-        Container, Square, Trash, Layers, Boxes, Keyboard, Server, Plug, Unplug, ScrollText,
-        Activity, Braces
+        Container,
+        Square,
+        Trash,
+        Layers,
+        Boxes,
+        Keyboard,
+        Server,
+        Plug,
+        Unplug,
+        ScrollText,
+        Activity,
+        Braces,
+        CircleArrowUp
     ]
 );
 

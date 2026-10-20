@@ -277,8 +277,8 @@ file and rename. The schema is versioned (`version = 1`) with forward-compatible
 
 ## 7. App bootstrap sequence
 
-1. `main()` → install the panic hook (logs and crash file) → init `tracing` → single-instance check (second launch focuses
-   the running window via a local socket/pipe, then exits) → load config (sync).
+1. `main()` → install the panic hook (logs and crash file) → **update relaunch wait** *(planned; only with `--update-relaunch=1` and a non-terminal stdin; UPD-017, SHL-022)* → load config (sync) → init `tracing` → single-instance check (second launch focuses
+   the running window via a local socket/pipe, then exits).
    **Windows only, before anything touches COM or GPUI:** `WSAStartup(2.2)` (WSLC handles are sockets),
    then `CoIncrementMTAUsage` (keeps the process MTA alive), then on a short-lived MTA thread `CoInitializeEx(MTA)` + `CoInitializeSecurity(IMPERSONATE, EOAC_STATIC_CLOAKING)`.
    Without `CoIncrementMTAUsage`, COM is uninitialised when that thread exits, the security settings are lost, and

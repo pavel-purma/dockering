@@ -1052,18 +1052,43 @@ pub const UPD_CHECK_NOW_DESC: &str = "Check GitHub Releases for a newer version.
 pub const UPD_UP_TO_DATE: &str = "You're up to date.";
 pub const UPD_CHECK_FAILED: &str = "Update check failed:";
 pub const UPD_CHECKING: &str = "Checking for updates…";
-pub const UPD_POLICY: &str = "Updates are turned off by your administrator.";
+/// The policy is a Windows registry value (UPD-005); the note names it as such and claims
+/// nothing about other systems.
+pub const UPD_POLICY: &str = "Updates are turned off by an administrator policy (the Windows registry value DisableUpdates).";
 pub const UPD_UNAVAILABLE: &str = "Updates aren't available in this build.";
 pub const UPD_NOTHING_READY: &str = "No update is ready to install.";
 pub const UPD_APPLY_FAILED: &str = "Couldn't start the update";
+pub const UPD_INSTALLED_RESTART_MANUALLY: &str =
+    "Dockering was updated, but couldn't restart by itself. Restart it to finish.";
 pub const UPD_WHATS_NEW: &str = "What's new";
 pub const UPD_RESTART_NOW: &str = "Restart now";
+/// Action button of the *Download* notification and the Settings offer row (UPD-008, UPD-009).
+pub const UPD_DOWNLOAD: &str = "Download";
+/// Tooltip of the title-bar update button after the new version was installed but the new
+/// process didn't start (UPD-015).
+pub const UPD_TOOLTIP_INSTALLED_RESTART: &str = "Dockering was updated. Restart to finish";
+// Settings → Updates, the retained offer (UPD-009)
+pub const UPD_OFFER: &str = "Available update";
+pub const UPD_OFFER_DOWNLOADING: &str = "Downloading the update…";
+pub const UPD_OFFER_APPLYING: &str = "Installing the update…";
+pub const UPD_REASON_NO_SELF_UPDATE: &str = "This installation can't update itself automatically.";
+pub const UPD_REASON_INSTALL_FAILED: &str = "The update couldn't be installed automatically.";
 pub const RELEASES_URL: &str = "https://github.com/pavel-purma/dockering/releases";
+/// Tooltip of the title-bar update button for a *Download* offer (UPD-015).
+pub fn upd_tooltip_available(version: &str) -> String {
+    format!("Dockering {version} is available")
+}
+/// Accessible name of the icon-only title-bar update button (UPD-015); it starts with
+/// 'Update available' so assistive technology and the end-to-end test can find it.
+pub fn upd_button_name(version: &str) -> String {
+    format!("Update available: Dockering {version}")
+}
+/// The offer's version as the Settings row shows it.
+pub fn upd_offer_version(version: &str) -> String {
+    format!("Dockering {version}")
+}
 pub fn upd_available(version: &str) -> String {
     format!("Dockering {version} is available.")
-}
-pub fn upd_available_short(version: &str) -> String {
-    format!("Dockering {version} available")
 }
 pub fn upd_downloading(percent: u64) -> String {
     format!("Downloading update… {percent}%")

@@ -117,7 +117,20 @@ impl HubInner {
             handle,
             rt,
             #[cfg(feature = "updater")]
+            crate::updates::UpdaterInit::Production,
+        )
+    }
+
+    /// `start_on` for tests that aren't about updates: with the `updater` feature the hub gets
+    /// no updater at all, so nothing in them can reach the network (UPD-005).
+    #[cfg(test)]
+    pub(crate) fn start_for_test(opts: HubOptions, handle: Handle) -> HubHandle {
+        Self::start_with(
+            opts,
+            handle,
             None,
+            #[cfg(feature = "updater")]
+            crate::updates::UpdaterInit::Off,
         )
     }
 
@@ -126,7 +139,7 @@ impl HubInner {
         opts: HubOptions,
         handle: Handle,
         rt: Option<Runtime>,
-        #[cfg(feature = "updater")] update_state: Option<crate::updates::State>,
+        #[cfg(feature = "updater")] updater: crate::updates::UpdaterInit,
     ) -> HubHandle {
         let factories = opts.factories.unwrap_or_else(crate::default_factories);
         let (events_tx, _) = broadcast::channel(HUB_EVENTS_CAPACITY);
@@ -156,10 +169,12 @@ impl HubInner {
             generation: AtomicU64::new(1),
             demo: opts.demo,
             #[cfg(feature = "updater")]
-            updates: if opts.demo {
-                None
-            } else {
-                update_state.or_else(crate::updates::State::production)
+            updates: match (opts.demo, updater) {
+                (true, _) | (_, crate::updates::UpdaterInit::Off) => None,
+                (false, crate::updates::UpdaterInit::Production) => {
+                    crate::updates::State::production()
+                }
+                (false, crate::updates::UpdaterInit::State(state)) => Some(*state),
             },
         });
         inner.handle.spawn(saver_loop(inner.clone()));
@@ -966,7 +981,7 @@ pub(crate) fn diagnostics_text(inner: &HubInner) -> String {
     use std::fmt::Write as _;
     let reg = lock(&inner.reg);
     let mut out = String::new();
-    let _ = writeln!(out, "Dockering {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(out, "Dockering {}", crate::app_version());
     let _ = writeln!(
         out,
         "OS: {} {}",
@@ -1095,11 +1110,13 @@ pub(crate) fn config_update(inner: &Arc<HubInner>, f: impl FnOnce(&mut Config)) 
 
 // ── updates (UPD-*) ─────────────────────────────────────────────────────────────────────────
 
-pub(crate) fn update_status(h: &HubHandle) -> HubStream<crate::updates::UpdateStatus> {
-    use crate::updates::UpdateStatus;
+pub(crate) fn update_status(h: &HubHandle) -> HubStream<crate::updates::UpdateSnapshot> {
+    use crate::updates::UpdateSnapshot;
     #[cfg(feature = "updater")]
     if let Some(u) = h.inner.updates.as_ref() {
-        let mut rx = u.status.subscribe();
+        // A watch channel keeps only the latest snapshot, so a slow UI sees the newest state
+        // (its `revision` is higher than anything it dropped); the current one is sent first.
+        let mut rx = u.snapshot.subscribe();
         let (mut tx, token, stream) = HubStream::channel(STREAM_CAPACITY);
         h.inner.handle.spawn(async move {
             loop {
@@ -1120,9 +1137,7 @@ pub(crate) fn update_status(h: &HubHandle) -> HubStream<crate::updates::UpdateSt
     }
     let _ = h;
     let (mut tx, _token, stream) = HubStream::channel(1);
-    let _ = tx.try_send(Ok(UpdateStatus::Disabled {
-        reason: crate::updates::DisabledReason::Unavailable,
-    }));
+    let _ = tx.try_send(Ok(UpdateSnapshot::unavailable()));
     stream
 }
 
@@ -1140,13 +1155,17 @@ pub(crate) fn check_for_updates(h: &HubHandle) -> HubCall<crate::updates::Update
     HubCall::ready(Ok(crate::updates::UpdateCheck::Disabled))
 }
 
-pub(crate) fn apply_update(h: &HubHandle) -> HubCall<()> {
+pub(crate) fn apply_update(h: &HubHandle) -> HubCall<crate::updates::ApplyOutcome> {
     #[cfg(feature = "updater")]
     {
         let (tx, call) = HubCall::channel();
         let inner = h.inner.clone();
         h.inner.handle.spawn_blocking(move || {
-            let _ = tx.send(crate::updates::apply(&inner));
+            // NFR-030: a panic in the updater becomes an error, never a hung call.
+            let result =
+                std::panic::catch_unwind(AssertUnwindSafe(|| crate::updates::apply_update(&inner)))
+                    .unwrap_or_else(|p| Err(panic_error(&*p)));
+            let _ = tx.send(result);
         });
         call
     }
@@ -1160,7 +1179,7 @@ pub(crate) fn apply_update(h: &HubHandle) -> HubCall<()> {
 }
 
 pub(crate) fn take_previous_version(h: &HubHandle) -> Option<String> {
-    let current = env!("CARGO_PKG_VERSION");
+    let current = crate::app_version();
     let previous = h.inner.ui_state().updates.last_run_version;
     if previous.as_deref() == Some(current) {
         return None;

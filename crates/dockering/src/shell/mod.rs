@@ -11,6 +11,7 @@ pub mod regions;
 pub mod shortcuts;
 mod sidebar_nav;
 pub mod switcher;
+pub(crate) mod update_button;
 
 pub use app_shell::{AppShell, ShellPage};
 pub use regions::{Region, Regions};

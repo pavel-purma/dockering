@@ -14,6 +14,8 @@ export PKG_DIR="${PKG_DIR:-/pkg}" EXPECTED_VERSION
 # shellcheck source=/dev/null
 . /etc/os-release
 LEG="${LEG:-$ID}"
+# no launch of the app in this container checks for updates (REL-085, plan §3 decision 14); run.sh sets it again at the launch
+export DOCKERING_DISABLE_UPDATES=1
 export LANG=C.UTF-8 DEBIAN_FRONTEND=noninteractive
 t0=$(date +%s)
 at() { echo $(($(date +%s) - t0)); }

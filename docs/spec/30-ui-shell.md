@@ -28,7 +28,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 
 | Region | GPUI Kit component | Notes |
 |---|---|---|
-| Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings |
+| Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings. While an update is offered, an update button is the first of these buttons, the same on every platform (UPD-015) |
 | Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…" (Rescan lives in Settings → Engines, ENG-113) |
 | Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
 | Page header | `v_flex` of two rows: the title on the left and the view controls (filters, group-by, page buttons) on the right; then the search `Input` on the left and, on the right, the summary counts (or the selection actions while rows are checked, SHL-005) followed by the page `⋮`. A small gap separates the header from the table | `chrome::page_header` |
@@ -41,13 +41,13 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Toasts | `Notification` via `window.push_notification` | |
 | Empty states | `empty` component + illustration icon + CTA | |
 | Loading | `Skeleton` rows (first load), `Spinner` in header (refresh) | |
-| Status bar | `StatusBar` | Left: state dot and label │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, update item (UPD-008). The state dot is the only colour: never a route note or coloured chip (ENG-108, ENG-110) |
+| Status bar | `StatusBar` | Left: state dot and label │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, and the transient update item (*Downloading…*, and *Checking…* or the error during a manual check; UPD-008). The state dot is the only colour: never a route note or coloured chip (ENG-108, ENG-110) |
 
 ## 1a. Native menus & window chrome (SHL-020…)
 
 - **SHL-020** macOS: a native app menu via GPUI `cx.set_menus`. *Dockering* (About, Settings… `Cmd+,`, Hide `Cmd+H`, Hide Others, Quit `Cmd+Q`), *Edit* (Undo/Redo/Cut/Copy/Paste/Select All, needed for text fields), *View* (pages `Cmd+1…4`, Toggle Sidebar, Command Palette, Theme), *Window* (Minimize `Cmd+M`, Zoom), *Help* (Keyboard Shortcuts, Open Logs Folder). Menu items dispatch the same actions as the keymap (KBD-002).
 - **SHL-021** Windows/Linux: no menu bar. The same commands are in the title-bar overflow menu (`Alt` focuses it) and in the command palette.
-- **SHL-022** Single instance per user. A second launch focuses the existing window and exits (10 §7).
+- **SHL-022** Single instance per user. An ordinary second launch focuses the existing window and exits (10 §7). The one exception *(planned)* is the Linux AppImage update relaunch (UPD-014, UPD-017): the new process is started with `--update-relaunch=1` and a piped stdin, and, as the first thing in `main()` and before it reads the config or `state.json`, blocks until that stdin reaches end-of-file (the old process exited or crashed) or 30 s have passed. It never sends a focus request while it waits, so it becomes the primary instance instead of focusing the one that is quitting. After a timeout the ordinary rule applies. Windows keeps the Inno handoff (UPD-007); the application mutex of REL-024 is unchanged.
 - **SHL-023** Linux: a `.desktop` file and Wayland `app_id` = `dev.dockering.Dockering`, so the dock/taskbar icon matches.
 - **SHL-025** Detail tabs are a segmented control (`ui::segmented::Segmented`): each tab shows an icon and a label, the selection slides between tabs, and the control hugs its content. Every segmented control in the app uses the same component and style: detail tabs, inner tab bars (Stats window, terminal sessions, shell picker) and list filters (CON-004, KBD-039). The selected segment must stand out clearly. In light mode it is a raised white pill (thin border, soft shadow) on a slightly darker trough. In dark mode it is a lighter pill on the trough.
 - **SHL-024** UI language is **English only** in v1. All strings go through one module (`strings.rs`) so they can be localised later. OS high-contrast settings: the System theme follows the OS light/dark setting. A dedicated high-contrast theme is post-v1. UI zoom is `Mod+=` / `Mod+-` / `Mod+0` (scales the rem size).

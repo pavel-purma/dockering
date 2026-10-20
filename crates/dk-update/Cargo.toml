@@ -10,6 +10,9 @@ publish.workspace = true
 [features]
 default = []
 test-support = []
+# REL-086 test seam: `GithubSource::with_base` points every fetch at a loopback server. Never in
+# default features and never in a shipped build; `dk-hub` and `dockering` forward it.
+update-e2e = []
 
 [dependencies]
 reqwest.workspace = true
@@ -25,6 +28,10 @@ tracing.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The AppImage strategy marks inherited descriptors close-on-exec in a child (apply/appimage/fds.rs).
+libc.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Security_WinTrust", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Shell"] }
 
@@ -35,7 +42,8 @@ tempfile.workspace = true
 proptest.workspace = true
 
 [lints.rust]
-# Win32 Authenticode FFI is confined to `authenticode`; all other modules deny unsafe code.
+# `lib.rs` denies unsafe code; the modules that need it opt in one by one: the Win32 FFI of `authenticode`, `policy` and
+# `apply::runas`, and the `pre_exec` closure of `apply/appimage/fds.rs` (UPD-014).
 unsafe_code = "allow"
 
 [lints.clippy]
