@@ -237,6 +237,11 @@ mod model;
 
 #[cfg(all(feature = "updater", test))]
 pub(crate) use apply::fakes;
+// Tier 1 of the update end-to-end plan (REL-085): the whole mechanism below the UI over real
+// HTTP on loopback. Wired from here (the file sits next to the other `updates_*_tests.rs`).
+#[cfg(all(feature = "updater", test))]
+#[path = "updates_http_tests.rs"]
+mod updates_http_tests;
 #[cfg(feature = "updater")]
 #[allow(unused_imports)]
 pub(crate) use apply::{

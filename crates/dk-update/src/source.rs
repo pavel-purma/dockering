@@ -311,6 +311,91 @@ pub mod testing {
         Body(Vec<u8>),
         /// `302` to this `Location`.
         Redirect(String),
+        /// `200` that promises `claimed_len` bytes in `Content-Length`, sends only `body` and
+        /// closes the connection: a download cut off mid-stream.
+        Truncated {
+            /// The bytes actually sent.
+            body: Vec<u8>,
+            /// The length the response header claims.
+            claimed_len: usize,
+        },
+    }
+
+    /// How a [`LoopbackServer`] misbehaves for **every** request while the switch is on (the
+    /// fault switch of `scripts/linux-update/serve.py`, REL-085). The request is still recorded.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Fault {
+        /// Every request gets `503` (the `down` mode of `serve.py`).
+        Down,
+        /// The connection is closed without an answer (a dead network path).
+        Drop,
+    }
+
+    /// Holds the answer to one path until [`Hold::release`], so a test can keep a request "in
+    /// flight" deterministically instead of racing a delay. The server answers one connection at
+    /// a time: while a hold is active **every other request waits behind it** (do not make a
+    /// request that must be answered while one is held). A hold that is never released gives up
+    /// after [`Hold::GIVE_UP`], so a failed test can't hang its server's shutdown.
+    #[derive(Debug, Clone)]
+    pub struct Hold {
+        state: Arc<(Mutex<HoldState>, std::sync::Condvar)>,
+    }
+
+    #[derive(Debug, Default)]
+    struct HoldState {
+        arrived: usize,
+        released: bool,
+    }
+
+    impl Hold {
+        /// How long a held request waits at most.
+        pub const GIVE_UP: Duration = Duration::from_secs(10);
+
+        fn new() -> Self {
+            Self {
+                state: Arc::new((Mutex::new(HoldState::default()), std::sync::Condvar::new())),
+            }
+        }
+
+        /// How many requests have reached the hold so far.
+        pub fn arrived(&self) -> usize {
+            self.state.0.lock().map(|s| s.arrived).unwrap_or(0)
+        }
+
+        /// Lets the held requests (and every later one) through.
+        pub fn release(&self) {
+            if let Ok(mut state) = self.state.0.lock() {
+                state.released = true;
+            }
+            self.state.1.notify_all();
+        }
+
+        /// Server side: note the arrival and block until released (or given up).
+        fn pass(&self) {
+            let (lock, cv) = &*self.state;
+            let Ok(mut state) = lock.lock() else { return };
+            state.arrived += 1;
+            cv.notify_all();
+            let deadline = std::time::Instant::now() + Self::GIVE_UP;
+            while !state.released {
+                let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) else {
+                    return;
+                };
+                state = match cv.wait_timeout(state, left) {
+                    Ok((state, _)) => state,
+                    Err(_) => return,
+                };
+            }
+        }
+    }
+
+    /// What the server thread shares with the owning [`LoopbackServer`].
+    struct Shared {
+        routes: Mutex<Vec<(String, Reply)>>,
+        seen: Mutex<Vec<SeenRequest>>,
+        fault: Mutex<Option<Fault>>,
+        holds: Mutex<Vec<(String, Hold)>>,
+        stop: AtomicBool,
     }
 
     /// One request a [`LoopbackServer`] received.
@@ -335,13 +420,18 @@ pub mod testing {
     }
 
     /// A tiny HTTP/1.1 responder on `127.0.0.1:<free port>` for tests of the real client (the
-    /// REL-086 seam): fixed replies per path, `404` otherwise, one connection at a time, every
-    /// request recorded. It runs on its own thread and needs no runtime (so it can't be
-    /// starved by a paused tokio clock). Dropping it stops the thread.
+    /// REL-086 seam): replies per path (changeable while it runs, [`LoopbackServer::set_route`]),
+    /// `404` otherwise, one connection at a time, every request recorded with its headers, a
+    /// fault switch ([`Fault`]) and deterministic holds ([`LoopbackServer::hold`]). It runs on its
+    /// own thread and needs no runtime. Dropping it stops the thread.
+    ///
+    /// **Time:** a test of the real client must run on the *real* tokio clock. With
+    /// `start_paused = true` the runtime advances the clock whenever it is idle, and a task
+    /// waiting for a loopback reply is idle for a moment, so the client's own connect and read
+    /// timeouts (15 s and 60 s) would fire at random.
     pub struct LoopbackServer {
         addr: std::net::SocketAddr,
-        seen: Arc<Mutex<Vec<SeenRequest>>>,
-        stop: Arc<AtomicBool>,
+        shared: Arc<Shared>,
         worker: Option<std::thread::JoinHandle<()>>,
     }
 
@@ -350,27 +440,31 @@ pub mod testing {
         pub fn start(routes: Vec<(String, Reply)>) -> std::io::Result<Self> {
             let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
             let addr = listener.local_addr()?;
-            let seen = Arc::new(Mutex::new(Vec::new()));
-            let stop = Arc::new(AtomicBool::new(false));
+            let shared = Arc::new(Shared {
+                routes: Mutex::new(routes),
+                seen: Mutex::new(Vec::new()),
+                fault: Mutex::new(None),
+                holds: Mutex::new(Vec::new()),
+                stop: AtomicBool::new(false),
+            });
             let worker = {
-                let (seen, stop) = (seen.clone(), stop.clone());
+                let shared = shared.clone();
                 std::thread::Builder::new()
                     .name("loopback-server".into())
                     .spawn(move || {
                         for stream in listener.incoming() {
-                            if stop.load(Ordering::SeqCst) {
+                            if shared.stop.load(Ordering::SeqCst) {
                                 break;
                             }
                             if let Ok(mut stream) = stream {
-                                let _ = answer(&mut stream, &routes, &seen);
+                                let _ = answer(&mut stream, &shared);
                             }
                         }
                     })?
             };
             Ok(Self {
                 addr,
-                seen,
-                stop,
+                shared,
                 worker: Some(worker),
             })
         }
@@ -382,13 +476,76 @@ pub mod testing {
 
         /// Every request received so far, oldest first.
         pub fn requests(&self) -> Vec<SeenRequest> {
-            self.seen.lock().map(|s| s.clone()).unwrap_or_default()
+            self.shared
+                .seen
+                .lock()
+                .map(|s| s.clone())
+                .unwrap_or_default()
+        }
+
+        /// How many requests for exactly `path` (the request target) were received so far.
+        pub fn count(&self, path: &str) -> usize {
+            self.shared
+                .seen
+                .lock()
+                .map(|s| s.iter().filter(|r| r.path == path).count())
+                .unwrap_or(0)
+        }
+
+        /// Forgets the recorded requests (to count the next phase of a scenario on its own).
+        pub fn clear_requests(&self) {
+            if let Ok(mut seen) = self.shared.seen.lock() {
+                seen.clear();
+            }
+        }
+
+        /// Serves `reply` at `path` from now on: adds the route or replaces its reply. This is
+        /// how a scenario moves GitHub's `latest` from one release to the next while the server
+        /// keeps its port.
+        pub fn set_route(&self, path: &str, reply: Reply) {
+            if let Ok(mut routes) = self.shared.routes.lock() {
+                match routes.iter_mut().find(|(p, _)| p == path) {
+                    Some(route) => route.1 = reply,
+                    None => routes.push((path.to_owned(), reply)),
+                }
+            }
+        }
+
+        /// Stops serving `path` (it answers `404` again): a pulled release.
+        pub fn remove_route(&self, path: &str) {
+            if let Ok(mut routes) = self.shared.routes.lock() {
+                routes.retain(|(p, _)| p != path);
+            }
+        }
+
+        /// Switches the fault for every request on (`Some`) or off (`None`), also while the
+        /// server runs.
+        pub fn set_fault(&self, fault: Option<Fault>) {
+            if let Ok(mut slot) = self.shared.fault.lock() {
+                *slot = fault;
+            }
+        }
+
+        /// Holds the answer to `path` until the returned [`Hold`] is released. The request is
+        /// recorded when it arrives, so `count`/`requests` show it while it waits.
+        pub fn hold(&self, path: &str) -> Hold {
+            let hold = Hold::new();
+            if let Ok(mut holds) = self.shared.holds.lock() {
+                holds.push((path.to_owned(), hold.clone()));
+            }
+            hold
         }
     }
 
     impl Drop for LoopbackServer {
         fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
+            self.shared.stop.store(true, Ordering::SeqCst);
+            // A request still held must not keep the worker (and so this drop) waiting.
+            if let Ok(holds) = self.shared.holds.lock() {
+                for (_, hold) in holds.iter() {
+                    hold.release();
+                }
+            }
             // Wake the blocking `accept`.
             let _ = std::net::TcpStream::connect(self.addr);
             if let Some(worker) = self.worker.take() {
@@ -397,11 +554,7 @@ pub mod testing {
         }
     }
 
-    fn answer(
-        stream: &mut std::net::TcpStream,
-        routes: &[(String, Reply)],
-        seen: &Mutex<Vec<SeenRequest>>,
-    ) -> std::io::Result<()> {
+    fn answer(stream: &mut std::net::TcpStream, shared: &Shared) -> std::io::Result<()> {
         use std::io::{Read, Write};
 
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -424,22 +577,41 @@ pub mod testing {
             .filter_map(|l| l.split_once(':'))
             .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_owned()))
             .collect();
-        if let Ok(mut seen) = seen.lock() {
+        if let Ok(mut seen) = shared.seen.lock() {
             seen.push(SeenRequest {
                 method,
                 path: path.clone(),
                 headers,
             });
         }
-        let reply = routes.iter().find(|(p, _)| *p == path).map(|(_, r)| r);
-        let (status, extra, body): (&str, String, &[u8]) = match reply {
-            Some(Reply::Body(body)) => ("200 OK", String::new(), body),
-            Some(Reply::Redirect(to)) => ("302 Found", format!("Location: {to}\r\n"), &[]),
-            None => ("404 Not Found", String::new(), &[]),
+        let hold = shared
+            .holds
+            .lock()
+            .ok()
+            .and_then(|h| h.iter().find(|(p, _)| *p == path).map(|(_, h)| h.clone()));
+        if let Some(hold) = hold {
+            hold.pass();
+        }
+        let fault = shared.fault.lock().ok().and_then(|f| *f);
+        if fault == Some(Fault::Drop) {
+            return stream.shutdown(std::net::Shutdown::Both);
+        }
+        let reply = shared
+            .routes
+            .lock()
+            .ok()
+            .and_then(|r| r.iter().find(|(p, _)| *p == path).map(|(_, r)| r.clone()));
+        let (status, extra, body, claimed): (&str, String, &[u8], usize) = match &reply {
+            _ if fault == Some(Fault::Down) => ("503 Service Unavailable", String::new(), &[], 0),
+            Some(Reply::Body(body)) => ("200 OK", String::new(), body, body.len()),
+            Some(Reply::Redirect(to)) => ("302 Found", format!("Location: {to}\r\n"), &[], 0),
+            Some(Reply::Truncated { body, claimed_len }) => {
+                ("200 OK", String::new(), body, *claimed_len)
+            }
+            None => ("404 Not Found", String::new(), &[], 0),
         };
         let response = format!(
-            "HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
+            "HTTP/1.1 {status}\r\n{extra}Content-Length: {claimed}\r\nConnection: close\r\n\r\n",
         );
         stream.write_all(response.as_bytes())?;
         stream.write_all(body)?;
@@ -450,7 +622,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use super::testing::{LoopbackServer, Reply};
+    use super::testing::{Fault, LoopbackServer, Reply};
     use super::*;
     use sha2::Digest;
 
@@ -678,5 +850,98 @@ mod tests {
             server.requests().iter().all(|r| r.path != "/elsewhere"),
             "the redirect target was never contacted"
         );
+    }
+
+    #[tokio::test]
+    async fn upd_004_loopback_server_routes_change_while_it_runs() {
+        let server = release_server(b"x");
+        let source = GithubSource::with_base(VERSION, &server.base_url()).expect("source");
+        let manifest_path = path_of(crate::MANIFEST_URL);
+        assert_eq!(
+            source.get_small(crate::MANIFEST_URL).await,
+            Ok(b"{\"manifest\":true}".to_vec())
+        );
+        // `latest` moves on: same path, other bytes.
+        server.set_route(&manifest_path, Reply::Body(b"second".to_vec()));
+        assert_eq!(
+            source.get_small(crate::MANIFEST_URL).await,
+            Ok(b"second".to_vec())
+        );
+        // A new route appears, a removed one is a 404.
+        server.set_route("/new", Reply::Body(b"new".to_vec()));
+        server.remove_route(&manifest_path);
+        assert_eq!(
+            source.get_small(crate::MANIFEST_URL).await,
+            Err(UpdateError::Http(404))
+        );
+        assert_eq!(server.count(&manifest_path), 3);
+        assert_eq!(server.requests().len(), 3);
+        server.clear_requests();
+        assert_eq!(server.requests(), []);
+    }
+
+    #[tokio::test]
+    async fn upd_004_loopback_server_fault_switch() {
+        let server = release_server(b"x");
+        let source = GithubSource::with_base(VERSION, &server.base_url()).expect("source");
+        server.set_fault(Some(Fault::Down));
+        assert_eq!(
+            source.get_small(crate::MANIFEST_URL).await,
+            Err(UpdateError::Http(503))
+        );
+        server.set_fault(Some(Fault::Drop));
+        let result = source.get_small(crate::MANIFEST_URL).await;
+        assert!(matches!(result, Err(UpdateError::Network(_))), "{result:?}");
+        // The requests were recorded even though none was answered properly.
+        assert_eq!(server.count(&path_of(crate::MANIFEST_URL)), 2);
+        server.set_fault(None);
+        assert!(source.get_small(crate::MANIFEST_URL).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn upd_004_loopback_server_hold_keeps_a_request_in_flight() {
+        let server = release_server(b"x");
+        let source = GithubSource::with_base(VERSION, &server.base_url()).expect("source");
+        let hold = server.hold(&path_of(crate::MANIFEST_URL));
+        let fetch = tokio::spawn(async move { source.fetch_manifest().await });
+        // The request reached the server (and is recorded) but isn't answered.
+        for _ in 0..500 {
+            if hold.arrived() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(hold.arrived(), 1);
+        assert_eq!(server.count(&path_of(crate::MANIFEST_URL)), 1);
+        assert!(!fetch.is_finished());
+        hold.release();
+        let (manifest, _) = fetch.await.expect("join").expect("fetched");
+        assert_eq!(manifest, b"{\"manifest\":true}");
+    }
+
+    #[tokio::test]
+    async fn upd_003_truncated_download_leaves_no_partial_file() {
+        let body = vec![7u8; 4096];
+        let server = release_server(&body);
+        let url_path = path_of(&asset_url());
+        server.set_route(
+            &url_path,
+            Reply::Truncated {
+                body: body[..1000].to_vec(),
+                claimed_len: body.len(),
+            },
+        );
+        let source = GithubSource::with_base(VERSION, &server.base_url()).expect("source");
+        let asset = asset_for(&body, asset_url());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let result = source
+            .download(&asset, dir.path(), ASSET_NAME, Box::new(|_, _| {}))
+            .await;
+        assert!(matches!(result, Err(UpdateError::Network(_))), "{result:?}");
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read_dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert!(left.is_empty(), "no partial file: {left:?}");
     }
 }

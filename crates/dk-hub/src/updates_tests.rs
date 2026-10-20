@@ -237,7 +237,7 @@ pub(crate) struct FakeStrategy {
 }
 
 impl FakeStrategy {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             result: Mutex::new(Ok(ApplyResult::Handoff)),
             jobs: Mutex::new(Vec::new()),
@@ -321,7 +321,7 @@ fn entry_kind(kind: InstallKind) -> &'static str {
     }
 }
 
-fn sign(kp: &minisign::KeyPair, json: &[u8]) -> String {
+pub(crate) fn sign(kp: &minisign::KeyPair, json: &[u8]) -> String {
     minisign::sign(None, &kp.sk, Cursor::new(json), None, None)
         .expect("sign")
         .into_string()

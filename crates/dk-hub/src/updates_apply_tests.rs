@@ -31,7 +31,7 @@ use crate::updates_tests::{Fixture, SHORT, current, sha2_hex, until, updater_env
 use crate::{ApplyOutcome, OfferMode, OfferStage};
 
 #[cfg(target_os = "linux")]
-mod stub {
+pub(crate) mod stub {
     //! The compiled stand-in AppImage (see the module documentation above).
 
     use std::fs;
@@ -113,7 +113,7 @@ fn main() {
 
     /// A stand-in AppImage of `version`. `marker` is where its relaunch records itself; with
     /// `relaunch_dies` the relaunch exits at once (the new process "crashes").
-    pub(super) fn appimage(version: &str, marker: Option<&Path>, relaunch_dies: bool) -> Vec<u8> {
+    pub(crate) fn appimage(version: &str, marker: Option<&Path>, relaunch_dies: bool) -> Vec<u8> {
         let mut bytes = binary().to_vec();
         bytes.extend_from_slice(format!("\nDK-STUB-VERSION={version}\n").as_bytes());
         if let Some(marker) = marker {
