@@ -55,8 +55,26 @@ These unchecked gates do not alter any historical release result below.
     `C:\Program Files\Git\cmd\git.exe` (install both at those paths so the signed-file half runs).
   - [ ] **`upd_007_locked_per_user_start_works_w1`** passes: a per-user start of a `FILE_SHARE_READ`-locked image (a copy of
     `hostname.exe`). If it fails with `LockedStartFailed`, Windows refuses such a start and the UPD-007 fallbacks apply.
-- [ ] Linux: scenarios S1 (extract-and-run and FUSE legs) to S4 in `linux-update-e2e.yml`; manual check on a real
-  desktop (this machine: Hyprland, real FUSE, launched from the `.desktop` entry, a symlinked install).
+- [ ] Linux, end-to-end (REL-085, REL-087 c): `linux-update-e2e.yml` (a green pull-request run on `ubuntu-24.04`, with its
+  `linux-update-e2e` artifact) runs S1 (extract-and-run and FUSE legs) to S4. Record the run URL, the commit and the image digest
+  in `image.txt`. *Run locally 2026-10-20 through `scripts/linux-update/run.sh` on `ghcr.io/archlinux/archlinux:latest`
+  (glibc 2.44, the build host's): S1 passed 23 of 23 checks in both legs. A CI run on Ubuntu 24.04 has not happened; the same
+  AppImages built on the Arch host are rejected there by the loader (`GLIBC_2.44 not found`), which is expected.*
+  - [ ] **This machine, by hand** (the maintainer's desktop; real display, real FUSE; use a scratch `HOME` or back up
+    `~/.local/share/dockering` first, because the old build in this test overwrites `state.json` and `offer.json`):
+    1. Build the pair: `scripts/linux-update/build-appimages.sh ~/dk-e2e --source worktree`, then `cargo xtask update-e2e-fixture
+       --out ~/dk-e2e/fixture --appimage ~/dk-e2e/Dockering-x86_64.AppImage --version <its version>` and serve
+       `~/dk-e2e/fixture/root` with `python3 scripts/linux-update/serve.py --root ~/dk-e2e/fixture/root --port 8099 --log ~/dk-e2e/req.jsonl`.
+    2. Install the OLD AppImage as `~/.local/bin/dockering` and start it **from the launcher** (the `.desktop` entry's `Exec`,
+       not a terminal) with `DOCKERING_UPDATE_E2E_URL=http://127.0.0.1:8099`, `DOCKERING_UPDATE_E2E_KEY=$(tr -d '\n' < ~/dk-e2e/fixture/public-key.txt)` and `DOCKERING_UPDATE_E2E_FIRST_CHECK_SECS=5` in the environment the launcher gives it.
+    3. Within seconds: one notification with *Restart now*, and the same icon in the title bar next to the other icons
+       (screenshot). Close and reopen the window: the icon is still there and there is no second notification.
+    4. *Restart now*: the window closes and the new version opens by itself (screenshot of 'Updated to …'), the icon is gone,
+       `sha256sum ~/.local/bin/dockering` equals the new AppImage's, and `pgrep -a dockering` shows no process of the old mount.
+    5. Repeat with `~/.local/bin/dockering` a **symlink** to an AppImage in another directory: the target is replaced, the link
+       stays a link. Repeat with the directory not writable (`chmod a-w ~/.local/bin`): a *Download* offer, no asset request.
+    6. Record the Hyprland and runtime versions, the commit, and attach the screenshots.
+- [ ] Linux, `.deb` and tarball installs: the offer is *Download* (UPD-006). *Covered by Tier 1 tests; not run on a real `.deb`.*
 - [ ] macOS: the update shows a *Download* offer (no in-app install; UPD-016 is deferred).
 - [ ] Attach exact commit, artifact, OS and architecture to each result. Linux runs and mocks do not complete the Windows items.
 - [ ] First updater release installed by hand, then a second release updates it by itself.
