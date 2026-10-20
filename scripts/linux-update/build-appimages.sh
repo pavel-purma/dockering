@@ -158,6 +158,10 @@ build() {
   fi
   echo "build-appimages.sh: [$which] cargo xtask package --target $triple --formats appimage --no-archive" >&2
   rm -f "$packaged"
+  # xtask bakes the path of the checkout it was built from (CARGO_MANIFEST_DIR) and cargo does not rebuild it when only that
+  # path changes: a target directory shared with a build of another checkout, or of a worktree that is gone, would run the
+  # stale xtask and fail with "failed to spawn cargo metadata"
+  (cd "$src" && cargo clean -p xtask) >&2
   (cd "$src" && APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP="${NO_STRIP-1}" cargo xtask package --target "$triple" --formats appimage --no-archive) >&2
   [ -s "$packaged" ] || { echo "build-appimages.sh: cargo xtask package did not write $packaged" >&2; exit 1; }
   cp -f "$packaged" "$out/$name"

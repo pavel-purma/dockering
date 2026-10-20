@@ -8,9 +8,12 @@ Lowest layer that proves each piece:
 - `scripts/linux-update/build-appimages.sh` runs under bash against a fake `cargo` (and a fake `git`) that come first on PATH and
   record their argv, working directory and the environment variables that matter, so which features and which build-time
   version each AppImage gets is a real code path with scripted answers;
+- `scripts/linux-update/run.sh` runs under bash against a fake `docker` and a fake `xtask`: its validation, the docker command line
+  (read-only inputs, the FUSE privileges only on the fuse leg, no secret mounted) and the exit status;
+- `scripts/linux-update/selftest.sh` is started for real (two of its controls): the runner must fail when it should;
 - contract tests read the release workflow and the script headers. That the AppImages themselves build and print their versions
   needs a full build: see the `--version` checks inside build-appimages.sh.
-`scripts/linux-update/run.sh` and the scenarios S1-S4 need Docker and are tests of their own (plan tasks 13, 14).
+The scenarios themselves (S1-S4 in a container, `run.sh` against real AppImages) need Docker and are run by hand and by CI (plan tasks 13-15).
 """
 
 import http.client
@@ -359,6 +362,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 case "$verb" in
+  clean)
+    [ "${FAKE_CARGO_FAIL:-}" != clean ] || exit 103
+    ;;
   build)
     [ "${FAKE_CARGO_FAIL:-}" != build ] || exit 101
     version=$FAKE_WORKSPACE_VERSION
@@ -504,7 +510,7 @@ class BuildScriptTests(unittest.TestCase):
     def test_rel_086_new_appimage_is_built_like_a_release(self):
         # a stray variable of the caller must not turn the release-shaped build into a seam build
         self.build(env={"DOCKERING_E2E_VERSION": "7.7.7"})
-        new_build = self.cargo_calls()[2]
+        new_build = self.cargo_calls()[3]
         self.assertEqual(
             new_build["argv"],
             ["build", "--release", "--locked", "-p", "dockering", "--target", self.TRIPLE, "--features", "updater"],
@@ -521,8 +527,14 @@ class BuildScriptTests(unittest.TestCase):
     def test_rel_085_each_appimage_is_packaged_the_way_the_release_workflow_packages(self):
         self.build()
         calls = self.cargo_calls()
-        self.assertEqual([call["argv"][0] for call in calls], ["build", "xtask", "build", "xtask"], "old first, the release-shaped build last")
-        for package in (calls[1], calls[3]):
+        self.assertEqual(
+            [call["argv"][0] for call in calls],
+            ["build", "clean", "xtask", "build", "clean", "xtask"],
+            "old first, the release-shaped build last",
+        )
+        for clean in (calls[1], calls[4]):
+            self.assertEqual(clean["argv"], ["clean", "-p", "xtask"], "a stale xtask (it bakes its checkout's path) is rebuilt")
+        for package in (calls[2], calls[5]):
             self.assertEqual(
                 package["argv"],
                 ["xtask", "package", "--target", self.TRIPLE, "--formats", "appimage", "--no-archive"],
@@ -535,7 +547,7 @@ class BuildScriptTests(unittest.TestCase):
         workflow = read(RELEASE_WORKFLOW)
         self.assertIn('cargo build --release --locked -p dockering --target "$TARGET" "${features[@]}"', workflow)
         self.assertIn("run: cargo xtask package --target ${{ matrix.target }}\n", workflow, "the release call has no extra flags")
-        self.assertEqual(calls[1]["argv"][:4], ["xtask", "package", "--target", self.TRIPLE])
+        self.assertEqual(calls[2]["argv"][:4], ["xtask", "package", "--target", self.TRIPLE])
         self.assertNotIn("update-e2e", workflow)
 
     def test_rel_085_a_callers_no_strip_is_kept(self):
@@ -571,14 +583,16 @@ class BuildScriptTests(unittest.TestCase):
                 self.log.unlink(missing_ok=True)
                 result = self.run_script(self.out, env={"FAKE_CARGO_FAIL": step})
                 self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(len(self.cargo_calls()), 1 if step == "build" else 2, "it stops at the first failure")
+                self.assertEqual(len(self.cargo_calls()), 1 if step == "build" else 3, "it stops at the first failure")
                 self.assertEqual(
                     sorted(p.name for p in self.scratch.iterdir()), [], "the scratch directory of the script is removed on failure too"
                 )
 
     def test_rel_085_aarch64_names_and_triple(self):
         self.build("--arch", "aarch64")
-        triples = {call["argv"][call["argv"].index("--target") + 1] for call in self.cargo_calls()}
+        triples = {
+            call["argv"][call["argv"].index("--target") + 1] for call in self.cargo_calls() if call["argv"][0] != "clean"
+        }
         self.assertEqual(triples, {"aarch64-unknown-linux-gnu"})
         self.assertEqual(
             sorted(p.name for p in self.out.iterdir()), ["Dockering-aarch64.AppImage", "Dockering-old-aarch64.AppImage"]
@@ -652,6 +666,313 @@ class BuildScriptTests(unittest.TestCase):
         for needle in ("gh run download", "Ubuntu 24.04 container", "linux-update-e2e.yml", "Arch", "GLIBC_x.y", "glibc"):
             self.assertIn(needle, header)
         self.assertIn("set -euo pipefail", script)
+
+
+FAKE_DOCKER = r"""#!/usr/bin/env bash
+# test double for `docker` as run.sh uses it: records the argv, answers pull/inspect, and plays the container on `run`
+set -eu
+{
+  for a in "$@"; do printf '%s\x1f' "$a"; done
+  printf '\n'
+} >>"$FAKE_DOCKER_LOG"
+case "$1" in
+  pull)
+    [ "${FAKE_DOCKER_PULL:-ok}" = ok ] || { echo "pull failed" >&2; exit 1; }
+    ;;
+  image)
+    [ "${FAKE_DOCKER_LOCAL:-yes}" = yes ] || exit 1
+    [ "$2" = inspect ] || exit 97
+    echo "${FAKE_DOCKER_REPO:-docker.io/library/ubuntu}@sha256:0123456789abcdef"
+    ;;
+  run)
+    out=""
+    FAKE_DOCKER_RESULT=${FAKE_DOCKER_RESULT:-pass}
+    for a in "$@"; do
+      case $a in
+        *:/out) out=${a%:/out} ;;
+        *:/fixture/root:ro)
+          fixture=$(dirname "${a%:/fixture/root:ro}")
+          if [ -e "$fixture/e2e.key" ]; then echo "the secret key is still there" >>"$FAKE_DOCKER_LOG.key"; fi
+          ;;
+      esac
+    done
+    [ "$FAKE_DOCKER_RESULT" != none ] || exit "${FAKE_DOCKER_EXIT:-0}"
+    mkdir -p "$out"
+    case "$FAKE_DOCKER_RESULT" in
+      pass) printf 'a PASS ok\nb PASS ok\n' >"$out/results.txt" ;;
+      fail) printf 'a PASS ok\nb FAIL broken\n' >"$out/results.txt" ;;
+    esac
+    cat "$out/results.txt"
+    exit "${FAKE_DOCKER_EXIT:-0}"
+    ;;
+  *) exit 96 ;;
+esac
+"""
+
+FAKE_XTASK = r"""#!/usr/bin/env bash
+# test double for the prebuilt xtask: `update-e2e-fixture --out DIR --appimage F --version V`
+set -eu
+{
+  for a in "$@"; do printf '%s\x1f' "$a"; done
+  printf '\n'
+} >>"$FAKE_XTASK_LOG"
+[ "${FAKE_XTASK_FAIL:-}" != yes ] || { echo "xtask exploded" >&2; exit 3; }
+[ "$1" = update-e2e-fixture ] || exit 97
+shift
+while [ $# -gt 0 ]; do
+  case $1 in --out) out=$2 ;; esac
+  shift
+done
+mkdir -p "$out/root"
+echo manifest >"$out/dockering-update.json"
+echo signature >"$out/dockering-update.json.minisig"
+echo public >"$out/public-key.txt"
+echo SECRET >"$out/e2e.key"
+"""
+
+
+@unittest.skipIf(WINDOWS or not BASH, "needs bash and a POSIX shell for the fakes")
+class RunScriptTests(unittest.TestCase):
+    """REL-085: run.sh against a fake docker and a fake xtask: validation, the docker command line and the exit status."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="dockering-run-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        for name, body in (("docker", FAKE_DOCKER), ("xtask", FAKE_XTASK)):
+            path = self.bin / name
+            path.write_text(body, encoding="utf-8", newline="\n")
+            path.chmod(0o755)
+        self.docker_log = self.tmp / "docker.log"
+        self.xtask_log = self.tmp / "xtask.log"
+        self.old = self.tmp / "old.AppImage"
+        self.new = self.tmp / "new.AppImage"
+        self.old.write_bytes(b"old appimage")
+        self.new.write_bytes(b"new appimage")
+        self.out = self.tmp / "out"
+
+    def run_script(self, *args, env=None):
+        environment = os.environ.copy()
+        for name in list(environment):
+            if name.startswith(("E2E_", "FAKE_")) or name == "DOCKERING_XTASK":
+                del environment[name]
+        environment.update(
+            PATH=f"{self.bin}{os.pathsep}{environment['PATH']}",
+            DOCKERING_XTASK=str(self.bin / "xtask"),
+            FAKE_DOCKER_LOG=str(self.docker_log),
+            FAKE_XTASK_LOG=str(self.xtask_log),
+            E2E_PULL_DELAY="0",
+        )
+        environment.update(env or {})
+        return subprocess.run(
+            [BASH, "--noprofile", "--norc", str(UPDATE / "run.sh"), *map(str, args)],
+            cwd=self.tmp,
+            env=environment,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+
+    def standard(self, *extra, env=None):
+        return self.run_script("ubuntu:24.04", "--old", self.old, "--new", self.new, "--out", self.out, *extra, env=env)
+
+    def calls(self, log):
+        if not log.exists():
+            return []
+        return [line.split("\x1f")[:-1] for line in read(log).splitlines()]
+
+    def runs(self):
+        return [call for call in self.calls(self.docker_log) if call[0] == "run"]
+
+    def test_rel_085_a_bad_command_line_is_a_usage_error_and_runs_nothing(self):
+        cases = {
+            "no image": [],
+            "no old": ["ubuntu:24.04", "--new", "new.AppImage"],
+            "no new": ["ubuntu:24.04", "--old", "old.AppImage"],
+            "image with a shell character": ["ubuntu;rm", "--old", "old.AppImage", "--new", "new.AppImage"],
+            "image starting with a dash": ["--old", "old.AppImage", "--new", "new.AppImage", "-x"],
+            "unknown scenario": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--scenario", "s9"],
+            "unknown leg": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--leg", "both,extract"],
+            "bad version": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--version", "1.2"],
+            "missing file": ["ubuntu", "--old", "nope.AppImage", "--new", "new.AppImage"],
+            "second image": ["ubuntu", "debian", "--old", "old.AppImage", "--new", "new.AppImage"],
+            "option without a value": ["ubuntu", "--old", "old.AppImage", "--new"],
+        }
+        for name, args in cases.items():
+            with self.subTest(name):
+                result = self.run_script(*[a if not a.endswith(".AppImage") else self.tmp / a for a in args])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("usage:", result.stderr)
+        self.assertEqual(self.calls(self.docker_log), [])
+        self.assertEqual(self.calls(self.xtask_log), [])
+
+    def test_rel_085_same_file_same_content_and_bad_seconds_are_usage_errors(self):
+        twin = self.tmp / "twin.AppImage"
+        twin.write_bytes(self.new.read_bytes())
+        for name, args, env in (
+            ("same file", ["--old", self.new, "--new", self.new], {}),
+            ("same content", ["--old", twin, "--new", self.new], {}),
+            ("seconds not a number", ["--old", self.old, "--new", self.new], {"E2E_WAIT_TREE": "soon"}),
+            ("seconds too long", ["--old", self.old, "--new", self.new], {"E2E_WAIT_NEW": "12345"}),
+        ):
+            with self.subTest(name):
+                result = self.run_script("ubuntu:24.04", *args, "--out", self.out, env=env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(self.calls(self.docker_log), [])
+
+    def test_rel_085_the_extract_leg_runs_one_unprivileged_container_with_read_only_inputs(self):
+        result = self.standard("--leg", "extract", "--version", "9.8.7")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (run,) = self.runs()
+        joined = "\x1f".join(run)
+        self.assertEqual(run[:2], ["run", "--rm"])
+        for forbidden in ("--privileged", "--device", "--cap-add", "--user", "-u", "--network=host", "--net=host"):
+            self.assertNotIn(forbidden, run)
+        self.assertIn(f"{self.old}:/in/old.AppImage:ro", run)
+        self.assertIn(f"{self.new}:/in/new.AppImage:ro", run)
+        self.assertTrue(any(a.endswith(":/fixture/root:ro") for a in run), joined)
+        self.assertTrue(any(a.endswith(":/fixture/public-key.txt:ro") for a in run), joined)
+        self.assertTrue(any(a.endswith("/scripts:ro") or a.endswith(":/scripts:ro") for a in run), joined)
+        self.assertIn("E2E_LEG=extract", run)
+        self.assertIn("E2E_VERSION=9.8.7", run)
+        self.assertEqual(run[-4:], ["ubuntu:24.04", "bash", "/scripts/entry.sh", "s1"])
+        self.assertIn("s1 extract PASS ubuntu:24.04", result.stdout)
+
+    def test_rel_085_the_throwaway_secret_key_is_never_mounted_and_is_gone_afterwards(self):
+        result = self.standard("--leg", "extract")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for run in self.runs():
+            self.assertFalse(any("e2e.key" in a for a in run), run)
+        self.assertFalse(Path(f"{self.docker_log}.key").exists(), "the key was deleted before the container started")
+        self.assertEqual(list(self.out.rglob("e2e.key")), [])
+        self.assertEqual([p.name for p in self.out.glob(".fixture-*")], [], "the fixture is removed")
+        (fixture,) = self.calls(self.xtask_log)
+        self.assertEqual(fixture[0], "update-e2e-fixture")
+        self.assertIn(str(self.new), fixture)
+        self.assertTrue((self.out / "extract" / "fixture" / "dockering-update.json.minisig").is_file())
+
+    def test_rel_085_the_fuse_leg_gets_exactly_the_fuse_privileges(self):
+        result = self.standard("--leg", "fuse")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (run,) = self.runs()
+        self.assertIn("/dev/fuse", run)
+        self.assertEqual(run[run.index("--cap-add") + 1], "SYS_ADMIN")
+        self.assertIn("apparmor=unconfined", run)
+        self.assertNotIn("--privileged", run)
+        self.assertIn("E2E_LEG=fuse", run)
+
+    def test_rel_085_both_legs_run_in_two_fresh_containers(self):
+        result = self.standard()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        runs = self.runs()
+        self.assertEqual([next(a for a in r if a.startswith("E2E_LEG=")) for r in runs], ["E2E_LEG=extract", "E2E_LEG=fuse"])
+        self.assertEqual(len({next(a for a in r if a.startswith("linux-update-")) for r in runs}), 2)
+        self.assertIn("s1 extract PASS", result.stdout)
+        self.assertIn("s1 fuse PASS", result.stdout)
+
+    def test_rel_085_the_version_defaults_to_the_workspace_version_and_the_evidence_names_the_image(self):
+        self.standard("--leg", "extract")
+        info = read(self.out / "image.txt")
+        self.assertIn(f"version={workspace_version()}", info)
+        self.assertIn("digest=docker.io/library/ubuntu@sha256:", info)
+        self.assertRegex(info, r"old=.*old\.AppImage sha256 [0-9a-f]{64}")
+        self.assertRegex(info, r"new=.*new\.AppImage sha256 [0-9a-f]{64}")
+
+    def test_rel_085_the_wait_overrides_are_forwarded_by_name_only(self):
+        self.standard("--leg", "extract", env={"E2E_WAIT_TREE": "7", "E2E_FIRST_CHECK_SECS": "3"})
+        (run,) = self.runs()
+        self.assertIn("E2E_WAIT_TREE", run)
+        self.assertIn("E2E_FIRST_CHECK_SECS", run)
+        self.assertNotIn("E2E_WAIT_TREE=7", run)
+        self.assertNotIn("E2E_WAIT_BUTTON", run)
+
+    def test_rel_085_a_failing_check_is_exit_one_even_when_the_container_exits_zero(self):
+        result = self.standard("--leg", "extract", env={"FAKE_DOCKER_RESULT": "fail", "FAKE_DOCKER_EXIT": "0"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("s1 extract FAIL", result.stdout)
+
+    def test_rel_085_a_failing_container_is_exit_one_and_the_other_leg_still_runs(self):
+        result = self.standard(env={"FAKE_DOCKER_RESULT": "fail", "FAKE_DOCKER_EXIT": "1"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(self.runs()), 2)
+        self.assertIn("s1 extract FAIL", result.stdout)
+        self.assertIn("s1 fuse FAIL", result.stdout)
+
+    def test_rel_085_a_leg_without_results_is_a_failure_not_a_pass(self):
+        result = self.standard("--leg", "extract", env={"FAKE_DOCKER_RESULT": "none", "FAKE_DOCKER_EXIT": "0"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("wrote no results.txt", result.stderr)
+        self.assertIn("s1 extract FAIL", result.stdout)
+
+    def test_rel_085_a_failing_fixture_step_stops_before_docker_run(self):
+        result = self.standard("--leg", "extract", env={"FAKE_XTASK_FAIL": "yes"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.runs(), [])
+        self.assertIn("update-e2e-fixture failed", result.stderr)
+
+    def test_rel_085_a_pull_that_fails_falls_back_to_the_local_image_or_stops(self):
+        local = self.standard("--leg", "extract", env={"FAKE_DOCKER_PULL": "fail"})
+        self.assertEqual(local.returncode, 0, local.stdout + local.stderr)
+        self.assertIn("using the local copy", local.stderr)
+        self.assertEqual(len([c for c in self.calls(self.docker_log) if c[0] == "pull"]), 3, "three tries")
+
+        self.docker_log.unlink()
+        gone = self.standard("--leg", "extract", env={"FAKE_DOCKER_PULL": "fail", "FAKE_DOCKER_LOCAL": "no"})
+        self.assertEqual(gone.returncode, 1, gone.stdout + gone.stderr)
+        self.assertEqual(self.runs(), [])
+
+    def test_rel_085_a_missing_xtask_binary_says_how_to_build_it(self):
+        result = self.standard("--leg", "extract", env={"DOCKERING_XTASK": str(self.tmp / "no-such-xtask")})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("cargo build -p xtask", result.stderr)
+        self.assertEqual(self.runs(), [])
+
+
+@unittest.skipIf(WINDOWS or not BASH, "needs bash and a POSIX shell")
+class SelftestScriptTests(unittest.TestCase):
+    """REL-085: selftest.sh proves the runner can fail: its command line, and two controls run for real."""
+
+    SELFTEST = UPDATE / "selftest.sh"
+
+    def selftest(self, *args, timeout=240):
+        return subprocess.run(
+            [BASH, "--noprofile", "--norc", str(self.SELFTEST), *args],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+
+    def test_rel_085_the_controls_are_listed_and_include_the_baseline_and_the_missing_swap(self):
+        result = self.selftest("--list")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = result.stdout.split()
+        self.assertEqual(names[0], "baseline", "the clean run comes first")
+        self.assertGreaterEqual(len(names), 5, "at least four defects besides the baseline")
+        for name in ("no_swap", "no_button", "old_lingers", "wrong_user_agent"):
+            self.assertIn(name, names)
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_rel_085_a_bad_command_line_is_a_usage_error(self):
+        for args in (["--jobs", "0"], ["--jobs", "x"], ["--only", "No-Such Control"], ["--bogus"], ["--only"]):
+            with self.subTest(args=args):
+                result = self.selftest(*args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("usage:", result.stderr)
+
+    def test_rel_085_an_unknown_control_name_is_not_a_pass(self):
+        result = self.selftest("--only", "no_such_control")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the stand-in app uses /proc")
+    def test_rel_085_the_baseline_passes_and_a_missing_swap_fails_exactly_the_swap_check(self):
+        result = self.selftest("--only", "baseline,no_swap", "--jobs", "2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(result.stdout, r"baseline\s+\| PASS \| no check failed")
+        self.assertRegex(result.stdout, r"no_swap\s+\| PASS \| failed exactly: swap")
+        self.assertIn("== selftest: 2 passed, 0 failed", result.stdout)
 
 
 class ScriptFilesTests(unittest.TestCase):
