@@ -437,6 +437,19 @@ impl Rig {
         std::fs::read(self.updates_dir().join(OFFER_FILE)).expect("offer.json")
     }
 
+    /// `offer.json` without `confirmed_at`, which every successful check refreshes (and whose
+    /// RFC 3339 text changes length with the sub-second digits).
+    fn offer_json_sans_time(&self) -> serde_json::Value {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&self.offer_json()).expect("offer.json is JSON");
+        value
+            .as_object_mut()
+            .expect("an object")
+            .remove("confirmed_at")
+            .expect("confirmed_at is stored");
+        value
+    }
+
     /// Everything under the updates directory (files, relative, sorted), and its top-level names.
     fn update_files(&self) -> Vec<String> {
         fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
@@ -1663,7 +1676,7 @@ async fn upd_e2e_s8_restart_with_announced_offer() {
     assert!(!hub.mark_update_notified("0.2.0"));
     hub.shutdown();
     assert_eq!(rig.counts(), counts(1, 1, 1));
-    let json = rig.offer_json();
+    let json = rig.offer_json_sans_time();
     let saved = || crate::load_config(&rig.paths()).1;
     assert_eq!(saved().updates.notified_version.as_deref(), Some("0.2.0"));
 
@@ -1722,7 +1735,7 @@ async fn upd_e2e_s8_restart_with_announced_offer() {
         strategy.last_job().payload.as_deref(),
         Some(rig.payload("0.2.0").as_path())
     );
-    assert_eq!(rig.offer_json().len(), json.len(), "the same offer file");
+    assert_eq!(rig.offer_json_sans_time(), json, "the same offer file");
     assert_eq!(rig.counts(), Counts::default());
 }
 

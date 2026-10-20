@@ -257,10 +257,17 @@ fn upd_013_the_stand_in_passes_the_appimage_probe() {
     let path = dir.path().join("Dockering.AppImage");
     write_executable(&path, &stub::appimage("1.2.3", None, false));
     assert!(FsProbe.is_appimage_file(&path), "ELF magic and `AI\\x02`");
-    let output = std::process::Command::new(&path)
-        .arg("--version")
-        .output()
-        .expect("the stand-in runs");
+    // Another test's fork can hold the just-written file's descriptor for a moment (ETXTBSY).
+    let mut attempts = 0;
+    let output = loop {
+        match std::process::Command::new(&path).arg("--version").output() {
+            Err(error) if error.raw_os_error() == Some(26) && attempts < 50 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            result => break result.expect("the stand-in runs"),
+        }
+    };
     assert_eq!(String::from_utf8_lossy(&output.stdout), "dockering 1.2.3\n");
 }
 
