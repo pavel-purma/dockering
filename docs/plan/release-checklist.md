@@ -55,11 +55,10 @@ These unchecked gates do not alter any historical release result below.
     `C:\Program Files\Git\cmd\git.exe` (install both at those paths so the signed-file half runs).
   - [ ] **`upd_007_locked_per_user_start_works_w1`** passes: a per-user start of a `FILE_SHARE_READ`-locked image (a copy of
     `hostname.exe`). If it fails with `LockedStartFailed`, Windows refuses such a start and the UPD-007 fallbacks apply.
-- [ ] Linux, end-to-end (REL-085, REL-087 c): `linux-update-e2e.yml` (a green pull-request run on `ubuntu-24.04`, with its
-  `linux-update-e2e` artifact) runs S1 (extract-and-run and FUSE legs) to S4. Record the run URL, the commit and the image digest
-  in `image.txt`. *Run locally 2026-10-20 through `scripts/linux-update/run.sh` on `ghcr.io/archlinux/archlinux:latest`
-  (glibc 2.44, the build host's): `--scenario all` passed S1 in both legs (23 of 23 checks) and S2, S3 and S4 in the extract leg (24, 19 and 24 checks). A CI run on Ubuntu 24.04 has not happened; the same
-  AppImages built on the Arch host are rejected there by the loader (`GLIBC_2.44 not found`), which is expected.*
+- [x] Linux, end-to-end (REL-085, REL-087 c): `linux-update-e2e.yml` (a green pull-request run on `ubuntu-24.04`, with its
+  `linux-update-e2e` artifact) runs S1 (extract-and-run and FUSE legs) to S4. **Green 2026-10-20:** [run 39393495043](https://github.com/pavel-purma/dockering/actions/runs/39393495043) on commit `2ab9bec` (pull request #54), image `mirror.gcr.io/library/ubuntu:24.04` digest `sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac`, 16 minutes with the build; S1 extract 23, S1 FUSE 23, S2 24, S3 19, S4 24 checks, no FAIL or SKIP; the artifact has no AppImage and no key. *Before that, run locally 2026-10-20 through `scripts/linux-update/run.sh` on `ghcr.io/archlinux/archlinux:latest`
+  (glibc 2.44, the build host's): `--scenario all` passed S1 in both legs (23 of 23 checks) and S2, S3 and S4 in the extract leg (24, 19 and 24 checks). The same
+  AppImages built on the Arch host are rejected on Ubuntu 24.04 by the loader (`GLIBC_2.44 not found`), which is expected: the CI builds its own on the Ubuntu runner.*
   - [ ] **This machine, by hand** (the maintainer's desktop; real display, real FUSE; use a scratch `HOME` or back up
     `~/.local/share/dockering` first, because the old build in this test overwrites `state.json` and `offer.json`):
     1. Build the pair: `scripts/linux-update/build-appimages.sh ~/dk-e2e --source worktree`, then `cargo xtask update-e2e-fixture

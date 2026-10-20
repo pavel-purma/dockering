@@ -1,7 +1,7 @@
 # Plan: One shared updater for Windows, macOS and Linux, installing without OS code signing
 
 - **Slug:** `linux-appimage-updates` (kept so existing links work; the scope is no longer Linux-only)
-- **Status:** implemented (2026-10-20) on `feat/shared-updater`; **not `done`**: open are task 0 (update keys, maintainer), task 20 (first updater release and its live proof, maintainer), the Windows spike W1 and the unrun GitHub e2e workflow (see §11) <!-- set to `done` when its open list is empty -->
+- **Status:** implemented (2026-10-20) on `feat/shared-updater`; **not `done`**: open are task 0 (update keys, maintainer), task 20 (first updater release and its live proof, maintainer), the Windows spike W1 and the Windows CI update leg (see §11) <!-- set to `done` when its open list is empty -->
 - **Spec:** [distribution.md](../../spec/features/distribution.md) §7 (UPD) and §9 (REL-083…087) · [ADR-0007 (accepted)](../adr/0007-cross-platform-updater.md)
 - **Milestone:** none; follows v0.3.0, the first updater release is the next release after approval
 - **Requirement IDs:** UPD-013, UPD-014, UPD-015, UPD-017, REL-083…087 (new) · UPD-016 (new, **deferred**) · UPD-003, UPD-005…UPD-012, REL-012, REL-016, REL-017, REL-031, REL-032, REL-060, SET-090, KBD-076, SHL-022 (changed)
@@ -456,7 +456,7 @@ Order: 1 first (it touches many files); 2 and 4 next, then 3a → 3b → 9, 10; 
 
 ## 11. Completion report (2026-10-20)
 
-Reconciled by `/feature-planning complete`. Implemented on `feat/shared-updater`, reviewed read-only on `claude-sonnet-5.5` (approve with fixes; no blockers; the fixes are in), verified on Linux. Nothing here has run on Windows or on GitHub.
+Reconciled by `/feature-planning complete`. Implemented on `feat/shared-updater`, reviewed read-only on `claude-sonnet-5.5` (approve with fixes; no blockers; the fixes are in), verified on Linux. Nothing here has run on Windows; the Linux end-to-end workflow ran green on GitHub on `ubuntu-24.04` (run 39393495043).
 
 | ID | Implemented | Tests | Notes |
 |---|---|---|---|
@@ -470,13 +470,13 @@ Reconciled by `/feature-planning complete`. Implemented on `feat/shared-updater`
 | UPD-015, UPD-017 | yes | view, hub, 26 in-process HTTP scenarios, S1 and S4 | |
 | UPD-016 | deferred | `upd_006_deb_and_macos_get_download_offer_over_http` | macOS shows *Download* only |
 | REL-083, REL-084, REL-086 | yes, workflow only | `test_rel_083_*`, `test_rel_084_*`, `test_rel_086_*`, xtask `rel_084_*` | not run on a real tag, draft or `main` rehearsal; `verify-update-artifacts` now also runs in `assemble` |
-| REL-085 | yes | `RunScriptTests`, `SelftestScriptTests` (31 controls), S1–S4 through Docker, workflow contract tests | the workflow has not run on GitHub |
+| REL-085 | yes | `RunScriptTests`, `SelftestScriptTests` (31 controls), S1–S4 through Docker, workflow contract tests | green on GitHub on `ubuntu-24.04` ([run 39393495043](https://github.com/pavel-purma/dockering/actions/runs/39393495043)); its weekly and dispatch triggers have not fired yet |
 | REL-087 | CI leg written | `test_installer_smoke_update.py` | W1 and the CI leg unrun on Windows |
 | SHL-022 | yes | `shl_022_wait_runs_before_config_load` (xtask order scan), `shl_022_relaunch_never_sends_focus_while_waiting` | |
 | REL-012, REL-016, REL-017, REL-031, REL-032, REL-060 | yes | the python and xtask suites | |
 
 **Deviations from this plan, all in the spec:** (1) one small `unsafe` `pre_exec` closure and a Linux-only `libc` dependency close inherited descriptors in the swap's children (ADR-0007 amended); (2) the failure toast of S2 is *Couldn't start the update*; (3) evidence directories are `<scenario>-<leg>` and S2–S4 run the extract leg only; (4) `notes_url` is pinned to this project's releases like the asset URL; (5) the unused `spawn_installer` was removed; (6) `verify-update-artifacts` runs in `assemble`, not only in the skill; (7) an AppImage needs the glibc of its build host, so a locally built pair runs on the build host's image (Arch), and the Ubuntu 24.04 image is the CI's.
 
-**Open (why this plan is not `done`):** task 0 (maintainer: update keys), task 20 (first updater release by hand, then a second to prove the self-update), spike W1 and the Windows CI update leg, one green GitHub run of `linux-update-e2e.yml` (with the FUSE leg and a measured wall time), the checklist's manual desktop check.
+**Open (why this plan is not `done`):** task 0 (maintainer: update keys), task 20 (first updater release by hand, then a second to prove the self-update), spike W1 and the Windows CI update leg, the checklist's manual desktop check.
 
 **Follow-ups (nits from the review, none blocks a merge):** kill the whole process group on a self-test timeout (`appimage/selftest.rs`); keep the offer in *Applying* after a handoff until the process exits; the unreachable hard-disabled branch of the Settings offer row; `pump` in `dockering/src/testing.rs` sleeps for real; consider skipping fork pull requests in the end-to-end workflow (it runs under `SYS_ADMIN`); on kernels before 5.11 the `fcntl` fallback stops at fd 65 535.
