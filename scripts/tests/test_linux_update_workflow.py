@@ -64,7 +64,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertRegex(on, r'cron: "\d+ \d+ \* \* \d"', "weekly")
 
     def test_rel_085_it_is_not_a_required_check(self):
-        ci = read(CI)
+        ci = without_comments(read(CI))
         self.assertNotIn("linux-update-e2e", ci, "ci.yml's gate must not depend on it (REL-080)")
         self.assertNotIn("Linux update e2e", ci)
 
