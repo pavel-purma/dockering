@@ -824,11 +824,14 @@ class DocumentTests(unittest.TestCase):
             self.assertRegex(sources, rf"fn {name}\(\)", f"{name} no longer exists in crates/dk-update")
         self.assertIn("cargo test -p dk-update --lib -- _w1", block)
 
-    def test_rel_087_spec_row_claims_nothing_verified(self):
+    def test_rel_087_spec_row_claims_only_the_ci_leg_verified(self):
         spec = SPEC.read_text(encoding="utf-8")
-        row = next(line for line in spec.split("\n") if line.startswith("| REL-087 | *Windows leg written"))
-        self.assertIn("Nothing here is verified on Windows", row)
-        self.assertIn("W1 not started", row)
+        row = next(line for line in spec.split("\n") if line.startswith("| REL-087 | *Windows CI leg green"))
+        # The CI leg ran (same-version mode); nothing beyond it, and none of W1, is claimed.
+        self.assertIn("W1, the manual rows, is not started", row)
+        self.assertIn("nothing beyond that CI leg is verified on Windows", row)
+        self.assertIn("same-version mode", row)
+        self.assertNotIn("W1 passed", row)
         self.assertIn("test_installer_smoke_update.py", row)
         self.assertIn("-AllowSameVersion", row)
         self.assertIn("release-checklist.md", row)
