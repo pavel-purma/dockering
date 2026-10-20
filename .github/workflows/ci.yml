@@ -221,6 +221,56 @@ jobs:
           $setup = "target\dist\${{ matrix.target }}\Dockering-Setup-${{ matrix.arch }}.exe"
           pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version
           pwsh -NoProfile -File scripts/installer-smoke.ps1 -Setup $setup -Version $version -AllUsers
+      # REL-087 (b), the update leg: the installer under test runs with exactly the updater's argv over the last published
+      # stable release's installer (per user), then everything is uninstalled. With no published release (the first release
+      # ever) or no answer from GitHub the step skips with a notice or warning and never fails the job. While the workspace
+      # version equals the last release (the usual state between releases) the leg runs with -AllowSameVersion: it can't see a
+      # version change then and prints a SKIP line; on a version bump it is strict. Spike W1 items (Mark-of-the-Web,
+      # Defender, SmartScreen, UAC, the share-locked start) are manual and are not asserted here.
+      - name: Update leg, last release to this build (REL-087)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Skip([string] $Level, [string] $Why) {
+            Write-Host "::$Level title=Update leg skipped::$Why"
+            if ($env:GITHUB_STEP_SUMMARY) { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Update leg (REL-087) not run: $Why" }
+            exit 0
+          }
+          # A transient GitHub failure must not turn a pull request red: three tries, then the caller skips.
+          function Invoke-Retry([scriptblock] $Command) {
+            for ($try = 1; $try -le 3; $try++) {
+              & $Command
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($try -lt 3) { Start-Sleep -Seconds (5 * $try) }
+            }
+          }
+          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Write-Host '::error::gh is not on PATH on this runner'; exit 1 }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $name = "Dockering-Setup-$env:ARCH.exe"
+          $setup = "target\dist\$env:TARGET\$name"
+          $json = Invoke-Retry { gh release list --repo $env:REPO --exclude-drafts --exclude-pre-releases --limit 1 --json tagName }
+          if ($LASTEXITCODE -ne 0) { Skip 'warning' 'GitHub did not answer the release list in three tries' }
+          $latest = if ($json) { @($json | ConvertFrom-Json) } else { @() }
+          if ($latest.Count -eq 0) { Skip 'notice' 'no stable release is published yet, so there is nothing to update from' }
+          $tag = [string] $latest[0].tagName
+          if ($tag -notmatch '^v\d+\.\d+\.\d+') { Skip 'warning' "the latest release tag '$tag' is not vX.Y.Z" }
+          $dest = Join-Path $env:RUNNER_TEMP 'update-from'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Invoke-Retry { gh release download $tag --repo $env:REPO --pattern $name --pattern SHA256SUMS --dir $dest --clobber }
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $dest $name)) -or -not (Test-Path (Join-Path $dest 'SHA256SUMS'))) {
+            Skip 'warning' "could not download $name and SHA256SUMS from $tag"
+          }
+          $legArgs = @('-Setup', $setup, '-Version', $version, '-UpdateFrom', (Join-Path $dest $name), '-UpdateFromSums', (Join-Path $dest 'SHA256SUMS'))
+          if ($tag -eq "v$version") { $legArgs += '-AllowSameVersion' }
+          Write-Host "update leg: $tag ($name) -> $version"
+          pwsh -NoProfile -NonInteractive -File scripts/installer-smoke.ps1 @legArgs
+          exit $LASTEXITCODE
       - name: Collect binary
         shell: bash
         env:

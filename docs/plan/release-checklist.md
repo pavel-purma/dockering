@@ -16,8 +16,45 @@ These unchecked gates do not alter any historical release result below.
   manifest URL/kind/hash/size/version match the draft.
 - [ ] Shared on all three OSes (view tests in CI): one notification per version, title-bar button from the offer,
   retention through re-checks and offline start, withdrawal of a pulled release, Settings offer row.
-- [ ] Windows x64/ARM64: spike W1 report (no Mark-of-the-Web, *Unknown publisher*, share-locked start, cancellation,
-  Explorer relaunch) and the `installer-smoke.ps1` update leg; manual UAC check on a real machine.
+- [ ] Windows x64/ARM64, CI (REL-087 b): the `installer-smoke.ps1` update leg (`-UpdateFrom` / `-UpdateFromSums`; build step
+  *Update leg, last release to this build*) is green on `windows-2025` and `windows-11-arm`: the last stable release's installer,
+  checked against its `SHA256SUMS`, installed per user; the installer under test run with exactly the updater's argv; version,
+  files and a `/RELAUNCH` process from the install dir checked; silent uninstall leaves nothing. Record the run, the commit, the
+  old and the new version and which mode ran: strict (a version bump) or `-AllowSameVersion` (the last release has this
+  version, so the version change itself is not asserted; the step prints a `SKIP` line). A skipped step (no release, no GitHub)
+  is not a pass. A CI run is not a W1 result and proves none of the rows below. *Not run on Windows yet.*
+- [ ] Windows, **spike W1, manual** (REL-087 a): the maintainer on a real Windows 10/11 machine, with a throwaway per-user
+  profile or VM for the all-users rows. Record per row: pass or fail, Windows build and architecture, the commit, the installer's
+  artifact name and SHA-256, and a screenshot for UAC and SmartScreen. A Linux run, a mock or a CI runner completes none of
+  them. Nothing below is checked, and the plan's expectations stay expectations until it is:
+  - [ ] **Mark-of-the-Web / SmartScreen:** an installer written by the app's own HTTP client has no `Zone.Identifier` stream
+    (`Get-Item -Stream * <installer>` lists only `:$DATA`), and SmartScreen does not intervene when the app starts it. Compare
+    with the same installer saved from a browser.
+  - [ ] **Defender and Smart App Control:** an unsigned app starting an unsigned installer is not blocked or quarantined, with
+    Smart App Control on and off. If either blocks it: the offer must become *Download* with the reason (UPD-007), and the
+    finding is recorded.
+  - [ ] **UAC text:** the prompt for an **all-users** unsigned install says *Unknown publisher* (screenshot). Declining it shows
+    *Couldn't start the update* and leaves the app running with the same offer.
+  - [ ] **Share-locked start:** Inno starts while the app holds the installer `FILE_SHARE_READ`-locked, per user and all users.
+    If it does not: a per-user install retries once after another hash check, an all-users install falls back to *Download*
+    rather than elevating an unlocked file. Record which of the three happened.
+  - [ ] **Cancel:** cancelling the installer (close the progress window, or end the process) leaves the old app installed and
+    working, and the next launch shows the same offer again.
+  - [ ] **Relaunch:** after an all-users update the new Dockering is started by Explorer and is **not elevated** (Task Manager,
+    *Elevated* column); after a per-user update it starts as the user. The window appears (the CI leg asserts only the process).
+  - [ ] **`WinVerifyTrust` for an unsigned PE:** on the Windows machine run
+    `cargo test -p dk-update --lib -- _w1 --nocapture` (the three tests below are `#[cfg(windows)]` and not `#[ignore]`d, so this
+    filter selects exactly them; on Linux and macOS it lists 0 tests; CI's `test (windows-2025)` job runs them too, on a hosted
+    runner, which is CI evidence only). `upd_003_windows_unsigned_exe_is_no_signature_w1`
+    passes only if the unsigned test binary maps to *no signature*, that is, the status is in `NO_SIGNATURE_STATUSES`
+    (today only `TRUST_E_NOSIGNATURE`, `0x800B0100`); on failure its message carries `WinVerifyTrust status 0x…`: record that
+    value, and widen the list only from a recorded result. It prints no status on success. Cross-check the released installer
+    with `(Get-AuthenticodeSignature .\Dockering-Setup-x64.exe).Status` (expected `NotSigned`).
+  - [ ] **`upd_003_windows_open_handle_verdict_matches_path_w1`** passes: the verdict through an open handle equals the verdict by
+    path, for the unsigned test binary and, where they exist, `C:\Program Files\PowerShell\7\pwsh.exe` and
+    `C:\Program Files\Git\cmd\git.exe` (install both at those paths so the signed-file half runs).
+  - [ ] **`upd_007_locked_per_user_start_works_w1`** passes: a per-user start of a `FILE_SHARE_READ`-locked image (a copy of
+    `hostname.exe`). If it fails with `LockedStartFailed`, Windows refuses such a start and the UPD-007 fallbacks apply.
 - [ ] Linux: scenarios S1 (extract-and-run and FUSE legs) to S4 in `linux-update-e2e.yml`; manual check on a real
   desktop (this machine: Hyprland, real FUSE, launched from the `.desktop` entry, a symlinked install).
 - [ ] macOS: the update shows a *Download* offer (no in-app install; UPD-016 is deferred).
