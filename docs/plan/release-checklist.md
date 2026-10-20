@@ -58,7 +58,7 @@ These unchecked gates do not alter any historical release result below.
 - [ ] Linux, end-to-end (REL-085, REL-087 c): `linux-update-e2e.yml` (a green pull-request run on `ubuntu-24.04`, with its
   `linux-update-e2e` artifact) runs S1 (extract-and-run and FUSE legs) to S4. Record the run URL, the commit and the image digest
   in `image.txt`. *Run locally 2026-10-20 through `scripts/linux-update/run.sh` on `ghcr.io/archlinux/archlinux:latest`
-  (glibc 2.44, the build host's): S1 passed 23 of 23 checks in both legs. A CI run on Ubuntu 24.04 has not happened; the same
+  (glibc 2.44, the build host's): `--scenario all` passed S1 in both legs (23 of 23 checks) and S2, S3 and S4 in the extract leg (24, 19 and 24 checks). A CI run on Ubuntu 24.04 has not happened; the same
   AppImages built on the Arch host are rejected there by the loader (`GLIBC_2.44 not found`), which is expected.*
   - [ ] **This machine, by hand** (the maintainer's desktop; real display, real FUSE; use a scratch `HOME` or back up
     `~/.local/share/dockering` first, because the old build in this test overwrites `state.json` and `offer.json`):
