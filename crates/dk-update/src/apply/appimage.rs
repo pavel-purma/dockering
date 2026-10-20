@@ -29,6 +29,8 @@ use crate::UpdateError;
 #[cfg(target_os = "linux")]
 mod child;
 #[cfg(target_os = "linux")]
+mod fds;
+#[cfg(target_os = "linux")]
 mod flow;
 #[cfg(target_os = "linux")]
 mod relaunch;

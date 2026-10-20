@@ -34,6 +34,8 @@ impl<'a> ChildEnv<'a> {
     pub(super) fn command(&self, program: &Path) -> Command {
         let mut command = Command::new(program);
         command.env_clear();
+        // The runtime's mount descriptor must not reach the new app (see `fds`).
+        super::fds::close_inherited_fds(&mut command);
         command.envs(
             self.vars
                 .iter()
