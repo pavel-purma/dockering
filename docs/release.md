@@ -1,8 +1,8 @@
 # Releasing Dockering
 
-The repository is public. Releases so far are unsigned for all six supported targets. Windows code
-signing through SignPath Foundation is prepared ([signing.md](signing.md)); macOS notarization,
-winget, and the release bot stay deferred, and so does the updater: it is its own switch (`UPDATER=none|all`,
+The repository is public. Releases so far are unsigned for all six supported targets, and they stay
+unsigned until a certificate provider is set up; the workflow keeps the hooks for it ([signing.md](signing.md)).
+macOS notarization, winget, and the release bot stay deferred, and so does the updater: it is its own switch (`UPDATER=none|all`,
 REL-083, unset today), independent of OS signing, and the app side of it is still being built. The workflow always creates a **draft**;
 publication is a separate maintainer action. See [the specification](spec/features/distribution.md),
 the [signing guide](signing.md) and the [first-release plan](plan/features/unsigned-first-release.md).
@@ -39,7 +39,7 @@ from whatever state it finds if a run is interrupted.
 | 1–3 | Plan from the conventional commits since the last tag (`cargo xtask release-plan`), write both changelogs ([rules](../.agents/skills/release/changelog.md)) | **Prepare** |
 | 4–5 | Local gate on a scratch worktree, bump, local release build | **Prepare** |
 | 6–7 | Gate 1, release PR, wait for every check, squash-merge | **Pull request** |
-| 8–9 | Annotated tag on the merge commit, watch `release.yml` (signed channel: approve the SignPath requests) | **Tag**, **Build** |
+| 8–9 | Annotated tag on the merge commit, watch `release.yml` | **Tag**, **Build** |
 | 10 | `scripts/verify-release.ps1 -Expect … -Updater …` and `cargo xtask verify-update-artifacts --updater …` side by side, then the [draft gate](#draft-gate): the Linux and macOS smoke tests on the unpublished build | **Verify the draft** |
 | 11 | Gate 2, publish, check the public URLs, wait for the [Linux](#linux-smoke-test) and [macOS](#macos-smoke-test) smoke tests that publishing starts | **Publish** |
 | 12 | Record PR: README, release table, checklist | **Record** |
@@ -71,8 +71,7 @@ from whatever state it finds if a run is interrupted.
    ```
 
 5. **Build.** The tag starts `release.yml`: `gh run list --workflow release.yml --branch vX.Y.Z`, then
-   `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly. On the
-   signed channel each Windows job waits for two SignPath approvals ([signing.md](signing.md)).
+   `gh run watch <run-id> --exit-status`. It ends with a draft; a failed matrix blocks assembly.
 6. **Verify the draft** (`gh release download vX.Y.Z --dir target/release-review/vX.Y.Z`). Read the channel from the
    draft: the run's `updater-evidence-X.Y.Z` artifact (`gh run download <run-id> -n updater-evidence-X.Y.Z --dir
    target/release-review/evidence-X.Y.Z`, not into the release directory) holds six `updater-evidence-<target>.txt` files
@@ -449,13 +448,12 @@ how far it got. The channel is chosen by repository variables:
 |---|---|
 | `PUBLIC_RELEASES=true` | Selects **OS signing** only (REL-031, REL-083): tags are Authenticode-signed (and `MACOS_SIGNING` applies); it no longer decides the updater. A manual run's `unsigned` input (default true) overrides OS signing, never the updater. |
 | `UPDATER=none` \| `all` | The only switch for the updater (REL-083): `all` builds every target with `--features updater` and signs the manifest, with or without OS signing; off (`none`, also when unset) by default. A manual run takes the input `updater` = `inherit` (default, uses the variable) \| `none` \| `all`; on a `v*` tag the input must be `inherit`. Needs `UPDATE_SIGNING_KEY` and public keys in `keys.rs`. Set it only after the key phase and an `updater=all` rehearsal from `main`, and not before the app side of the updater (AppImage install, retained offer, title-bar button) lands: that part is planned. |
-| `WINDOWS_SIGNING` | `signpath` \| `azure` \| `none` (default). |
+| `WINDOWS_SIGNING` | `azure` \| `none` (default). |
 | `MACOS_SIGNING` | `apple` \| `none` (default). Independent of Windows (REL-034): a signed release never requires it. |
-| `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` | SignPath project. |
 | `WINDOWS_SIGNER_SUBJECT` | the expected signer subject; **required** by signed tag builds (REL-032). |
 
 Secrets live in the `release` environment (restricted to `main` and `v*` refs) and reach only the steps
-that use them: `SIGNPATH_API_TOKEN`; `UPDATE_SIGNING_KEY` (+ optional `UPDATE_SIGNING_KEY_PASSWORD`);
+that use them: `UPDATE_SIGNING_KEY` (+ optional `UPDATE_SIGNING_KEY_PASSWORD`);
 Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`,
 `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`; Apple: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`. Never commit a key.

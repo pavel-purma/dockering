@@ -7,7 +7,7 @@
 ## Context
 
 The updater (UPD-001…012) exists but is compiled in only when OS code signing is on, so no published
-build checks for updates, and Linux and macOS can only notify. OS code signing (SignPath, Apple) is not
+build checks for updates, and Linux and macOS can only notify. OS code signing (Windows Authenticode, Apple) is not
 available and must not gate updates. Common desktop updaters (for example VS Code, Electron/Squirrel and Zed)
 work the same way: check on a schedule, download in the background, show one 'ready' prompt, install
 on restart, and fall back to a download link where in-place install isn't possible. Historical ADRs 0001, 0005

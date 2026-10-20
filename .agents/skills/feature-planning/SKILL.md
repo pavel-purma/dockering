@@ -1,6 +1,11 @@
 ---
 name: feature-planning
-description: Spec-driven feature planning for Dockering. Use when the user asks to plan, design, add, or change a feature (e.g. "/feature-planning add container rename", "plan image search"), or to finalize a finished feature ("/feature-planning complete <slug>"). Reads docs/spec, writes a plan to docs/plan/features/<slug>.md, and updates the spec (requirements, status) so spec and code never drift. Never edits a changelog: the release skill writes both at release time.
+description: >-
+  Spec-driven feature planning for Dockering. Use when the user asks to plan, design,
+  add, or change a feature (e.g. "/feature-planning add container rename", "plan image search"),
+  or to finalize a finished feature ("/feature-planning complete <slug>"). Reads docs/spec,
+  writes a plan to docs/plan/features/<slug>.md, and updates the spec (requirements, status)
+  so spec and code never drift. Never edits a changelog: the release skill writes both at release time.
 ---
 
 # Feature planning (spec-driven)

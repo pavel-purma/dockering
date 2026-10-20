@@ -28,7 +28,7 @@ Released from `main` at `<short sha>` as workspace version `X.Y.Z`: <why this bu
 - [ ] Update channel (REL-084): the `updater-evidence-X.Y.Z` artifact of the release run has six files, every one `updater=<true|false>` as the channel says and `seam=false`; `cargo xtask verify-update-artifacts --assets <dir> --version X.Y.Z --updater <none|all>`: `<result: signed by the current key #0 or no .minisig with --updater none; version; six entries>`.
 - [ ] Exactly 15 files (16 with `.minisig` when the manifest is signed: updater `all` or an OS-signed build); all `SHA256SUMS` entries and the six-platform manifest match.
 - [ ] All attestations pass `gh attestation verify` with source digest `<sha>`, ref `refs/tags/vX.Y.Z`, the `release.yml` signer, self-hosted runners denied.
-- [ ] Notes identify <unsigned downloads | the code signing policy and attribution> and carry the sentence for the update channel (*Dockering checks for updates…* | *Automatic updates are not included…*).
+- [ ] Notes identify <unsigned | signed> downloads and carry the sentence for the update channel (*Dockering checks for updates…* | *Automatic updates are not included…*).
 - [ ] OS-signed only: every Windows executable and installer is `Valid`, timestamped, SHA-256, one signer `<subject>`.
 - [ ] Windows CI installer tests passed for x64 and ARM64, per user and `/ALLUSERS` (they do not start the application).
 - [ ] Launch check on this machine (profile written by `<previous version>`, then `--demo`): ran and passed, or not run (<why>).

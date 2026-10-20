@@ -19,12 +19,10 @@
 #                     key in crates/dk-update/src/keys.rs when all            REL-083, UPD-005
 #   PUBLIC_RELEASES   'true' → OS-signed channel; tags are OS-signed. It does not
 #                     decide the updater                                  REL-031, REL-060
-#   WINDOWS_SIGNING   signpath | azure | none (default none)            REL-031
+#   WINDOWS_SIGNING   azure | none (default none)                        REL-031
 #   MACOS_SIGNING     apple | none (default none), independent of Windows   REL-034
-#   SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG                      (signpath)
 #   WINDOWS_SIGNER_SUBJECT  expected Authenticode subject DN; required on signed tags   REL-032
 # Secrets (environment `release`):
-#   SIGNPATH_API_TOKEN                                                   (signpath)
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
 #   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE    (azure)
 #   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)          UPD-003 manifest signature;
@@ -103,7 +101,6 @@ jobs:
           MACOS_SIGNING: ${{ vars.MACOS_SIGNING || 'none' }}
           WINDOWS_SIGNER_SUBJECT: ${{ vars.WINDOWS_SIGNER_SUBJECT }}
           HAS_AZURE: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_SIGNING_ENDPOINT != '' && secrets.AZURE_SIGNING_ACCOUNT != '' && secrets.AZURE_CERT_PROFILE != '' }}
-          HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' && vars.SIGNPATH_PROJECT_SLUG != '' }}
           HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_API_KEY != '' && secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_KEY_P8 != '' }}
           HAS_UPDATE_KEY: ${{ secrets.UPDATE_SIGNING_KEY != '' }}
         run: |
@@ -177,8 +174,7 @@ jobs:
           if [[ "$unsigned" == false ]]; then
             case "$WINDOWS_SIGNING" in
               azure) [[ "$HAS_AZURE" == true ]] || { echo "::error::Azure signing configuration is incomplete"; exit 1; } ;;
-              signpath) [[ "$HAS_SIGNPATH" == true ]] || { echo "::error::SignPath signing configuration is incomplete"; exit 1; } ;;
-              *) echo "::error::signed mode requires WINDOWS_SIGNING=azure or signpath"; exit 1 ;;
+              *) echo "::error::signed mode requires WINDOWS_SIGNING=azure"; exit 1 ;;
             esac
             case "$MACOS_SIGNING" in
               apple)
@@ -237,7 +233,6 @@ jobs:
     environment: release
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -254,7 +249,6 @@ jobs:
       # Only "is it configured" booleans at job level: secret values never reach build steps
       # (cargo build scripts, cargo install, …), only the steps that use them (NFR-020, REL-013).
       HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' }}
-      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
       - name: Linux prerequisites (GPUI Kit)
@@ -314,29 +308,6 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
-      - name: Upload unsigned dockering.exe for SignPath
-        id: unsigned-exe
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: unsigned-exe-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/dockering.exe
-          if-no-files-found: error
-      - name: Sign dockering.exe (SignPath)
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: exe
-          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: target/${{ matrix.target }}/release
-          parameters: |
-            version: "${{ needs.verify.outputs.version }}"
 
       # --- macOS: cargo-packager signs and notarises the .app when the identity is set (REL-034) ---
       - name: Prepare macOS signing
@@ -384,29 +355,6 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
-      - name: Upload unsigned installer for SignPath
-        id: unsigned-setup
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: unsigned-setup-${{ matrix.target }}
-          path: target/dist/${{ matrix.target }}/Dockering-Setup-*.exe
-          if-no-files-found: error
-      - name: Sign the installer (SignPath)
-        if: needs.verify.outputs.unsigned != 'true' && runner.os == 'Windows' && env.SIGNING == 'signpath' && env.HAS_SIGNPATH == 'true'
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: installer
-          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: target/dist/${{ matrix.target }}
-          parameters: |
-            version: "${{ needs.verify.outputs.version }}"
 
       - name: Verify Windows signatures (REL-030, REL-032)
         id: verify-signatures
@@ -585,7 +533,6 @@ jobs:
           MACOS_SIGNED: ${{ needs.verify.outputs.macos_signed }}
           UPDATER: ${{ needs.verify.outputs.updater }}
           SIGN_MANIFEST: ${{ needs.verify.outputs.sign_manifest }}
-          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING || 'none' }}
           PUBLIC_REPOSITORY: ${{ github.event.repository.private != true }}
         run: |
           version="$VERSION"
@@ -605,17 +552,13 @@ jobs:
               updates="Automatic updates are not included in these builds; the update manifest has no signature." ;;
             *) echo "::error::inconsistent update channel (updater=$UPDATER, sign_manifest=$SIGN_MANIFEST)"; exit 1 ;;
           esac
-          policy="https://github.com/$GITHUB_REPOSITORY#code-signing-policy"
           {
             echo
             echo "---"
             if [[ "$UNSIGNED" == true ]]; then
               echo "**Unsigned release:** Windows files are not Authenticode-signed; macOS files are not Developer ID-signed or notarised. Windows SmartScreen and macOS Gatekeeper may warn or block launch. $updates"
             else
-              echo "**Signed release:** \`dockering.exe\` and the Windows installers are Authenticode-signed. See the [Code signing policy]($policy)."
-              if [[ "$WINDOWS_SIGNING" == signpath ]]; then
-                echo "Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)"
-              fi
+              echo "**Signed release:** \`dockering.exe\` and the Windows installers are Authenticode-signed."
               if [[ "$MACOS_SIGNED" != true ]]; then
                 echo "macOS files are not Developer ID-signed or notarised; Gatekeeper may warn or block launch."
               fi

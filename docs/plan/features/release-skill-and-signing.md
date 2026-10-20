@@ -1,10 +1,10 @@
-# Plan: `/release` skill, release-time changelogs, Windows signing (SignPath Foundation)
+# Plan: `/release` skill, release-time changelogs, Windows signing hooks
 
 - **Slug:** `release-skill-and-signing`
-- **Status:** in-progress (built 2026-10-06; the signing setup is the maintainer's, see [signing.md](../../signing.md))
+- **Status:** in-progress (built 2026-10-06; releases stay unsigned until a signing provider is set up, see [signing.md](../../signing.md))
 - **Spec:** [Distribution](../../spec/features/distribution.md)
 - **Milestone:** after the unsigned v0.1.0/v0.2.0 releases
-- **Requirement IDs:** REL-018, REL-019, REL-033, REL-034 (new); REL-010, REL-011, REL-031, REL-032, REL-060 (changed)
+- **Requirement IDs:** REL-018, REL-019, REL-034 (new); REL-033 (new, removed 2026-10-20); REL-010, REL-011, REL-031, REL-032, REL-060 (changed)
 - **Created:** 2026-10-06
 
 ## 1. Goal
@@ -13,29 +13,27 @@ One `/release` command does the whole release: it writes the changelogs from the
 the version from their severity, builds and tests locally, opens and merges the release PR, tags,
 watches the build, verifies the draft and publishes it after the maintainer's approval. The changelogs
 are written only at release time, so feature PRs stop conflicting on them. Windows downloads can be
-signed by SignPath Foundation, and the signed channel no longer waits for macOS signing.
+signed once a provider is set up, and the signed channel no longer waits for macOS signing.
 
 ## 2. Scope
 
 **In:** the `release` skill (Claude Code and OpenCode adapters), three `xtask` helpers, a committed
-draft verifier, `release.yml` changes, SignPath artifact configurations, the README code signing
-policy, the signing guide, the `feature-planning` change and the agent/spec text that mandated a
-changelog line per PR.
+draft verifier, `release.yml` changes, the signing guide, the `feature-planning` change and the
+agent/spec text that mandated a changelog line per PR.
 
-**Out:** applying to SignPath, creating the SignPath configuration, generating and storing the real
+**Out:** choosing and setting up a signing provider, generating and storing the real
 update keys, the signed rehearsal and the channel switch (maintainer steps, [signing.md](../../signing.md));
-Apple signing and notarization; retiring release-plz; a CI launch test; an app profile override;
-fewer SignPath approvals (restructuring the Windows jobs).
+Apple signing and notarization; retiring release-plz; a CI launch test; an app profile override.
 
 ## 3. Assumptions & open questions
 
 | # | Assumption / question | Default if unanswered |
 |---|---|---|
-| 1 | Windows provider: SignPath Foundation (free for open source, files show *SignPath Foundation* as publisher, manual approval per request). Azure Artifact Signing stays supported. | Decided by the maintainer. |
+| 1 | Windows provider: Azure Artifact Signing is the supported one; no provider is set up and releases stay unsigned. | Decided by the maintainer. |
 | 2 | macOS signing is independent of the signed channel (`MACOS_SIGNING`, default `none`). | Decided by the maintainer. |
 | 3 | The skill stops twice: before the release PR and before publishing. `auto` skips a stop only when the channel is unchanged, nothing warned and every check passed. | Decided by the maintainer. |
 | 4 | "The change log" in the request means `docs/spec/CHANGELOG.md`; the root `CHANGELOG.md` is only ever written in release PRs. Both are release-time now. | Both release-time. |
-| 5 | SignPath's exact signer subject, quotas, solo-maintainer acceptance, branch-rehearsal policy and `parameters` syntax could not be confirmed from its documentation. | The signed rehearsal confirms them; the channel stays unsigned until it passes. |
+| 5 | The provider's exact signer subject, quotas and branch-rehearsal policy can't be confirmed before it is set up. | The signed rehearsal confirms them; the channel stays unsigned until it passes. |
 
 ## 4. Requirements
 
@@ -43,7 +41,7 @@ fewer SignPath approvals (restructuring the Windows jobs).
 |---|---|---|
 | REL-018 | `/release` runs REL-010 end to end with two approval stops, a local gate, draft verification and public URL checks; hard prohibitions on pushing to `main`, touching tags and published releases, and handling secrets. | New |
 | REL-019 | Both changelogs are written only by the release skill, in the release PR; other PRs and `feature-planning` never edit them. | New |
-| REL-033 | README *Code signing policy* and the signed notes' policy link and SignPath attribution. | New |
+| ~~REL-033~~ | ~~README *Code signing policy* and the signed notes' policy link and provider attribution.~~ (removed 2026-10-20) | New, removed |
 | REL-034 | `MACOS_SIGNING` (`apple`\|`none`) is independent of Windows; a signed release never requires macOS signing. | New |
 | REL-010, REL-011 | The flow runs through the skill; bumps come from `cargo xtask release-plan`; release-plz is dormant. | Changed |
 | REL-031, REL-032 | Signed mode needs a compiled-in public key; signed tags require `WINDOWS_SIGNER_SUBJECT`; timestamp and digest are checked; the manifest signature is checked against the app's keys. | Changed |
@@ -57,7 +55,7 @@ None. Engine APIs, capabilities, hub threading, application UI and keyboard bind
 
 ```
 /release → preflight → release-plan → changelogs → local gate → bump → [Gate 1] → release PR
-        → merge → tag → release.yml (signed: 4 SignPath approvals) → draft → verify-release.ps1
+        → merge → tag → release.yml (signed: Azure signing, no manual step) → draft → verify-release.ps1
         → [Gate 2] → publish → record PR
 ```
 
@@ -65,8 +63,8 @@ None. Engine APIs, capabilities, hub threading, application UI and keyboard bind
 - **`cargo xtask release-verify`** mirrors the `verify` job of `release.yml` locally.
 - **`cargo xtask verify-manifest`** checks the `.minisig` against the keys in `keys.rs`: the one check that proves the CI secret matches the compiled-in public keys.
 - **`scripts/verify-release.ps1`** replaces the uncommitted 114-check script of 0.2.0 and adds signature, attestation, public URL and launch checks.
-- **`release.yml`:** per-platform signing (`macos_signed` output), early failure on an incomplete signed configuration, `actions: read` for SignPath, the `version` artifact parameter, a one-hour approval wait, timestamp/digest/subject checks, notes for the signed channel.
-- **Signing flow:** see [signing.md](../../signing.md) phases 1–7. A trusted certificate can't be generated locally; SignPath Foundation holds the key and signs after the maintainer approves.
+- **`release.yml`:** per-platform signing (`macos_signed` output), early failure on an incomplete signed configuration, timestamp/digest/subject checks, notes for the signed channel.
+- **Signing flow:** see [signing.md](../../signing.md) phases 1–7. A trusted certificate can't be generated locally; the provider holds the key and signs.
 
 ## 7. Tasks
 
@@ -75,9 +73,9 @@ None. Engine APIs, capabilities, hub threading, application UI and keyboard bind
 | 1 | Spec, plan, index row. | architect | all | review |
 | 2 | `release-plan`, `release-verify`, `verify-manifest` in `xtask`. | release-engineer | REL-011, REL-018, UPD-003 | `rel_018_*` and `upd_003_*` tests; real-repo runs over `v0.1.0..v0.2.0` |
 | 3 | `scripts/verify-release.ps1`. | release-engineer | REL-018, REL-032 | passes on public v0.2.0 as unsigned, fails only signature checks as signed, thirteen mutations each fail the right check |
-| 4 | `release.yml` per-platform signing, early failures, SignPath inputs, signed notes, verification of timestamp/digest/subject/manifest. | release-engineer | REL-031…034 | actionlint 1.7.12; the `verify` step run in 13 configurations (`scripts/tests/test_release_verify.py`); digest function exercised on signed binaries |
+| 4 | `release.yml` per-platform signing, early failures, signed notes, verification of timestamp/digest/subject/manifest. | release-engineer | REL-031…034 | actionlint 1.7.12; the `verify` step run in 13 configurations (`scripts/tests/test_release_verify.py`); digest function exercised on signed binaries |
 | 5 | Skill, adapters, `AGENTS.md`, agent prompts, quality DoD, `feature-planning` change. | coordinator | REL-018, REL-019 | grep shows no per-PR changelog duty left |
-| 6 | SignPath configurations, signing guide, README policy, runbook. | coordinator | REL-030…034 | links resolve |
+| 6 | Signing guide, runbook. | coordinator | REL-030…034 | links resolve |
 | 7 | Review. | reviewer | all | verdict |
 
 ## 8. Test plan
@@ -93,7 +91,7 @@ None. Engine APIs, capabilities, hub threading, application UI and keyboard bind
 
 | Risk | Mitigation |
 |---|---|
-| SignPath's behaviour differs from its documentation (subject, origin policy for branch runs, parameter syntax). | The channel stays unsigned until a rehearsal passes; the rehearsal is a dispatch, so nothing is tagged or published. |
+| The signing provider's behaviour differs from its documentation (subject, policy for branch runs). | The channel stays unsigned until a rehearsal passes; the rehearsal is a dispatch, so nothing is tagged or published. |
 | Renewal changes the signer's subject or issuer, which the updater pins (UPD-003). | The verifier prints both; the signing guide says to check at each renewal. |
 | `release.yml` is edited but only runs on tags and dispatch. | After merge, dispatch `-f unsigned=true` on `main` and require the unsigned behaviour to be unchanged. |
 | The skill is autonomous over a long, expensive flow. | Two approval stops, resume rules, prohibitions on tags, `main` and secrets, and every step re-checks state first. |
@@ -101,4 +99,5 @@ None. Engine APIs, capabilities, hub threading, application UI and keyboard bind
 
 ## 10. Revision log
 
-- 2026-10-06: Created and built after the maintainer approved the plan (SignPath Foundation, Windows first, two approvals).
+- 2026-10-06: Created and built after the maintainer approved the plan (Windows first, two approvals).
+- 2026-10-20: The planned free signing provider is not available. Removed its workflow steps, artifact configurations, verifier attribution check, README *Code signing policy* (REL-033) and every reference to it; `WINDOWS_SIGNING` is `azure` or `none`. Releases stay unsigned, and the Azure and Apple hooks remain for later.
