@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# One fresh container is one leg of the Linux update end-to-end test: install the harness tools, make an unprivileged user and run
-# a scenario as that user. Plan: docs/plan/features/linux-appimage-updates.md §6.5 (REL-085). Started by run.sh.
-#   entry.sh <scenario>        s1
+# One fresh container is one scenario on one leg of the Linux update end-to-end test: install the harness tools, make an
+# unprivileged user and run the scenario as that user. Plan: docs/plan/features/linux-appimage-updates.md §6.5 (REL-085).
+# Started by run.sh.
+#   entry.sh <scenario>        s1 | s2 | s3 | s4   (all four run scripts/linux-update/s1.sh with E2E_SCENARIO set)
 # env:  E2E_LEG       extract | fuse (default extract)
-#       E2E_VERSION   required, the version of the NEW AppImage, for example 0.3.0
-#       E2E_FIRST_CHECK_SECS, E2E_WAIT_*  optional, forwarded to the scenario
+#       E2E_VERSION   required, the version the manifest names: the NEW AppImage's, for example 0.3.0 (s2: a claimed one)
+#       E2E_NEW_VERSION  s2: what the NEW AppImage really prints
+#       E2E_SCENARIO  optional; when set it must equal the argument
+#       E2E_FIRST_CHECK_SECS, E2E_QUIT_DELAY_SECS, E2E_WAIT_*  optional, forwarded to the scenario
 #       HOST_UID, HOST_GID  the owner of the files in /out when the container is done (default: leave them as they are)
 # mounts: /scripts (this directory, read-only), /in/old.AppImage and /in/new.AppImage (read-only), /fixture/root and
 #         /fixture/public-key.txt (read-only: `cargo xtask update-e2e-fixture` ran on the host), /out (writable evidence)
 # Why a user: the smoke test runs as root, and root ignores chmod a-w, which scenario S3 (a read-only install directory) needs.
 # The app runs as `dk` with HOME=/home/dk and nothing else in its environment but what a desktop session would have.
 set -u
-SCENARIO="${1:?scenario (s1)}"
+SCENARIO="${1:?scenario (s1, s2, s3 or s4)}"
 : "${E2E_VERSION:?set E2E_VERSION}"
-case "$SCENARIO" in s1) ;; *) echo "entry.sh: unknown scenario '$SCENARIO'" >&2; exit 2 ;; esac
+case "$SCENARIO" in s1 | s2 | s3 | s4) ;; *) echo "entry.sh: unknown scenario '$SCENARIO'" >&2; exit 2 ;; esac
+[ -z "${E2E_SCENARIO:-}" ] || [ "$E2E_SCENARIO" = "$SCENARIO" ] || { echo "entry.sh: E2E_SCENARIO=$E2E_SCENARIO disagrees with the scenario argument '$SCENARIO'" >&2; exit 2; }
 # the distro's file, outside this repo
 # shellcheck source=/dev/null
 . /etc/os-release
@@ -65,14 +69,14 @@ trap finish EXIT
 
 echo "== $PRETTY_NAME: glibc $(ldd --version | head -n 1 | awk '{print $NF}'); leg ${E2E_LEG:-extract}; running $SCENARIO as dk (uid $uid) after $(at)s"
 env_args=()
-for name in E2E_FIRST_CHECK_SECS E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW E2E_ALIVE E2E_SETTLE; do
+for name in E2E_FIRST_CHECK_SECS E2E_QUIT_DELAY_SECS E2E_NEW_VERSION E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW E2E_ALIVE E2E_SETTLE; do
   [ -z "${!name:-}" ] || env_args+=("$name=${!name}")
 done
 runuser -u dk -- env -i HOME=/home/dk USER=dk LOGNAME=dk SHELL=/bin/bash PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   LANG=C.UTF-8 XDG_RUNTIME_DIR="$runtime" \
-  E2E_OLD=/in/old.AppImage E2E_NEW=/in/new.AppImage E2E_FIXTURE=/fixture E2E_VERSION="$E2E_VERSION" \
+  E2E_SCENARIO="$SCENARIO" E2E_OLD=/in/old.AppImage E2E_NEW=/in/new.AppImage E2E_FIXTURE=/fixture E2E_VERSION="$E2E_VERSION" \
   E2E_LEG="${E2E_LEG:-extract}" E2E_OUT=/work/out "${env_args[@]}" \
-  bash "/scripts/$SCENARIO.sh"
+  bash "/scripts/s1.sh"
 rc=$?
 echo "== $PRETTY_NAME: $SCENARIO (${E2E_LEG:-extract}) finished with rc=$rc after $(at)s"
 exit "$rc"

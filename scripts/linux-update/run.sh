@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the Linux update end-to-end test through Docker (REL-085; plan docs/plan/features/linux-appimage-updates.md §6.5).
 #
-#   run.sh <image> --old <old.AppImage> --new <new.AppImage> [--scenario s1|all] [--leg extract|fuse|both]
+#   run.sh <image> --old <old.AppImage> --new <new.AppImage> [--scenario s1|s2|s3|s4|all] [--leg extract|fuse|both]
 #          [--version X.Y.Z] [--out DIR]
 #
 # image      the distribution image the app runs in: ubuntu (CI: mirror.gcr.io/library/ubuntu:24.04) or archlinux
@@ -9,28 +9,34 @@
 #            image that built it (a build on an Arch host runs on the Arch image, not on Ubuntu 24.04), or use the CI artifact.
 # --old      the OLD AppImage: `updater,update-e2e` and the build-time version 0.0.1 (build-appimages.sh writes Dockering-old-*)
 # --new      the NEW AppImage, built exactly like a release (build-appimages.sh writes Dockering-*)
-# --scenario s1 (default) is the happy path; `all` runs every scenario that exists (today: s1; S2-S4 are plan task 14)
+# --scenario s1 (default) the happy path; s2 the new AppImage fails its --version self-test (the manifest claims 99.0.0, which it
+#            does not print); s3 a read-only install directory; s4 the predecessor exits late; all = s1, s2, s3, s4 in that order
 # --leg      extract: APPIMAGE_EXTRACT_AND_RUN=1; fuse: the AppImage is really mounted (--device /dev/fuse --cap-add SYS_ADMIN
-#            --security-opt apparmor=unconfined); both (default): one fresh container per leg
-# --version  what the NEW AppImage prints for --version, and what the manifest names (default: the workspace version of this tree)
-# --out      evidence directory (default ./linux-update-out): <leg>/results.txt, requests.jsonl, dockering.log, screenshots, ...
+#            --security-opt apparmor=unconfined); both (default): one fresh container per leg for s1, and the extract leg only for
+#            s2-s4 (the FUSE mount is what s1 proves; it would only cost CI time there). An explicit extract or fuse applies to
+#            every scenario that runs.
+# --version  what the NEW AppImage prints for --version, and what the manifest names (default: the workspace version of this tree);
+#            s2 names another version in the manifest on purpose (its button says 99.0.0)
+# --out      evidence directory (default ./linux-update-out): <scenario>-<leg>/results.txt, requests.jsonl, dockering.log, screenshots, ...
 #
 # On the HOST: `cargo xtask update-e2e-fixture` writes the throwaway key pair, the signed manifest and a server root that mirrors
 # GitHub's paths (a prebuilt xtask binary: `cargo build -p xtask`, found in $DOCKERING_XTASK or target/debug/xtask; xtask never
 # runs in the container). In the CONTAINER, as an unprivileged user (root ignores chmod a-w): entry.sh installs the tools, s1.sh
 # lays out ~/.local/bin/dockering and its .desktop entry, runs scripts/linux-update/serve.py on 127.0.0.1 and starts the old app
-# in real mode with the seam variables. The inputs are mounted read-only; no secret is mounted (the throwaway secret key is
-# deleted after it has signed the manifest); the container needs no network access at run time (it installs packages first).
+# in real mode with the seam variables (all four scenarios run in s1.sh, picked by E2E_SCENARIO). The inputs are mounted
+# read-only; no secret is mounted (the throwaway secret key is deleted after it has signed the manifest); the container needs no
+# network access at run time (it installs packages first).
 # env:  DOCKERING_XTASK    the xtask binary (default <repo>/target/debug/xtask)
-#       E2E_FIRST_CHECK_SECS, E2E_WAIT_TREE, E2E_WAIT_BUTTON, E2E_WAIT_OLD_EXIT, E2E_WAIT_NEW  forwarded to the scenario (seconds)
+#       E2E_FIRST_CHECK_SECS, E2E_QUIT_DELAY_SECS (s4), E2E_WAIT_TREE, E2E_WAIT_BUTTON, E2E_WAIT_OLD_EXIT, E2E_WAIT_NEW
+#                          forwarded to the scenario (seconds)
 #       E2E_PULL_DELAY     seconds between pull attempts (default 10)
-# Prints one `name PASS|FAIL detail` line per check (the container's), then a line per leg; exits 0 only when every leg passed,
-# 1 when a check or a step failed, 2 for a usage error.
+# Prints one `name PASS|FAIL detail` line per check (the container's), then a line per scenario and leg (`s1 extract PASS <image>`);
+# exits 0 only when every one passed, 1 when a check or a step failed, 2 for a usage error.
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: run.sh <image> --old <old.AppImage> --new <new.AppImage> [--scenario s1|all] [--leg extract|fuse|both] [--version X.Y.Z] [--out DIR]
+usage: run.sh <image> --old <old.AppImage> --new <new.AppImage> [--scenario s1|s2|s3|s4|all] [--leg extract|fuse|both] [--version X.Y.Z] [--out DIR]
 EOF
 }
 bad() {
@@ -87,10 +93,10 @@ secs_re='^[0-9]{1,4}$'
 [[ $image =~ $image_re ]] || bad "unexpected image reference '$image'"
 [ -n "$old" ] || bad "--old is required"
 [ -n "$new" ] || bad "--new is required"
-case $scenario in s1 | all) ;; *) bad "--scenario must be s1 or all, not '$scenario'" ;; esac
+case $scenario in s1 | s2 | s3 | s4 | all) ;; *) bad "--scenario must be s1, s2, s3, s4 or all, not '$scenario'" ;; esac
 case $leg in extract | fuse | both) ;; *) bad "--leg must be extract, fuse or both, not '$leg'" ;; esac
 [ -z "$version" ] || [[ $version =~ $version_re ]] || bad "--version must be X.Y.Z, not '$version'"
-for name in E2E_FIRST_CHECK_SECS E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW; do
+for name in E2E_FIRST_CHECK_SECS E2E_QUIT_DELAY_SECS E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW; do
   [ -z "${!name:-}" ] || [[ ${!name} =~ $secs_re ]] || bad "$name must be a number of seconds, not '${!name}'"
 done
 for file in "$old" "$new"; do
@@ -158,9 +164,16 @@ printf 'image=%s\ndigest=%s\nold=%s sha256 %s\nnew=%s sha256 %s\nversion=%s\n' "
   "$old" "$(sha256 "$old")" "$new" "$(sha256 "$new")" "$version" >"$out/image.txt"
 echo "run.sh: $scenario on $image (${digest:-no repo digest}); old $(sha256 "$old" | cut -c1-12), new $(sha256 "$new" | cut -c1-12), version $version" >&2
 
-legs=("$leg")
-[ "$leg" != both ] || legs=(extract fuse)
-scenarios=(s1) # `all` is every scenario that exists; S2-S4 come with plan task 14
+scenarios=("$scenario")
+[ "$scenario" != all ] || scenarios=(s1 s2 s3 s4)
+# s2 names a version in the manifest that the NEW AppImage does not print, so that its --version self-test fails
+claimed=99.0.0
+[ "$version" != "$claimed" ] || claimed=99.0.1
+
+# the legs of a scenario: `both` is s1's two legs and the extract leg of the others; an explicit leg applies to every scenario
+legs_of() { # <scenario>
+  if [ "$leg" != both ]; then echo "$leg"; elif [ "$1" = s1 ]; then echo "extract fuse"; else echo extract; fi
+}
 
 summary=()
 status=0
@@ -172,12 +185,18 @@ cleanup() {
 trap cleanup EXIT
 
 run_leg() { # <scenario> <leg>
-  local sc=$1 lg=$2 leg_out="$out/$2" rc=0 flags=() env_args=() var
-  fixture="$out/.fixture-$lg"
+  local sc=$1 lg=$2 leg_out="$out/$1-$2" rc=0 flags=() env_args=() fixture_args=() var shown=$version
+  fixture="$out/.fixture-$sc-$lg"
   rm -rf "$fixture" "$leg_out"
   mkdir -p "$leg_out"
+  # s2: the manifest, its URL and the button name the claimed version while the file still prints $version
+  if [ "$sc" = s2 ]; then
+    shown=$claimed
+    fixture_args=(--claimed-version "$claimed")
+    env_args+=(-e "E2E_NEW_VERSION=$version")
+  fi
   # the fixture is written on the host and never needs the container: a key pair, the signed manifest, the server root
-  if ! (cd "$repo" && "$xtask" update-e2e-fixture --out "$fixture" --appimage "$new" --version "$version") >"$leg_out/xtask.log" 2>&1; then
+  if ! (cd "$repo" && "$xtask" update-e2e-fixture --out "$fixture" --appimage "$new" --version "$version" "${fixture_args[@]}") >"$leg_out/xtask.log" 2>&1; then
     echo "run.sh: cargo xtask update-e2e-fixture failed:" >&2
     tail -n 5 "$leg_out/xtask.log" >&2
     return 1
@@ -186,14 +205,14 @@ run_leg() { # <scenario> <leg>
   mkdir -p "$leg_out/fixture"
   cp "$fixture/dockering-update.json" "$fixture/dockering-update.json.minisig" "$fixture/public-key.txt" "$leg_out/fixture/"
   if [ "$lg" = fuse ]; then flags=(--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined); fi
-  for var in E2E_FIRST_CHECK_SECS E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW; do
+  for var in E2E_FIRST_CHECK_SECS E2E_QUIT_DELAY_SECS E2E_WAIT_TREE E2E_WAIT_BUTTON E2E_WAIT_OLD_EXIT E2E_WAIT_NEW; do
     if [ -n "${!var:-}" ]; then env_args+=(-e "$var"); fi
   done
   echo "run.sh: $sc, $lg leg" >&2
-  if docker run --rm --name "linux-update-$lg-$$" --shm-size=512m "${flags[@]}" \
+  if docker run --rm --name "linux-update-$sc-$lg-$$" --shm-size=512m "${flags[@]}" \
     -v "$here:/scripts:ro" -v "$old:/in/old.AppImage:ro" -v "$new:/in/new.AppImage:ro" \
     -v "$fixture/root:/fixture/root:ro" -v "$fixture/public-key.txt:/fixture/public-key.txt:ro" -v "$leg_out:/out" \
-    -e "E2E_LEG=$lg" -e "E2E_VERSION=$version" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" "${env_args[@]}" \
+    -e "E2E_SCENARIO=$sc" -e "E2E_LEG=$lg" -e "E2E_VERSION=$shown" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" "${env_args[@]}" \
     "$image" bash /scripts/entry.sh "$sc" 2>&1 | tee "$leg_out/leg.log"; then
     rc=0
   else
@@ -202,7 +221,7 @@ run_leg() { # <scenario> <leg>
   rm -rf "$fixture"
   fixture=""
   if [ ! -f "$leg_out/results.txt" ]; then
-    echo "run.sh: $lg leg wrote no results.txt (container exit $rc)" >&2
+    echo "run.sh: $sc $lg leg wrote no results.txt (container exit $rc)" >&2
     return 1
   fi
   # the container's exit status and its results must agree: a FAIL line can't hide behind a zero exit
@@ -211,7 +230,8 @@ run_leg() { # <scenario> <leg>
 }
 
 for sc in "${scenarios[@]}"; do
-  for lg in "${legs[@]}"; do
+  read -ra scenario_legs <<<"$(legs_of "$sc")"
+  for lg in "${scenario_legs[@]}"; do
     if run_leg "$sc" "$lg"; then
       summary+=("$sc $lg PASS $image")
     else

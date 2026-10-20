@@ -1,46 +1,78 @@
 #!/usr/bin/env bash
-# Scenario S1 (happy path) of the Linux update end-to-end test (REL-085; plan linux-appimage-updates §6.5), one leg.
+# Scenarios S1-S4 of the Linux update end-to-end test (REL-085; plan linux-appimage-updates §6.5), one scenario and one leg.
 # Runs INSIDE the container, as the unprivileged user, started by entry.sh; selftest.sh runs it on the host against stubs.
-#   s1.sh
+#   s1.sh      (the file keeps the name of the scenario it started as; E2E_SCENARIO picks the scenario)
 # env (set by entry.sh or selftest.sh, never by a person):
+#   E2E_SCENARIO  s1 (default) the happy path; s2 the new AppImage fails its --version self-test (the manifest names a version it
+#                 does not print); s3 a read-only install directory (a Download offer, nothing is fetched); s4 the predecessor
+#                 exits late (DOCKERING_UPDATE_E2E_QUIT_DELAY_SECS)
 #   E2E_OLD       the OLD AppImage (updater + seam, believes it is 0.0.1)
 #   E2E_NEW       the NEW AppImage, byte for byte what the fixture serves
 #   E2E_FIXTURE   directory with root/ (the server root) and public-key.txt (`cargo xtask update-e2e-fixture` wrote them)
-#   E2E_VERSION   the version the NEW AppImage prints with --version, and the manifest names
+#   E2E_VERSION   the version the manifest names (and the title-bar button says): the one the NEW AppImage prints with --version,
+#                 except in s2, where the manifest claims another version on purpose
+#   E2E_NEW_VERSION  s2 only, optional: the version the NEW AppImage really prints (the fixture's --version)
 #   E2E_LEG       extract (APPIMAGE_EXTRACT_AND_RUN=1) or fuse (a really mounted AppImage); default extract
 #   E2E_OUT       evidence directory (default /work/out)
 #   E2E_FIRST_CHECK_SECS  the seam's first automatic check (default 3)
-#   E2E_WAIT_TREE/BUTTON/OLD_EXIT/NEW  limits in seconds (45, 45, 30, 45); E2E_ALIVE (3) and E2E_SETTLE (6) are fixed waits
+#   E2E_QUIT_DELAY_SECS   s4 only: the seam's delay of the old app's exit, 2-20 (default 6)
+#   E2E_WAIT_TREE/BUTTON/OLD_EXIT/NEW  limits in seconds (45, 45, 30 (s4: 30 plus the delay), 45); E2E_ALIVE (3) and E2E_SETTLE (6) are fixed waits
 #   E2E_STUB=1    self-test: no display, session bus or AT-SPI; the AT-SPI helper is stub-atspi.py (see selftest.sh)
 # Layout, like a user's machine: ~/.local/bin/dockering is the OLD AppImage, ~/.local/share/applications/dockering.desktop
 # has that Exec, and the app is started the way the desktop entry starts it, in REAL mode (--demo disables the updater) with
 # the seam variables pointing at serve.py on 127.0.0.1. Prints one `name PASS|FAIL|SKIP|INFO detail` line per check (the
 # format of scripts/linux-smoke/run.sh), writes results.txt and the evidence into E2E_OUT, exits 1 on any FAIL.
 # SKIP is only recorded after a FAIL that makes the check impossible (no button, so nothing to click).
+# The scenarios share the bring-up and the first check (button, toast, requests); they differ in what follows:
+#   s1, s4  click the button; the old app exits, the new one is relaunched as the primary instance with the saved window state
+#           (s4: the old app needs E2E_QUIT_DELAY_SECS to exit, and the relaunched one has to wait for that)
+#   s2      click the button; the install fails before the swap: nothing is replaced, the app keeps running, the offer is *Download*
+#   s3      ~/.local/bin is made read-only; no click (Download opens a browser); a Download offer, no asset request
 # Not `set -e`: a failed step is a result, not an abort (like scripts/linux-smoke/run.sh).
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 : "${E2E_OLD:?set E2E_OLD}" "${E2E_NEW:?set E2E_NEW}" "${E2E_FIXTURE:?set E2E_FIXTURE}" "${E2E_VERSION:?set E2E_VERSION}"
 STUB=${E2E_STUB:-}
+SCENARIO=${E2E_SCENARIO:-s1}
+case "$SCENARIO" in s1 | s2 | s3 | s4) ;; *) echo "s1.sh: E2E_SCENARIO must be s1, s2, s3 or s4, not '$SCENARIO'" >&2; exit 2 ;; esac
 # one session bus per run: GPUI publishes its accessibility tree over AT-SPI, which lives on it
 if [ -z "$STUB" ] && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then exec dbus-run-session -- bash "$0" "$@"; fi
 
 LEG=${E2E_LEG:-extract}
 VERSION=$E2E_VERSION
+NEW_VERSION=${E2E_NEW_VERSION:-}
 OUT=${E2E_OUT:-/work/out}
 FIRST=${E2E_FIRST_CHECK_SECS:-3}
 W_TREE=${E2E_WAIT_TREE:-45}
 W_BUTTON=${E2E_WAIT_BUTTON:-45}
-W_OLD_EXIT=${E2E_WAIT_OLD_EXIT:-30}
+# s4: the old app's exit is delayed by the seam, and the relaunched one gives up waiting for it after 30 s (UPD-017)
+QUIT_DELAY=0
+if [ "$SCENARIO" = s4 ]; then
+  QUIT_DELAY=${E2E_QUIT_DELAY_SECS:-6}
+  if ! [[ $QUIT_DELAY =~ ^[0-9]+$ ]] || [ "$QUIT_DELAY" -lt 2 ] || [ "$QUIT_DELAY" -gt 20 ]; then
+    echo "s1.sh: E2E_QUIT_DELAY_SECS must be 2-20 seconds (the relaunch wait gives up after 30 s), not '$QUIT_DELAY'" >&2
+    exit 2
+  fi
+fi
+W_OLD_EXIT=${E2E_WAIT_OLD_EXIT:-$((30 + QUIT_DELAY))}
 W_NEW=${E2E_WAIT_NEW:-45}
 ALIVE=${E2E_ALIVE:-3}
 SETTLE=${E2E_SETTLE:-6}
+if [ "$QUIT_DELAY" -gt 0 ] && [ "$W_OLD_EXIT" -le "$QUIT_DELAY" ]; then
+  echo "s1.sh: E2E_WAIT_OLD_EXIT ($W_OLD_EXIT s) must exceed the quit delay ($QUIT_DELAY s): the old app could not exit in time" >&2
+  exit 2
+fi
 UA="Dockering/0.0.1 (linux; x86_64)"
-INSTALL="$HOME/.local/bin/dockering"
+OLD_VERSION=0.0.1 # the old AppImage's build-time version (build-appimages.sh)
+BINDIR="$HOME/.local/bin"
+INSTALL="$BINDIR/dockering"
 DESKTOP="$HOME/.local/share/applications/dockering.desktop"
 DATA="$HOME/.local/share/dockering"
 SOCKET="$DATA/instance.sock"
+OFFER="$DATA/updates/offer.json"
 REQUESTS="$OUT/requests.jsonl"
+RESTART=""
+case "$SCENARIO" in s1 | s4) RESTART=1 ;; esac # the scenarios in which the new AppImage replaces the old one and is relaunched
 case "$LEG" in extract | fuse) ;; *) echo "s1.sh: E2E_LEG must be extract or fuse, not '$LEG'" >&2; exit 2 ;; esac
 
 # a profile with Dockering data in it is not clean, and this script deletes and replaces files below $HOME
@@ -97,6 +129,7 @@ crash=""
 XVFB="" BUS="" SERVE=""
 cleanup() {
   local p
+  chmod u+w "$BINDIR" 2>/dev/null # s3 made it read-only: the evidence copy and the removal of a profile need it writable again
   for p in $(family 2>/dev/null); do kill "$p" 2>/dev/null; done
   sleep 0.5
   for p in $(family 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
@@ -167,7 +200,33 @@ if [ "${#EXEC[@]}" -eq 0 ] || [ "${EXEC[0]}" != "$INSTALL" ]; then
   check layout FAIL "the desktop entry's Exec is '${EXEC[*]:-}', not $INSTALL"
   exit 1
 fi
-check layout PASS "$INSTALL (old AppImage), $DESKTOP"
+if [ "$SCENARIO" = s3 ]; then
+  # an install directory the user cannot write to (a package manager's, a read-only mount): the offer is a Download one (UPD-006).
+  # The harness user is unprivileged, so this holds; root ignores chmod a-w, so a write is tried instead of trusting the mode
+  chmod a-w "$BINDIR"
+  if : >"$BINDIR/.e2e-write-probe" 2>/dev/null; then
+    rm -f "$BINDIR/.e2e-write-probe"
+    check layout FAIL "$BINDIR is still writable after chmod a-w (is this process root? root ignores it)"
+    exit 1
+  fi
+  check layout PASS "$INSTALL (old AppImage), $DESKTOP; $BINDIR is not writable (mode $(stat -c %a "$BINDIR"))"
+else
+  check layout PASS "$INSTALL (old AppImage), $DESKTOP"
+fi
+
+# ---- s2: the premise: the new file really prints another version than the manifest names ---------------------------------
+if [ "$SCENARIO" = s2 ]; then
+  new_says=$(timeout 120 "$E2E_NEW" --version 2>&1 | head -n 1)
+  if [ -z "$new_says" ] || [[ $new_says != "dockering "* ]]; then
+    check premise FAIL "the new AppImage does not run: '--version' printed '${new_says:0:120}'"
+  elif [ "$new_says" = "dockering $VERSION" ]; then
+    check premise FAIL "the new AppImage prints '$new_says', the version the manifest names: the self-test would pass, this is not scenario s2"
+  elif [ -n "$NEW_VERSION" ] && [ "$new_says" != "dockering $NEW_VERSION" ]; then
+    check premise FAIL "the new AppImage prints '$new_says', expected 'dockering $NEW_VERSION'"
+  else
+    check premise PASS "the new AppImage prints '$new_says' but the manifest names $VERSION: its --version self-test must fail"
+  fi
+fi
 
 # ---- start the old app like the desktop entry does -----------------------------------------------------------------------
 step "launch ${EXEC[*]} ($LEG leg)"
@@ -177,6 +236,8 @@ t_start=$(date +%s.%N)
   cd "$HOME" || exit 1
   export DOCKERING_UPDATE_E2E_URL="http://127.0.0.1:$PORT" DOCKERING_UPDATE_E2E_KEY="$KEY" \
     DOCKERING_UPDATE_E2E_FIRST_CHECK_SECS="$FIRST" DOCKERING_UPDATE_E2E_INTERVAL_SECS=3600 RUST_LOG=info
+  # s4: the seam delays the old app's exit until after run() returned and its destructors ran
+  [ "$QUIT_DELAY" -eq 0 ] || export DOCKERING_UPDATE_E2E_QUIT_DELAY_SECS="$QUIT_DELAY"
   exec setsid "${EXEC[@]}" </dev/null >"$OUT/app.stdout" 2>"$OUT/app.stderr"
 ) &
 sleep 0.3
@@ -219,30 +280,39 @@ else
 fi
 
 # ---- the first check, the button and the toast ---------------------------------------------------------------------------
+# s3: the toast offers *Download* and the payload is never fetched (asset 0); the others fetch it once and offer *Restart now*
+TOAST=restart ASSETS=1
+if [ "$SCENARIO" = s3 ]; then TOAST=download ASSETS=0; fi
 step "waiting for the update button"
-atspi watch "$VERSION" --timeout "$W_BUTTON" | emit
+atspi watch "$VERSION" --timeout "$W_BUTTON" --toast "$TOAST" | emit
 shot 02-button
 atspi dump >"$OUT/atspi-tree-button.txt"
 sleep 1 # a stray second request would arrive about now
 probe schedule "$REQUESTS" --start "$t_start" --first-check "$FIRST" | emit
-probe requests "$REQUESTS" --version "$VERSION" | emit
+probe requests "$REQUESTS" --version "$VERSION" --asset "$ASSETS" | emit
 probe user_agent "$REQUESTS" --expect "$UA" | emit
 poll_check 8 "${PROBE[@]}" state "$DATA/state.json" --version "$VERSION" --want toast
+# what the retained offer says (UPD-017): s2 a verified install offer waiting to be applied, s3 a Download offer without a payload
+case "$SCENARIO" in
+  s2) poll_check 8 "${PROBE[@]}" offer "$OFFER" --version "$VERSION" --want ready --name offer_ready ;;
+  s3) poll_check 8 "${PROBE[@]}" offer "$OFFER" --version "$VERSION" --want download --name offer_download ;;
+esac
 
 blocked=""
 [ "$(status_of button)" = PASS ] || blocked="no update button was shown, so there was nothing to click"
 
-# ---- click the button (the toast's Restart now: the same RestartToUpdate action) ----------------------------------------
-if [ -z "$blocked" ]; then
-  step "activate the title-bar button"
-  atspi activate "$VERSION" | emit
-  [ "$(status_of activate)" = PASS ] || blocked="the button could not be activated"
-else
-  skip activate "$blocked"
+# ---- click the button (the toast's Restart now: the same RestartToUpdate action); s3 has no click: Download opens a browser ----
+if [ "$SCENARIO" != s3 ]; then
+  if [ -z "$blocked" ]; then
+    step "activate the title-bar button"
+    atspi activate "$VERSION" | emit
+    [ "$(status_of activate)" = PASS ] || blocked="the button could not be activated"
+  else
+    skip activate "$blocked"
+  fi
 fi
-
 new_pids=""
-if [ -z "$blocked" ]; then
+if [ -n "$RESTART" ] && [ -z "$blocked" ]; then
   # the old process exits (the new one waits for that, UPD-017)
   end=$(($(date +%s) + W_OLD_EXIT))
   t_click=$(date +%s.%N)
@@ -254,13 +324,26 @@ if [ -z "$blocked" ]; then
     [ "$(date +%s)" -ge "$end" ] && break
     sleep 0.25
   done
+  took=$(echo "$(date +%s.%N) $t_click" | awk '{printf "%.1f", $1 - $2}')
   if [ -z "$left" ]; then
-    check old_exit PASS "the old app's processes (${old_pids% }) are gone $(echo "$(date +%s.%N) $t_click" | awk '{printf "%.1f", $1 - $2}')s after the click"
+    check old_exit PASS "the old app's processes (${old_pids% }) are gone ${took}s after the click"
   else
     check old_exit FAIL "still running ${W_OLD_EXIT}s after the click: ${left% }"
     # who pins the old mount: the runtime's daemon exits once nothing uses its mount any more
     oldmount=$(awk '/ fuse\./ { print $2; exit }' "$OUT/mounts-old.txt" 2>/dev/null || true)
     [ -z "$oldmount" ] || { echo "== holders of the old mount $oldmount"; probe holders "$oldmount"; } >"$OUT/old-mount-holders.txt"
+  fi
+  # s4: the delay was real. The seam sleeps after run() returned, and the apply and the quit take time of their own, so the old
+  # app can't be gone sooner than the delay after the click (one second of slack for the click and the polling)
+  if [ "$SCENARIO" = s4 ]; then
+    floor=$((QUIT_DELAY - 1))
+    if [ -n "$left" ]; then
+      skip exit_delayed "the old app did not exit within ${W_OLD_EXIT}s"
+    elif awk -v t="$took" -v n="$floor" 'BEGIN { exit !(t >= n) }'; then
+      check exit_delayed PASS "the old app needed ${took}s to exit after the click (the seam delays its exit by ${QUIT_DELAY}s; at least ${floor}s expected)"
+    else
+      check exit_delayed FAIL "the old app was gone ${took}s after the click, expected at least ${floor}s: the exit delay (DOCKERING_UPDATE_E2E_QUIT_DELAY_SECS=$QUIT_DELAY) did not apply"
+    fi
   fi
 
   # a new process of the app, started with --update-relaunch=1 (UPD-014)
@@ -295,7 +378,9 @@ if [ -z "$blocked" ]; then
 fi
 
 # ---- the file on disk ----------------------------------------------------------------------------------------------------
-if [ -z "$blocked" ]; then
+if [ -z "$RESTART" ]; then
+  : # s2 and s3 never swap: what they check about the file comes after the settle, below
+elif [ -z "$blocked" ]; then
   want=$(sha "$E2E_NEW")
   got=$(sha "$INSTALL")
   ver=$(timeout 120 "$INSTALL" --version 2>&1 | head -n 1)
@@ -314,10 +399,13 @@ else
   skip relaunch "$blocked"
   skip swap "$blocked"
   skip notice "$blocked"
+  [ "$SCENARIO" != s4 ] || skip exit_delayed "$blocked"
 fi
 
 # ---- the new instance ----------------------------------------------------------------------------------------------------
-if [ -n "$new_pids" ]; then
+if [ -z "$RESTART" ]; then
+  : # s2 and s3 start no new instance
+elif [ -n "$new_pids" ]; then
   end=$(($(date +%s) + W_NEW))
   owner=""
   while :; do
@@ -337,26 +425,96 @@ else
   for name in primary_instance no_button_after state_kept; do skip "$name" "${blocked:-no new process}"; done
 fi
 
+# ---- s2: the install fails before the swap and nothing changes --------------------------------------------------------------
+if [ "$SCENARIO" = s2 ]; then
+  if [ -z "$blocked" ]; then
+    step "the install must fail, and the old app must go on"
+    # the failure toast hides itself: look for it at once (best effort); the file on disk and the offer are the real evidence
+    atspi seen "Couldn't start the update" --button "Copy details" --name failure_toast_atspi --timeout 10 | emit
+    # UPD-014 (3)/UPD-017 (6): a failed self-test degrades the offer to Download for that version, for good, and removes the payload
+    poll_check 15 "${PROBE[@]}" offer "$OFFER" --version "$VERSION" --want failed --name offer_degraded
+    shot 03-after-failure
+    atspi dump >"$OUT/atspi-tree-after.txt"
+    atspi present "$VERSION" --name button_after_failure --timeout 10 | emit
+  else
+    for name in offer_degraded button_after_failure; do skip "$name" "$blocked"; done
+  fi
+fi
+
 # ---- nothing else happens ------------------------------------------------------------------------------------------------
 step "settling ${SETTLE}s: no second check"
 sleep "$SETTLE"
-probe requests "$REQUESTS" --version "$VERSION" --name no_second_check | emit
+probe requests "$REQUESTS" --version "$VERSION" --asset "$ASSETS" --name no_second_check | emit
+
+# ---- s2, s3: the old app and its file are untouched, and nothing was relaunched -----------------------------------------------
+relaunched=""
+if [ "$SCENARIO" = s2 ] || [ "$SCENARIO" = s3 ]; then
+  now_pids=$(family | tr '\n' ' ')
+  gone=""
+  for p in "${OLD[@]}"; do in_list "$p" "$now_pids" || gone+="$p "; done
+  if [ -z "$gone" ]; then
+    check old_alive PASS "the old app's processes (${old_pids% }) are all still running"
+  else
+    check old_alive FAIL "the old app's processes are gone: ${gone% } (it was running as ${old_pids% })"
+  fi
+  want=$(sha "$E2E_OLD")
+  got=$(sha "$INSTALL")
+  ver=$(timeout 120 "$INSTALL" --version 2>&1 | head -n 1)
+  why=()
+  [ "$got" = "$want" ] || why+=("sha256 ${got:0:12} is not the old AppImage's ${want:0:12}: the file was replaced")
+  [ -x "$INSTALL" ] || why+=("not executable")
+  [ "$ver" = "dockering $OLD_VERSION" ] || why+=("--version prints '$ver', expected 'dockering $OLD_VERSION'")
+  if [ ${#why[@]} -eq 0 ]; then
+    check install_untouched PASS "$INSTALL is still the old AppImage byte for byte (sha256 ${got:0:12}), executable, prints '$ver'"
+  else
+    joined=$(printf '%s; ' "${why[@]}")
+    check install_untouched FAIL "${joined%; }"
+  fi
+  # a staged copy (.dockering-update-<n>) next to the install must not outlive a failed or refused update (UPD-014)
+  listing=$(find "$BINDIR" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')
+  if [ "${listing% }" = dockering ]; then
+    check no_staging_left PASS "$BINDIR holds exactly: dockering"
+  else
+    check no_staging_left FAIL "$BINDIR holds '${listing% }', expected exactly 'dockering'"
+  fi
+  relaunched=$(family --arg=--update-relaunch=1 | tr '\n' ' ')
+fi
 
 # ---- stop, logs, crash ---------------------------------------------------------------------------------------------------
 step "stop"
 for p in $(family); do kill "$p" 2>/dev/null; done
 for _ in $(seq 1 20); do [ -z "$(family)" ] && break; sleep 0.25; done
 collect_logs
-if [ -n "$new_pids" ]; then
-  probe handshake "$OUT/dockering.log" | emit
+if [ -z "$RESTART" ]; then
+  : # no relaunch happens: a process with --update-relaunch=1 or a relaunch line in the log would be one
+elif [ -n "$new_pids" ]; then
+  # s4: the relaunched process had to wait for the late predecessor: at least the delay minus 1.5 s (the old process's own
+  # quit, the saves and the polling), and it never asked the old instance to focus
+  if [ "$SCENARIO" = s4 ]; then HANDSHAKE_ARGS=(--min-ms $((QUIT_DELAY * 1000 - 1500))); else HANDSHAKE_ARGS=(); fi
+  probe handshake "$OUT/dockering.log" "${HANDSHAKE_ARGS[@]}" | emit
 else
   skip handshake "${blocked:-no new process}"
+fi
+if [ "$SCENARIO" = s2 ] || [ "$SCENARIO" = s3 ]; then
+  relines=$(grep -c 'update relaunch:' "$OUT/dockering.log" 2>/dev/null)
+  if [ -z "$relaunched" ] && [ "${relines:-0}" -eq 0 ]; then
+    check no_relaunch PASS "no process was started with --update-relaunch=1 and the log has no relaunch line"
+  else
+    check no_relaunch FAIL "a relaunch happened: processes '${relaunched% }', ${relines:-0} relaunch log lines"
+  fi
 fi
 if [ -z "$crash" ] && ! grep -q 'panicked' "$OUT/app.stderr" "$OUT/dockering.log" 2>/dev/null; then check no_crash PASS; else check no_crash FAIL "${crash:-panic in the output}"; fi
 check log_lines INFO "$(grep -c ' ERROR ' "$OUT/dockering.log" 2>/dev/null) ERROR and $(grep -c ' WARN ' "$OUT/dockering.log" 2>/dev/null) WARN lines (a real launch without an engine logs some; read dockering.log)"
 
 # a skipped or truncated block must not read as green: every check has to have reported, and a SKIP needs a FAIL behind it
-required="server layout window running leg before_button before_requests requests user_agent button toast activate old_exit swap relaunch notice handshake primary_instance no_button_after state_kept no_second_check no_crash"
+# (per scenario: the checks every scenario has, then the ones of its own)
+common="server layout window running leg before_button before_requests requests user_agent button toast no_second_check no_crash"
+case "$SCENARIO" in
+  s1) required="$common activate old_exit swap relaunch notice handshake primary_instance no_button_after state_kept" ;;
+  s4) required="$common activate old_exit exit_delayed swap relaunch notice handshake primary_instance no_button_after state_kept" ;;
+  s2) required="$common premise offer_ready activate offer_degraded button_after_failure old_alive install_untouched no_staging_left no_relaunch" ;;
+  s3) required="$common offer_download old_alive install_untouched no_staging_left no_relaunch" ;;
+esac
 for name in $required; do
   awk -v n="$name" '$1 == n && ($2 == "PASS" || $2 == "FAIL" || $2 == "SKIP" || $2 == "INFO") { found = 1 } END { exit !found }' "$RESULTS" ||
     check "$name" FAIL "no result was recorded for this check"

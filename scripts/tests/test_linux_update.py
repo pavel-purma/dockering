@@ -9,8 +9,13 @@ Lowest layer that proves each piece:
   record their argv, working directory and the environment variables that matter, so which features and which build-time
   version each AppImage gets is a real code path with scripted answers;
 - `scripts/linux-update/run.sh` runs under bash against a fake `docker` and a fake `xtask`: its validation, the docker command line
-  (read-only inputs, the FUSE privileges only on the fuse leg, no secret mounted) and the exit status;
-- `scripts/linux-update/selftest.sh` is started for real (two of its controls): the runner must fail when it should;
+  (read-only inputs, the FUSE privileges only on the fuse leg, no secret mounted), which scenarios run on which legs with which
+  E2E_SCENARIO / E2E_VERSION (S2's manifest claims another version) and the exit status;
+- `scripts/linux-update/selftest.sh` is started for real (a few of its controls, one clean and one defective per scenario): the
+  runner must fail when it should;
+- `scripts/linux-update/e2e_probe.py` runs as the shell runs it, on scratch logs and offer files: `requests --asset 0` (S3),
+  `handshake --min-ms` (S4) and `offer` (S2, S3); the pure parts of `atspi_update.py` are imported and fed fake nodes;
+- s1.sh and entry.sh refuse a bad scenario or quit delay before they touch anything;
 - contract tests read the release workflow and the script headers. That the AppImages themselves build and print their versions
   needs a full build: see the `--version` checks inside build-appimages.sh.
 The scenarios themselves (S1-S4 in a container, `run.sh` against real AppImages) need Docker and are run by hand and by CI (plan tasks 13-15).
@@ -687,6 +692,8 @@ case "$1" in
   run)
     out=""
     FAKE_DOCKER_RESULT=${FAKE_DOCKER_RESULT:-pass}
+    # the scenario is the last argument (`bash /scripts/entry.sh <scenario>`): fail only that one
+    [ "${FAKE_DOCKER_FAIL_SCENARIO:-}" != "${!#}" ] || FAKE_DOCKER_RESULT=fail
     for a in "$@"; do
       case $a in
         *:/out) out=${a%:/out} ;;
@@ -794,6 +801,9 @@ class RunScriptTests(unittest.TestCase):
             "image with a shell character": ["ubuntu;rm", "--old", "old.AppImage", "--new", "new.AppImage"],
             "image starting with a dash": ["--old", "old.AppImage", "--new", "new.AppImage", "-x"],
             "unknown scenario": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--scenario", "s9"],
+            "scenario s5": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--scenario", "s5"],
+            "scenario in capitals": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--scenario", "S2"],
+            "two scenarios": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--scenario", "s2,s3"],
             "unknown leg": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--leg", "both,extract"],
             "bad version": ["ubuntu", "--old", "old.AppImage", "--new", "new.AppImage", "--version", "1.2"],
             "missing file": ["ubuntu", "--old", "nope.AppImage", "--new", "new.AppImage"],
@@ -816,6 +826,7 @@ class RunScriptTests(unittest.TestCase):
             ("same content", ["--old", twin, "--new", self.new], {}),
             ("seconds not a number", ["--old", self.old, "--new", self.new], {"E2E_WAIT_TREE": "soon"}),
             ("seconds too long", ["--old", self.old, "--new", self.new], {"E2E_WAIT_NEW": "12345"}),
+            ("quit delay not a number", ["--old", self.old, "--new", self.new], {"E2E_QUIT_DELAY_SECS": "late"}),
         ):
             with self.subTest(name):
                 result = self.run_script("ubuntu:24.04", *args, "--out", self.out, env=env)
@@ -836,9 +847,13 @@ class RunScriptTests(unittest.TestCase):
         self.assertTrue(any(a.endswith(":/fixture/public-key.txt:ro") for a in run), joined)
         self.assertTrue(any(a.endswith("/scripts:ro") or a.endswith(":/scripts:ro") for a in run), joined)
         self.assertIn("E2E_LEG=extract", run)
+        self.assertIn("E2E_SCENARIO=s1", run)
         self.assertIn("E2E_VERSION=9.8.7", run)
         self.assertEqual(run[-4:], ["ubuntu:24.04", "bash", "/scripts/entry.sh", "s1"])
         self.assertIn("s1 extract PASS ubuntu:24.04", result.stdout)
+        self.assertEqual([e for e in run if e.startswith("E2E_NEW_VERSION")], [], "only s2 needs what the new file prints")
+        (fixture,) = self.calls(self.xtask_log)
+        self.assertNotIn("--claimed-version", fixture, "only s2 makes the manifest claim another version")
 
     def test_rel_085_the_throwaway_secret_key_is_never_mounted_and_is_gone_afterwards(self):
         result = self.standard("--leg", "extract")
@@ -851,7 +866,7 @@ class RunScriptTests(unittest.TestCase):
         (fixture,) = self.calls(self.xtask_log)
         self.assertEqual(fixture[0], "update-e2e-fixture")
         self.assertIn(str(self.new), fixture)
-        self.assertTrue((self.out / "extract" / "fixture" / "dockering-update.json.minisig").is_file())
+        self.assertTrue((self.out / "s1-extract" / "fixture" / "dockering-update.json.minisig").is_file())
 
     def test_rel_085_the_fuse_leg_gets_exactly_the_fuse_privileges(self):
         result = self.standard("--leg", "fuse")
@@ -872,6 +887,89 @@ class RunScriptTests(unittest.TestCase):
         self.assertIn("s1 extract PASS", result.stdout)
         self.assertIn("s1 fuse PASS", result.stdout)
 
+    @staticmethod
+    def env_of(run, name):
+        """The value of `-e NAME=value` in a docker run line."""
+        values = [a.split("=", 1)[1] for a in run if a.startswith(f"{name}=")]
+        assert len(values) == 1, f"{name} is set {len(values)} times in {run}"
+        return values[0]
+
+    def summary(self, result):
+        return [line for line in result.stdout.splitlines() if re.match(r"^s[1-4] (extract|fuse) (PASS|FAIL) ", line)]
+
+    def test_rel_085_all_runs_every_scenario_in_order_in_one_fresh_container_each(self):
+        result = self.standard("--scenario", "all", "--version", "9.8.7")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        runs = self.runs()
+        self.assertEqual(
+            [(self.env_of(r, "E2E_SCENARIO"), self.env_of(r, "E2E_LEG")) for r in runs],
+            [("s1", "extract"), ("s1", "fuse"), ("s2", "extract"), ("s3", "extract"), ("s4", "extract")],
+            "s1 on both legs, then s2, s3 and s4 on the extract leg only",
+        )
+        self.assertEqual([r[-1] for r in runs], ["s1", "s1", "s2", "s3", "s4"], "entry.sh gets the same scenario as an argument")
+        self.assertEqual(len({next(a for a in r if a.startswith("linux-update-")) for r in runs}), 5, "a fresh container each")
+        self.assertEqual(
+            self.summary(result),
+            [f"{sc} {lg} PASS ubuntu:24.04" for sc, lg in (("s1", "extract"), ("s1", "fuse"), ("s2", "extract"), ("s3", "extract"), ("s4", "extract"))],
+        )
+        self.assertEqual(
+            [self.env_of(r, "E2E_VERSION") for r in runs], ["9.8.7", "9.8.7", "99.0.0", "9.8.7", "9.8.7"], "s2's manifest claims another version"
+        )
+        self.assertEqual([("/dev/fuse" in r) for r in runs], [False, True, False, False, False], "only the fuse leg gets the privileges")
+        for sc, lg in (("s1", "extract"), ("s1", "fuse"), ("s2", "extract"), ("s3", "extract"), ("s4", "extract")):
+            self.assertTrue((self.out / f"{sc}-{lg}" / "results.txt").is_file(), f"evidence of {sc} {lg}")
+
+    def test_rel_085_s2_has_a_manifest_that_claims_a_version_the_new_file_does_not_print(self):
+        result = self.standard("--scenario", "s2", "--version", "9.8.7")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (run,) = self.runs()
+        self.assertEqual(self.env_of(run, "E2E_SCENARIO"), "s2")
+        self.assertEqual(self.env_of(run, "E2E_VERSION"), "99.0.0", "what the manifest and the button say")
+        self.assertEqual(self.env_of(run, "E2E_NEW_VERSION"), "9.8.7", "what the new file really prints")
+        (fixture,) = self.calls(self.xtask_log)
+        self.assertEqual(fixture[fixture.index("--version") + 1], "9.8.7")
+        self.assertEqual(fixture[fixture.index("--claimed-version") + 1], "99.0.0")
+        self.assertIn("s2 extract PASS ubuntu:24.04", result.stdout)
+        # the claimed version must differ from the real one, even when the real one is the usual claim
+        self.docker_log.unlink()
+        self.xtask_log.unlink()
+        again = self.standard("--scenario", "s2", "--version", "99.0.0")
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        (run,) = self.runs()
+        self.assertEqual(self.env_of(run, "E2E_VERSION"), "99.0.1")
+        self.assertEqual(self.env_of(run, "E2E_NEW_VERSION"), "99.0.0")
+
+    def test_rel_085_the_legs_of_the_scenarios(self):
+        for args, want in (
+            (["--scenario", "s2"], [("s2", "extract")]),
+            (["--scenario", "s3", "--leg", "both"], [("s3", "extract")]),
+            (["--scenario", "s4", "--leg", "fuse"], [("s4", "fuse")]),
+            (["--scenario", "s1", "--leg", "both"], [("s1", "extract"), ("s1", "fuse")]),
+            (["--scenario", "all", "--leg", "extract"], [(s, "extract") for s in ("s1", "s2", "s3", "s4")]),
+            (["--scenario", "all", "--leg", "fuse"], [(s, "fuse") for s in ("s1", "s2", "s3", "s4")]),
+        ):
+            with self.subTest(args=args):
+                if self.docker_log.exists():
+                    self.docker_log.unlink()
+                result = self.standard(*args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual([(self.env_of(r, "E2E_SCENARIO"), self.env_of(r, "E2E_LEG")) for r in self.runs()], want)
+
+    def test_rel_085_a_failing_scenario_is_exit_one_and_the_others_still_run(self):
+        result = self.standard("--scenario", "all", env={"FAKE_DOCKER_FAIL_SCENARIO": "s3"})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(len(self.runs()), 5)
+        self.assertEqual(
+            self.summary(result),
+            [
+                "s1 extract PASS ubuntu:24.04",
+                "s1 fuse PASS ubuntu:24.04",
+                "s2 extract PASS ubuntu:24.04",
+                "s3 extract FAIL ubuntu:24.04",
+                "s4 extract PASS ubuntu:24.04",
+            ],
+        )
+
     def test_rel_085_the_version_defaults_to_the_workspace_version_and_the_evidence_names_the_image(self):
         self.standard("--leg", "extract")
         info = read(self.out / "image.txt")
@@ -881,11 +979,13 @@ class RunScriptTests(unittest.TestCase):
         self.assertRegex(info, r"new=.*new\.AppImage sha256 [0-9a-f]{64}")
 
     def test_rel_085_the_wait_overrides_are_forwarded_by_name_only(self):
-        self.standard("--leg", "extract", env={"E2E_WAIT_TREE": "7", "E2E_FIRST_CHECK_SECS": "3"})
+        self.standard("--leg", "extract", env={"E2E_WAIT_TREE": "7", "E2E_FIRST_CHECK_SECS": "3", "E2E_QUIT_DELAY_SECS": "8"})
         (run,) = self.runs()
         self.assertIn("E2E_WAIT_TREE", run)
         self.assertIn("E2E_FIRST_CHECK_SECS", run)
+        self.assertIn("E2E_QUIT_DELAY_SECS", run)
         self.assertNotIn("E2E_WAIT_TREE=7", run)
+        self.assertNotIn("E2E_QUIT_DELAY_SECS=8", run)
         self.assertNotIn("E2E_WAIT_BUTTON", run)
 
     def test_rel_085_a_failing_check_is_exit_one_even_when_the_container_exits_zero(self):
@@ -955,6 +1055,14 @@ class SelftestScriptTests(unittest.TestCase):
             self.assertIn(name, names)
         self.assertEqual(len(names), len(set(names)))
 
+    def test_rel_085_every_new_scenario_has_a_baseline_and_at_least_two_defect_controls(self):
+        names = self.selftest("--list").stdout.split()
+        for scenario in ("s2", "s3", "s4"):
+            with self.subTest(scenario=scenario):
+                self.assertIn(f"{scenario}_baseline", names)
+                defects = [n for n in names if n.startswith(f"{scenario}_") and n != f"{scenario}_baseline"]
+                self.assertGreaterEqual(len(defects), 2, defects)
+
     def test_rel_085_a_bad_command_line_is_a_usage_error(self):
         for args in (["--jobs", "0"], ["--jobs", "x"], ["--only", "No-Such Control"], ["--bogus"], ["--only"]):
             with self.subTest(args=args):
@@ -973,6 +1081,288 @@ class SelftestScriptTests(unittest.TestCase):
         self.assertRegex(result.stdout, r"baseline\s+\| PASS \| no check failed")
         self.assertRegex(result.stdout, r"no_swap\s+\| PASS \| failed exactly: swap")
         self.assertIn("== selftest: 2 passed, 0 failed", result.stdout)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the stand-in app uses /proc")
+    def test_rel_085_s2_s3_s4_each_pass_clean_and_fail_exactly_the_intended_check(self):
+        controls = {
+            "s2_baseline": r"no check failed",
+            "s2_stage_left": r"failed exactly: no_staging_left",
+            "s3_baseline": r"no check failed",
+            "s3_asset_late": r"failed exactly: no_second_check",
+            "s4_baseline": r"no check failed",
+            "s4_no_delay": r"failed exactly: exit_delayed handshake",
+        }
+        if os.geteuid() == 0:  # root ignores chmod a-w: the s3 controls are reported as skipped
+            controls = {name: want for name, want in controls.items() if not name.startswith("s3_")}
+        result = self.selftest("--only", ",".join(controls), "--jobs", "6")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name, want in controls.items():
+            self.assertRegex(result.stdout, rf"{name}\s+\| PASS \| {want}")
+        self.assertIn(f"== selftest: {len(controls)} passed, 0 failed", result.stdout)
+
+
+PROBE = UPDATE / "e2e_probe.py"
+ATSPI = UPDATE / "atspi_update.py"
+REPO_PATH = "/pavel-purma/dockering/releases"
+
+
+def request_line(path, status=200):
+    return json.dumps({"ts": "2026-10-20T06:47:38.447Z", "method": "GET", "path": path, "user_agent": UA, "status": status})
+
+
+class ProbeTests(unittest.TestCase):
+    """REL-085: the probes the S2-S4 checks rest on (e2e_probe.py, run as the shell runs it): each can fail, and says why."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="dockering-probe-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def probe(self, *args):
+        return subprocess.run(
+            [sys.executable, "-B", str(PROBE), *map(str, args)], capture_output=True, encoding="utf-8", errors="replace", timeout=60
+        )
+
+    def log(self, *paths):
+        path = self.tmp / "requests.jsonl"
+        path.write_text("".join(request_line(p) + "\n" for p in paths), encoding="utf-8")
+        return path
+
+    manifest = f"{REPO_PATH}/latest/download/dockering-update.json"
+    signature = f"{REPO_PATH}/latest/download/dockering-update.json.minisig"
+    asset = f"{REPO_PATH}/download/v1.2.3/Dockering-x86_64.AppImage"
+
+    def test_rel_085_requests_default_wants_one_manifest_one_signature_and_one_asset(self):
+        ok = self.probe("requests", self.log(self.manifest, self.signature, self.asset), "--version", "1.2.3")
+        self.assertEqual(ok.returncode, 0, ok.stdout)
+        self.assertEqual(ok.stderr, "", "a probe reports through its output line")
+        self.assertRegex(ok.stdout, r"^requests\s+PASS\s+manifest 1, \.minisig 1, asset 1")
+        missing = self.probe("requests", self.log(self.manifest, self.signature), "--version", "1.2.3")
+        self.assertEqual(missing.returncode, 1, missing.stdout)
+        self.assertIn("asset 0, expected one of each", missing.stdout)
+
+    def test_rel_085_s3_requests_asset_zero_wants_no_asset_request_at_all(self):
+        args = ("--version", "1.2.3", "--asset", "0")
+        ok = self.probe("requests", self.log(self.manifest, self.signature), *args)
+        self.assertEqual(ok.returncode, 0, ok.stdout)
+        self.assertRegex(ok.stdout, r"manifest 1, \.minisig 1, asset 0; 2 requests, all 200")
+        fetched = self.probe("requests", self.log(self.manifest, self.signature, self.asset), *args)
+        self.assertEqual(fetched.returncode, 1, fetched.stdout)
+        self.assertIn("asset 1, expected one manifest, one .minisig and no asset", fetched.stdout)
+        # a second manifest or a stray path is still a failure
+        twice = self.probe("requests", self.log(self.manifest, self.manifest, self.signature), *args)
+        self.assertEqual(twice.returncode, 1, twice.stdout)
+        stray = self.probe("requests", self.log(self.manifest, self.signature, "/elsewhere"), *args)
+        self.assertEqual(stray.returncode, 1, stray.stdout)
+        self.assertIn("other: GET /elsewhere", stray.stdout)
+        empty = self.probe("requests", self.tmp / "missing.jsonl", *args)
+        self.assertEqual(empty.returncode, 1, "no request at all is not 'no asset request'")
+        self.assertEqual(self.probe("requests", self.log(self.manifest), "--asset", "2", "--version", "1.2.3").returncode, 2)
+
+    def relaunch_log(self, *lines):
+        path = self.tmp / "dockering.log"
+        path.write_text("".join(f"2026-10-20T06:47:38.447Z  INFO {line}\n" for line in lines), encoding="utf-8")
+        return path
+
+    wait_line = "dockering: update relaunch: wait finished waited_ms={ms} outcome=Eof"
+
+    def test_rel_085_s1_handshake_accepts_any_eof_wait(self):
+        quick = self.probe("handshake", self.relaunch_log(self.wait_line.format(ms=12)))
+        self.assertEqual(quick.returncode, 0, quick.stdout)
+        self.assertIn("relaunch wait ended with Eof after 12 ms", quick.stdout)
+        timeout = self.probe(
+            "handshake",
+            self.relaunch_log("dockering: update relaunch: the previous instance did not exit in time; continuing as a normal launch"),
+        )
+        self.assertEqual(timeout.returncode, 1, timeout.stdout)
+        self.assertEqual(self.probe("handshake", self.relaunch_log()).returncode, 1, "no wait line at all")
+
+    def test_rel_085_s4_handshake_min_ms_needs_a_real_wait_and_no_focus_request(self):
+        for ms, status in ((4500, 0), (5200, 0), (4499, 1), (12, 1)):
+            with self.subTest(waited_ms=ms):
+                result = self.probe("handshake", self.relaunch_log(self.wait_line.format(ms=ms)), "--min-ms", "4500")
+                self.assertEqual(result.returncode, status, result.stdout)
+                if status:
+                    self.assertIn(f"waited {ms} ms, expected at least 4500 ms", result.stdout)
+                else:
+                    self.assertIn(f"after {ms} ms", result.stdout)
+        focus = self.probe(
+            "handshake",
+            self.relaunch_log(self.wait_line.format(ms=9000), "dockering: another instance is running; asked it to focus"),
+            "--min-ms",
+            "4500",
+        )
+        self.assertEqual(focus.returncode, 1, focus.stdout)
+        self.assertIn("focus request", focus.stdout)
+        no_ms = self.probe("handshake", self.relaunch_log("dockering: update relaunch: wait finished outcome=Eof"), "--min-ms", "10")
+        self.assertEqual(no_ms.returncode, 1, "a wait that reports no duration cannot show that it waited")
+
+    def offer(self, stage="ready", failed=False, version="1.2.3", payload=None):
+        """An updates directory as the app writes it (crates/dk-update/src/offer.rs): offer.json and maybe the payload."""
+        updates = self.tmp / "data" / "updates"
+        shutil.rmtree(updates, ignore_errors=True)
+        updates.mkdir(parents=True)
+        manifest = json.dumps({"schema": 1, "version": version, "platforms": {}})
+        offer = {"version": 1, "manifest": manifest, "signature": "sig", "confirmed_at": "2026-10-20T06:47:38Z", "stage": stage, "install_failed": failed}
+        (updates / "offer.json").write_text(json.dumps(offer), encoding="utf-8")
+        if payload:
+            target = updates / payload
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x")
+        return updates / "offer.json"
+
+    def test_rel_085_offer_probe_knows_ready_download_and_failed_offers(self):
+        file = self.offer(payload="1.2.3/Dockering-x86_64.AppImage")
+        self.assertEqual(self.probe("offer", file, "--version", "1.2.3", "--want", "ready").returncode, 0)
+        self.assertEqual(self.probe("offer", file, "--version", "1.2.3", "--want", "download").returncode, 1, "a payload on disk")
+        self.assertEqual(self.probe("offer", self.offer(), "--version", "1.2.3", "--want", "download").returncode, 0)
+        self.assertEqual(self.probe("offer", self.offer(), "--version", "1.2.3", "--want", "ready").returncode, 1, "no payload")
+        failed = self.offer(failed=True)
+        self.assertEqual(self.probe("offer", failed, "--version", "1.2.3", "--want", "failed").returncode, 0)
+        self.assertEqual(self.probe("offer", failed, "--version", "1.2.3", "--want", "download").returncode, 1, "install_failed is set")
+        self.assertEqual(self.probe("offer", self.offer(), "--version", "1.2.3", "--want", "failed").returncode, 1, "not degraded")
+
+    def test_rel_085_offer_probe_fails_on_the_wrong_version_stage_or_payload(self):
+        ready = self.offer(payload="1.2.3/Dockering-x86_64.AppImage")
+        wrong = self.probe("offer", ready, "--version", "9.9.9", "--want", "ready")
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+        self.assertIn("the offer is for '1.2.3', expected 9.9.9", wrong.stdout)
+        stuck = self.probe("offer", self.offer(stage="downloading"), "--version", "1.2.3", "--want", "download")
+        self.assertEqual(stuck.returncode, 1, stuck.stdout)
+        self.assertIn("stage is 'downloading', expected 'ready'", stuck.stdout)
+        # a degraded offer whose payload was not removed, a partial download left behind, a payload in another version's directory
+        left = self.offer(failed=True, payload="1.2.3/Dockering-x86_64.AppImage")
+        self.assertEqual(self.probe("offer", left, "--version", "1.2.3", "--want", "failed").returncode, 1)
+        part = self.offer(payload="1.2.3/Dockering-x86_64.AppImage.part")
+        self.assertEqual(self.probe("offer", part, "--version", "1.2.3", "--want", "download").returncode, 1)
+        other = self.offer(payload="0.9.0/Dockering-x86_64.AppImage")
+        self.assertEqual(self.probe("offer", other, "--version", "1.2.3", "--want", "ready").returncode, 1)
+
+    def test_rel_085_offer_probe_reports_an_unreadable_offer_instead_of_crashing(self):
+        missing = self.probe("offer", self.tmp / "nope" / "offer.json", "--version", "1.2.3", "--want", "download")
+        self.assertEqual(missing.returncode, 1, missing.stdout)
+        self.assertRegex(missing.stdout, r"^offer_download\s+FAIL\s+offer\.json unreadable")
+        garbage = self.tmp / "offer.json"
+        garbage.write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.probe("offer", garbage, "--version", "1.2.3", "--want", "failed").returncode, 1)
+        no_manifest = self.tmp / "offer2.json"
+        no_manifest.write_text('{"stage": "ready"}', encoding="utf-8")
+        self.assertEqual(self.probe("offer", no_manifest, "--version", "1.2.3", "--want", "failed", "--name", "mine").stdout[:4], "mine")
+
+
+class AtspiPureTests(unittest.TestCase):
+    """REL-085: the parts of atspi_update.py that need no accessibility bus: what counts as the button, the toast, a failure toast."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("atspi_update_under_test", ATSPI)
+        cls.atspi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.atspi)
+
+    def nodes(self, *named):
+        return [(role, name, f"node{i}") for i, (role, name) in enumerate(named)]
+
+    def test_rel_085_the_toast_is_looked_up_by_its_own_button_label(self):
+        tree = self.nodes(
+            ("push_button", "Update available: Dockering 1.2.3"),
+            ("label", "Dockering 1.2.3 is available."),
+            ("push_button", "Download"),
+        )
+        download = self.atspi.classify(tree, "1.2.3", "push_button", self.atspi.TOAST_DOWNLOAD)
+        self.assertTrue(download["restart_now"], "a Download offer's toast has the Download button")
+        self.assertEqual(download["button"], "node0")
+        self.assertEqual(download["texts"], ["Dockering 1.2.3 is available."])
+        restart = self.atspi.classify(tree, "1.2.3", "push_button")
+        self.assertFalse(restart["restart_now"], "the default is the Restart now toast: a Download button is not it")
+        self.assertEqual(self.atspi.classify(self.nodes(("push_button", "Restart now")), "1.2.3", "push_button")["restart_now"], True)
+
+    def test_rel_085_the_title_bar_button_needs_the_exact_name_and_role(self):
+        wrong_version = self.nodes(("push_button", "Update available: Dockering 9.9.9"))
+        found = self.atspi.classify(wrong_version, "1.2.3", "push_button")
+        self.assertIsNone(found["button"])
+        self.assertEqual(found["lookalikes"], ["Update available: Dockering 9.9.9"])
+        wrong_role = self.nodes(("label", "Update available: Dockering 1.2.3"))
+        self.assertIsNone(self.atspi.classify(wrong_role, "1.2.3", "push_button")["button"])
+
+    def test_rel_085_a_failure_toast_is_found_by_part_of_its_text(self):
+        tree = self.nodes(("label", "Couldn't start the update: the new version failed its self-test"), ("label", "Containers"), ("push_button", ""))
+        self.assertEqual(
+            self.atspi.names_containing(tree, "Couldn't start the update"),
+            ["Couldn't start the update: the new version failed its self-test"],
+        )
+        self.assertEqual(self.atspi.names_containing(tree, "Couldn’t"), [], "no fuzzy matching")
+        self.assertEqual(self.atspi.names_containing([], "x"), [])
+
+    def test_rel_085_a_toast_is_found_by_its_text_or_else_by_its_action_button(self):
+        # observed on the real S2 run: the error toast has an empty name and a 'Copy details' button
+        error = self.nodes(("notification", ""), ("push_button", "Copy details"), ("push_button", ""))
+        by_button = self.atspi.find_toast(error, "Couldn't start the update", "push_button", "Copy details")
+        self.assertIn("'Copy details' button", by_button)
+        self.assertIsNone(self.atspi.find_toast(error, "Couldn't start the update", "push_button"), "no button label given")
+        self.assertIsNone(self.atspi.find_toast(error, "Couldn't start the update", "push_button", "Retry"))
+        self.assertIsNone(self.atspi.find_toast(self.nodes(("label", "Copy details")), "x", "push_button", "Copy details"), "a label is not a button")
+        named = self.nodes(("label", "Couldn't start the update: boom"))
+        self.assertIn("Couldn't start the update: boom", self.atspi.find_toast(named, "Couldn't start the update", "push_button", "Copy details"))
+
+
+@unittest.skipIf(WINDOWS or not BASH, "needs bash and a POSIX shell")
+class ScenarioScriptTests(unittest.TestCase):
+    """REL-085: s1.sh and entry.sh refuse a bad scenario or a bad quit delay before they touch anything (exit 2)."""
+
+    def run_script(self, script, *args, **env):
+        environment = {k: v for k, v in os.environ.items() if not k.startswith(("E2E_", "DOCKERING_"))}
+        environment.update(
+            E2E_OLD="/nonexistent/old", E2E_NEW="/nonexistent/new", E2E_FIXTURE="/nonexistent/fixture", E2E_VERSION="0.3.0", E2E_STUB="1"
+        )
+        environment.update(env)
+        return subprocess.run(
+            [BASH, "--noprofile", "--norc", str(UPDATE / script), *args], env=environment, capture_output=True, encoding="utf-8", errors="replace", timeout=60
+        )
+
+    def test_rel_085_s1_sh_runs_only_the_scenarios_s1_to_s4(self):
+        for scenario in ("s0", "s5", "S1", "all", "s1,s2"):
+            with self.subTest(scenario=scenario):
+                result = self.run_script("s1.sh", E2E_SCENARIO=scenario)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("E2E_SCENARIO must be s1, s2, s3 or s4", result.stderr)
+
+    def test_rel_085_s4_needs_a_delay_the_relaunch_wait_can_outlast_and_an_old_exit_limit_above_it(self):
+        for delay in ("1", "21", "6s", "0", "-3"):
+            with self.subTest(delay=delay):
+                result = self.run_script("s1.sh", E2E_SCENARIO="s4", E2E_QUIT_DELAY_SECS=delay)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("E2E_QUIT_DELAY_SECS must be 2-20 seconds", result.stderr)
+        for wait in ("8", "3"):
+            with self.subTest(wait_old_exit=wait):
+                result = self.run_script("s1.sh", E2E_SCENARIO="s4", E2E_QUIT_DELAY_SECS="8", E2E_WAIT_OLD_EXIT=wait)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("E2E_WAIT_OLD_EXIT (", result.stderr)
+                self.assertIn("must exceed the quit delay (8 s)", result.stderr)
+
+    def test_rel_085_the_quit_delay_only_belongs_to_s4(self):
+        # s1 with a silly delay is not refused for it (the variable is ignored), so it gets as far as the leg check
+        result = self.run_script("s1.sh", E2E_SCENARIO="s1", E2E_QUIT_DELAY_SECS="x", E2E_LEG="sideways")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("E2E_LEG must be extract or fuse", result.stderr)
+
+    def test_rel_085_entry_sh_takes_the_four_scenarios_and_checks_the_variable_against_the_argument(self):
+        bad = self.run_script("entry.sh", "s5")
+        self.assertEqual(bad.returncode, 2, bad.stdout + bad.stderr)
+        self.assertIn("unknown scenario 's5'", bad.stderr)
+        for scenario in ("s2", "s3", "s4"):
+            with self.subTest(scenario=scenario):
+                clash = self.run_script("entry.sh", "s1", E2E_SCENARIO=scenario)
+                self.assertEqual(clash.returncode, 2, clash.stdout + clash.stderr)
+                self.assertIn(f"E2E_SCENARIO={scenario} disagrees with the scenario argument 's1'", clash.stderr)
+
+    def test_rel_085_entry_sh_runs_s1_sh_for_every_scenario(self):
+        script = read(UPDATE / "entry.sh")
+        self.assertIn('E2E_SCENARIO="$SCENARIO"', script)
+        self.assertIn('bash "/scripts/s1.sh"', script)
+        self.assertNotIn("/scripts/$SCENARIO.sh", script, "there is no s2.sh, s3.sh or s4.sh")
+        for name in ("E2E_QUIT_DELAY_SECS", "E2E_NEW_VERSION"):
+            self.assertIn(name, script, f"entry.sh forwards {name}")
 
 
 class ScriptFilesTests(unittest.TestCase):

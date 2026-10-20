@@ -7,9 +7,17 @@ name can be asserted. Prints one `name PASS|FAIL|INFO detail` line per check and
 
   atspi_update.py tree [--name NAME] [--timeout S]            the app is on the accessibility bus and has painted its tree
   atspi_update.py absent VERSION --name NAME [--for S]        no 'Update available...' control (any role) for S seconds
-  atspi_update.py watch VERSION [--timeout S]                 the title-bar button, role button, named exactly
+  atspi_update.py watch VERSION [--timeout S] [--toast restart|download]
+                                                              the title-bar button, role button, named exactly
                                                               'Update available: Dockering VERSION' (UPD-015); and, only as
-                                                              INFO (a toast hides itself), whether the toast was seen
+                                                              INFO (a toast hides itself), whether the toast was seen: with
+                                                              *Restart now* (default) or, for a Download offer (S3), *Download*
+  atspi_update.py present VERSION --name NAME [--timeout S]   the same button is (still) there, for example after a failed install
+  atspi_update.py seen TEXT --name NAME [--button LABEL] [--timeout S]
+                                                              a toast shows up: a control whose name contains TEXT (such as
+                                                              'Couldn't start the update') or, because a toast's text is not
+                                                              always exposed, its action button LABEL ('Copy details'): PASS
+                                                              when seen, INFO when not (toasts hide themselves)
   atspi_update.py activate VERSION                            do_action(0) on that button: the click, RestartToUpdate
   atspi_update.py notice VERSION [--timeout S]                the post-update notice is shown: its 'What's new' button (UPD-008)
   atspi_update.py dump                                        one line per node: depth, role, name (evidence, not a check)
@@ -26,6 +34,7 @@ warnings.filterwarnings("ignore")
 
 BUTTON_PREFIX = "Update available"
 TOAST_BUTTON = "Restart now"
+TOAST_DOWNLOAD = "Download"
 NOTICE_BUTTON = "What's new"
 MIN_NODES = 10  # a window that has painted, not just a registered application
 
@@ -34,11 +43,12 @@ def button_name(version):
     return f"{BUTTON_PREFIX}: Dockering {version}"
 
 
-def classify(nodes, version, push_button):
+def classify(nodes, version, push_button, toast_button=TOAST_BUTTON):
     """What the update scenarios look for in one snapshot of the tree: [(role, name, node)] -> a dict.
 
     `button`: the node of the title-bar button (role `push_button`, exact name); `lookalikes`: other controls whose name
-    starts with 'Update available' (a wrong role or a wrong version is a finding, not an absence).
+    starts with 'Update available' (a wrong role or a wrong version is a finding, not an absence); `restart_now`: the toast's
+    action button, named `toast_button` (*Restart now*, or *Download* for a Download offer).
     """
     found = {"count": len(nodes), "button": None, "lookalikes": [], "restart_now": False, "whats_new": False, "texts": []}
     for role, name, node in nodes:
@@ -49,13 +59,29 @@ def classify(nodes, version, push_button):
                 found["button"] = node
             else:
                 found["lookalikes"].append(name)
-        elif role == push_button and name == TOAST_BUTTON:
+        elif role == push_button and name == toast_button:
             found["restart_now"] = True
         elif role == push_button and name == NOTICE_BUTTON:
             found["whats_new"] = True
-        elif "ready to install" in name or "Updated to Dockering" in name:
+        elif "ready to install" in name or "is available" in name or "Updated to Dockering" in name:
             found["texts"].append(name)
     return found
+
+
+def names_containing(nodes, text):
+    """The accessible names (of any role) that contain `text`."""
+    return [name for _, name, _ in nodes if name and text in name]
+
+
+def find_toast(nodes, text, push_button, button=None):
+    """How a toast shows in the tree: a name containing `text`, else (the toast body is not always exposed: the error toast of a
+    failed action has an empty name) its action button named `button`. A description of what matched, or None."""
+    names = names_containing(nodes, text)
+    if names:
+        return f"{names[0]!r}"
+    if button and any(role == push_button and name == button for role, name, _ in nodes):
+        return f"a toast with a '{button}' button (its text is not exposed by name)"
+    return None
 
 
 def say(name, status, detail=""):
@@ -109,9 +135,9 @@ class Tree:
                 continue
         return out
 
-    def view(self, version):
+    def view(self, version, toast_button=TOAST_BUTTON):
         nodes = self.snapshot()
-        return None if nodes is None else classify(nodes, version, self.push_button)
+        return None if nodes is None else classify(nodes, version, self.push_button, toast_button)
 
 
 def wait_for(pred, timeout):
@@ -163,9 +189,10 @@ def cmd_absent(tree, args):
 
 def cmd_watch(tree, args):
     seen = {"toast": False, "texts": []}
+    toast_button = TOAST_DOWNLOAD if args.toast == "download" else TOAST_BUTTON
 
     def look():
-        view = tree.view(args.version)
+        view = tree.view(args.version, toast_button)
         if view is None:
             return None
         seen["toast"] = seen["toast"] or view["restart_now"]
@@ -178,9 +205,9 @@ def cmd_watch(tree, args):
     if view:
         say("button", "PASS", f"{button_name(args.version)!r} (role button) after {time.time() - started:.1f}s")
         if seen["toast"]:
-            say("toast_atspi", "PASS", f"the toast's '{TOAST_BUTTON}' button was in the tree: {seen['texts'][:1]}")
+            say("toast_atspi", "PASS", f"the toast's '{toast_button}' button was in the tree: {seen['texts'][:1]}")
         else:
-            say("toast_atspi", "INFO", "the toast was not in the tree (it hides itself; its announcement is asserted by toast)")
+            say("toast_atspi", "INFO", f"the toast ('{toast_button}') was not in the tree (it hides itself; its announcement is asserted by toast)")
         return True
     last = seen.get("view") or {}
     if last.get("lookalikes"):
@@ -196,6 +223,41 @@ def cmd_activate(tree, args):
     actions = node.get_action_iface()
     acted = bool(actions and actions.do_action(0))
     return say("activate", "PASS" if acted else "FAIL", "do_action(0) on the update button" if acted else "the button has no action or refused it")
+
+
+def cmd_present(tree, args):
+    """The title-bar button is there with its exact name and role (after a failed install it must still be)."""
+    last = {}
+
+    def there():
+        view = tree.view(args.version)
+        last["view"] = view
+        return view and view["button"] is not None and view
+
+    started = time.time()
+    view = wait_for(there, timeout_of(args, 10))
+    if view:
+        return say(args.name, "PASS", f"{button_name(args.version)!r} (role button) is in the tree ({view['count']} nodes)")
+    shown = last.get("view")
+    if shown is None:
+        return say(args.name, "FAIL", "the app is not on the accessibility bus: the button cannot be there")
+    if shown["lookalikes"]:
+        return say(args.name, "FAIL", f"a control named {shown['lookalikes'][0]!r} exists, expected {button_name(args.version)!r} with role button")
+    return say(args.name, "FAIL", f"no {button_name(args.version)!r} button in the tree after {time.time() - started:.1f}s ({shown['count']} nodes)")
+
+
+def cmd_seen(tree, args):
+    """Best effort: a toast hides itself, so not seeing it is INFO, never a FAIL."""
+
+    def shown():
+        nodes = tree.snapshot()
+        return find_toast(nodes, args.text, tree.push_button, args.button) if nodes else None
+
+    started = time.time()
+    what = wait_for(shown, timeout_of(args, 10))
+    if what:
+        return say(args.name, "PASS", f"{what} was in the tree after {time.time() - started:.1f}s")
+    return say(args.name, "INFO", f"nothing named like {args.text!r} was in the tree within {timeout_of(args, 10):g}s (a toast hides itself; the outcome is asserted by other checks)")
 
 
 def cmd_notice(tree, args):
@@ -237,6 +299,16 @@ def main(argv):
     p = sub.add_parser("watch")
     p.add_argument("version")
     p.add_argument("--timeout", type=float)
+    p.add_argument("--toast", choices=("restart", "download"), default="restart")
+    p = sub.add_parser("present")
+    p.add_argument("version")
+    p.add_argument("--name", required=True)
+    p.add_argument("--timeout", type=float)
+    p = sub.add_parser("seen")
+    p.add_argument("text")
+    p.add_argument("--name", required=True)
+    p.add_argument("--button")
+    p.add_argument("--timeout", type=float)
     p = sub.add_parser("activate")
     p.add_argument("version")
     p = sub.add_parser("notice")
@@ -244,7 +316,16 @@ def main(argv):
     p.add_argument("--timeout", type=float)
     sub.add_parser("dump")
     args = parser.parse_args(argv)
-    handlers = {"tree": cmd_tree, "absent": cmd_absent, "watch": cmd_watch, "activate": cmd_activate, "notice": cmd_notice, "dump": cmd_dump}
+    handlers = {
+        "tree": cmd_tree,
+        "absent": cmd_absent,
+        "watch": cmd_watch,
+        "present": cmd_present,
+        "seen": cmd_seen,
+        "activate": cmd_activate,
+        "notice": cmd_notice,
+        "dump": cmd_dump,
+    }
     try:
         return 0 if handlers[args.command](Tree(), args) else 1
     except Exception as error:

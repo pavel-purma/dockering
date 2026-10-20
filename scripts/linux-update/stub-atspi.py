@@ -2,9 +2,10 @@
 """Stand-in for atspi_update.py in the runner's self-test (selftest.sh; E2E_STUB=1 makes s1.sh call this instead).
 
 The stub app (stub_app.py) has no accessibility tree; it writes what its window would show to ~/.stub-ui.json. This answers the
-subcommands of atspi_update.py from that file and prints the same `name PASS|FAIL|INFO detail` lines, so s1.sh's own logic (its
+subcommands of atspi_update.py (tree, absent, watch, present, seen, activate, notice, dump) from that file and prints the same
+`name PASS|FAIL|INFO detail` lines, so s1.sh's own logic (its
 ordering, its process, file and request checks, its SKIP rules) is what the self-test exercises. The AT-SPI code itself is the
-real run's job and has its own unit tests (scripts/tests/test_linux_update.py).
+real run's job; its pure parts (classify, names_containing) have unit tests in scripts/tests/test_linux_update.py.
 """
 import argparse
 import json
@@ -54,6 +55,16 @@ def main(argv):
     p = sub.add_parser("watch")
     p.add_argument("version")
     p.add_argument("--timeout", type=float, default=45)
+    p.add_argument("--toast", choices=("restart", "download"), default="restart")
+    p = sub.add_parser("present")
+    p.add_argument("version")
+    p.add_argument("--name", required=True)
+    p.add_argument("--timeout", type=float, default=10)
+    p = sub.add_parser("seen")
+    p.add_argument("text")
+    p.add_argument("--name", required=True)
+    p.add_argument("--button")
+    p.add_argument("--timeout", type=float, default=10)
     p = sub.add_parser("activate")
     p.add_argument("version")
     p = sub.add_parser("notice")
@@ -81,9 +92,27 @@ def main(argv):
         ui = wait_for(lambda: (lambda u: u if u and u.get("button") == name else None)(read_ui()), args.timeout)
         if ui:
             say("button", "PASS", f"{name!r} (role button)")
-            say("toast_atspi", "INFO", "the stub shows no toast")
+            if ui.get("toast") == args.toast:
+                say("toast_atspi", "PASS", f"the stub's {args.toast} toast was shown")
+            else:
+                say("toast_atspi", "INFO", f"the stub shows no {args.toast} toast")
             return True
         return say("button", "FAIL", f"no {name!r} button in the stub's window")
+    if args.command == "present":
+        name = f"Update available: Dockering {args.version}"
+        if read_ui() is None:  # the stub has no bus to wait for: a gone app is answered at once
+            return say(args.name, "FAIL", "the app is not on the accessibility bus: the button cannot be there")
+        ui = wait_for(lambda: (lambda u: u if u and u.get("button") == name else None)(read_ui()), args.timeout)
+        if ui:
+            return say(args.name, "PASS", f"{name!r} (role button) is in the stub's window")
+        if read_ui() is None:
+            return say(args.name, "FAIL", "the app is not on the accessibility bus: the button cannot be there")
+        return say(args.name, "FAIL", f"no {name!r} button in the stub's window")
+    if args.command == "seen":
+        ui = wait_for(lambda: (lambda u: u if u and args.text in str(u.get("failure", "")) else None)(read_ui()), args.timeout if read_ui() else 0)
+        if ui:
+            return say(args.name, "PASS", f"{ui['failure']!r} was in the stub's window")
+        return say(args.name, "INFO", f"nothing named like {args.text!r} in the stub's window (a toast hides itself)")
     if args.command == "activate":
         ui = read_ui()
         if not ui or not ui.get("button"):

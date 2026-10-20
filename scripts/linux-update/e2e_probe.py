@@ -10,8 +10,9 @@ scripts/linux-smoke/run.sh, and exit 1 on a FAIL; the others print plain values 
       process, the AppImage runtime and the new process after a relaunch are all found this way, whatever their names.
   e2e_probe.py owner SOCKET
       the pid that listens on the unix socket SOCKET (the single-instance socket), or nothing
-  e2e_probe.py requests LOG --version V [--arch A] [--name NAME]
-      the server saw exactly one manifest, one .minisig and one asset request (all 200) and nothing else
+  e2e_probe.py requests LOG --version V [--arch A] [--asset 0|1] [--name NAME]
+      the server saw exactly one manifest, one .minisig and --asset asset requests (default 1; S3 passes 0: a read-only
+      install directory gets a Download offer and the payload is never fetched), all 200, and nothing else
   e2e_probe.py schedule LOG --start EPOCH --first-check SECS [--name NAME]
       the first request came no earlier than the first check was due (slack 1 s) and within 30 s after it
   e2e_probe.py user_agent LOG --expect UA [--name NAME]
@@ -19,8 +20,16 @@ scripts/linux-smoke/run.sh, and exit 1 on a FAIL; the others print plain values 
   e2e_probe.py state FILE --version V --want toast|kept [--name NAME]
       toast: state.json records the announcement (`updates.notified_version`); kept: the old instance's window bounds
       survived and the new instance recorded its version
-  e2e_probe.py handshake LOG
-      the relaunched process logged the end of its wait for the predecessor with outcome Eof (not a timeout)
+  e2e_probe.py handshake LOG [--min-ms MS]
+      the relaunched process logged the end of its wait for the predecessor with outcome Eof (not a timeout). With --min-ms
+      (S4: the predecessor exits late) it also waited at least MS milliseconds and never sent a focus request to the old instance
+  e2e_probe.py offer FILE --version V --want ready|download|failed [--arch A] [--name NAME]
+      FILE is <data>/updates/offer.json (crates/dk-update/src/offer.rs: `version` of the file format, `manifest` the signed
+      text, `confirmed_at`, `stage` ready|downloading|installed_restart, `install_failed`). ready: the install offer of
+      version V is verified, waiting, and its payload is on disk; download: V is a Download offer from the start (this
+      install can't update itself, S3), stage ready, no failed install, no payload on disk; failed: installing V failed
+      (S2: the self-test), so the offer degraded to Download for good (UPD-017 (6)): stage ready, install_failed true, and the
+      payload was removed
 """
 import argparse
 import json
@@ -155,14 +164,16 @@ def check_requests(args):
     counts, other = classify(entries, args.version, args.arch)
     bad_status = [f"{e.get('method')} {e.get('path')} -> {e.get('status')}" for e in entries if e.get("status") != 200]
     summary = f"manifest {counts['manifest']}, .minisig {counts['signature']}, asset {counts['asset']}"
-    if all(n == 1 for n in counts.values()) and not other and not bad_status:
+    wanted = {"manifest": 1, "signature": 1, "asset": args.asset}
+    if counts == wanted and not other and not bad_status:
         return say(args.name, "PASS", f"{summary}; {len(entries)} requests, all 200")
     why = []
     if other:
         why.append("other: " + "; ".join(other[:3]))
     if bad_status:
         why.append("not 200: " + "; ".join(bad_status[:3]))
-    return say(args.name, "FAIL", f"{summary}, expected one of each" + (f" ({'; '.join(why)})" if why else ""))
+    expected = "expected one of each" if args.asset else "expected one manifest, one .minisig and no asset"
+    return say(args.name, "FAIL", f"{summary}, {expected}" + (f" ({'; '.join(why)})" if why else ""))
 
 
 def check_schedule(args):
@@ -228,7 +239,62 @@ def check_handshake(args):
     if not re.search(r"outcome=Eof\b", waits[0]):
         return say("handshake", "FAIL", "the wait did not end with end-of-file: " + waits[0][-160:])
     waited = re.search(r"waited_ms=(\d+)", waits[0])
-    return say("handshake", "PASS", f"relaunch wait ended with Eof after {waited.group(1) if waited else '?'} ms")
+    waited_ms = int(waited.group(1)) if waited else None
+    if args.min_ms is not None:
+        focus = [line for line in lines if "asked it to focus" in line]
+        if focus:
+            return say("handshake", "FAIL", "the relaunched process sent a focus request to the old instance instead of waiting: " + focus[-1][-160:])
+        if waited_ms is None or waited_ms < args.min_ms:
+            return say(
+                "handshake",
+                "FAIL",
+                f"the relaunched process waited {waited_ms if waited_ms is not None else '?'} ms, expected at least {args.min_ms} ms "
+                "for a predecessor that exits late: it did not wait for the old process to be gone",
+            )
+    return say("handshake", "PASS", f"relaunch wait ended with Eof after {waited_ms if waited_ms is not None else '?'} ms")
+
+
+def payload_files(updates_dir):
+    """Every downloaded AppImage (or partial one) below the updates directory, as paths relative to it."""
+    found = []
+    for base, _, names in os.walk(updates_dir):
+        for name in names:
+            if name.endswith((".AppImage", ".part")):
+                found.append(os.path.relpath(os.path.join(base, name), updates_dir))
+    return sorted(found)
+
+
+def check_offer(args):
+    name = args.name or f"offer_{args.want}"
+    try:
+        with open(args.file, encoding="utf-8") as handle:
+            offer = json.load(handle)
+        manifest_version = json.loads(offer["manifest"]).get("version")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        return say(name, "FAIL", f"offer.json unreadable or not an offer: {type(error).__name__}: {str(error)[:100]}")
+    stage, failed = offer.get("stage"), offer.get("install_failed")
+    payload = payload_files(os.path.dirname(os.path.abspath(args.file)))
+    expected_payload = os.path.join(args.version, f"Dockering-{args.arch}.AppImage")
+    problems = []
+    if manifest_version != args.version:
+        problems.append(f"the offer is for {manifest_version!r}, expected {args.version}")
+    if stage != "ready":
+        problems.append(f"stage is {stage!r}, expected 'ready'")
+    if failed is not (args.want == "failed"):
+        problems.append(f"install_failed is {failed!r}, expected {args.want == 'failed'}")
+    if args.want == "ready":
+        if expected_payload not in payload:
+            problems.append(f"the payload {expected_payload} is not on disk (found {payload or 'no payload'})")
+    elif payload:
+        problems.append(f"a payload is on disk: {payload[0]}")
+    if problems:
+        return say(name, "FAIL", "; ".join(problems))
+    detail = {
+        "ready": f"offer {args.version}: stage ready, install not failed, payload {expected_payload} on disk",
+        "download": f"offer {args.version}: stage ready, install not failed, no payload on disk (a Download offer: nothing was fetched)",
+        "failed": f"offer {args.version}: stage ready, install_failed true, payload removed (degraded to Download)",
+    }[args.want]
+    return say(name, "PASS", detail)
 
 
 def mount_holders(mountpoint):
@@ -289,6 +355,7 @@ def main(argv):
     req.add_argument("log")
     req.add_argument("--version", required=True)
     req.add_argument("--arch", default="x86_64")
+    req.add_argument("--asset", type=int, choices=(0, 1), default=1)
     req.add_argument("--name", default="requests")
 
     sch = sub.add_parser("schedule")
@@ -310,6 +377,14 @@ def main(argv):
 
     hs = sub.add_parser("handshake")
     hs.add_argument("log")
+    hs.add_argument("--min-ms", type=int)
+
+    of = sub.add_parser("offer")
+    of.add_argument("file")
+    of.add_argument("--version", required=True)
+    of.add_argument("--want", choices=("ready", "download", "failed"), required=True)
+    of.add_argument("--arch", default="x86_64")
+    of.add_argument("--name")
 
     args = parser.parse_args(argv)
     if args.command == "holders":
@@ -332,6 +407,7 @@ def main(argv):
         "user_agent": check_user_agent,
         "state": check_state,
         "handshake": check_handshake,
+        "offer": check_offer,
     }[args.command]
     return handler(args)
 

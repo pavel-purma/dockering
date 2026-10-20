@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Self-test of the Linux update runner (REL-085; plan linux-appimage-updates §6.5 "selftest"): the harness must FAIL when it should.
-# Runs s1.sh, the scenario core of run.sh, against a test double of the app (stub-app.sh, stub_app.py) that carries one known
-# defect per control, with stub-atspi.py answering for the accessibility tree. Each control names the checks that must FAIL (and
-# the ones that must be SKIPped as a consequence); any other FAIL, a missing FAIL, another SKIP or a zero exit status is a failed
-# control. A runner that cannot fail would pass a broken updater. No Docker, no display, no AppImage, no network (127.0.0.1 only):
-# the container, the packages and the real AT-SPI calls are the real run's part; this proves the runner's own logic.
-# The controls run in parallel, each in its own HOME, port and output directory, as the current user.
+# Runs s1.sh, the scenario core of run.sh (all of S1-S4: E2E_SCENARIO picks one), against a test double of the app (stub-app.sh,
+# stub_app.py) that carries one known defect per control, with stub-atspi.py answering for the accessibility tree. Each control
+# names the checks that must FAIL (and the ones that must be SKIPped as a consequence); any other FAIL, a missing FAIL, another SKIP
+# or a zero exit status is a failed control. A runner that cannot fail would pass a broken updater. Every scenario has a baseline
+# control that must pass cleanly, and defect controls. No Docker, no display, no AppImage, no network (127.0.0.1 only): the
+# container, the packages and the real AT-SPI calls are the real run's part; this proves the runner's own logic.
+# The controls run in parallel, each in its own HOME, port and output directory, as the current user. The S3 controls need an
+# unprivileged user (root ignores chmod a-w, which makes the install directory read-only): as root they are reported as SKIP.
 #   selftest.sh [--only NAME[,NAME...]] [--out DIR] [--jobs N] [--list]
-# Prints one `name | PASS|FAIL | detail` line per control and `== selftest: N passed, M failed`; exits 1 when a control did not behave.
+# Prints one `name | PASS|FAIL|SKIP | detail` line per control and `== selftest: N passed, M failed`; exits 1 when a control did not behave.
 # The evidence (results.txt and the console of every control) is kept in --out (default: a temporary directory, removed when all
 # controls behaved).
 set -u
 usage() { echo "usage: selftest.sh [--only NAME[,NAME...]] [--out DIR] [--jobs N] [--list]" >&2; exit 2; }
 bad() { echo "selftest.sh: $*" >&2; usage; }
-only="" out="" jobs=4 list=""
+only="" out="" jobs=6 list=""
 while [ $# -gt 0 ]; do
   case $1 in
   --only | --out | --jobs)
@@ -37,7 +39,9 @@ for tool in python3 sed awk sha256sum; do command -v "$tool" >/dev/null 2>&1 || 
 
 OLD_VERSION=0.0.1
 NEW_VERSION=0.3.0
-# the controls: name | checks that must FAIL | checks that must be SKIPped | E2E_STUB_FLAGS (the defect injected)
+CLAIMED_VERSION=99.0.0 # s2: the manifest names a version the new stub does not print
+QUIT_DELAY=3 # s4: the seam's exit delay (the real run uses 6)
+# the controls: name | checks that must FAIL | checks that must be SKIPped as a consequence | E2E_STUB_FLAGS (the defect injected) | scenario (default s1)
 CONTROLS=(
   "baseline|||"
   "no_swap|swap||noswap"
@@ -53,6 +57,23 @@ CONTROLS=(
   "second_check|no_second_check||second_check"
   "no_notice|notice||no_notice"
   "button_again|no_button_after||button_again"
+  "s2_baseline||||s2"
+  "s2_swap_anyway|offer_degraded button_after_failure old_alive install_untouched no_relaunch||swap_anyway|s2"
+  "s2_exits|old_alive button_after_failure||exits_on_failure|s2"
+  "s2_no_degrade|offer_degraded||no_degrade|s2"
+  "s2_stage_left|no_staging_left||stage_left|s2"
+  "s2_redownload|no_second_check||redownload|s2"
+  "s2_no_button|button|activate offer_degraded button_after_failure|nobutton|s2"
+  "s3_baseline||||s3"
+  "s3_asset_early|requests offer_download no_second_check||asset_early|s3"
+  "s3_asset_late|no_second_check||asset_late|s3"
+  "s3_no_button|button||nobutton|s3"
+  "s3_offer_stuck|offer_download||offer_stuck|s3"
+  "s3_exits_late|old_alive||exits_late|s3"
+  "s4_baseline||||s4"
+  "s4_no_delay|exit_delayed handshake||no_delay|s4"
+  "s4_pipe_early|handshake||pipe_early|s4"
+  "s4_stale_state|state_kept||stale_state|s4"
 )
 names=()
 for entry in "${CONTROLS[@]}"; do names+=("${entry%%|*}"); done
@@ -81,6 +102,14 @@ printf '{"version":"%s"}\n' "$NEW_VERSION" >"$repo/latest/download/dockering-upd
 printf 'stub signature\n' >"$repo/latest/download/dockering-update.json.minisig"
 cp "$out/new.AppImage" "$repo/download/v$NEW_VERSION/Dockering-x86_64.AppImage"
 printf 'stub-public-key\n' >"$fx/public-key.txt"
+# s2: the manifest claims a version the file it serves does not print (the real fixture: `xtask update-e2e-fixture --claimed-version`)
+fx2="$out/fixture-s2"
+repo2="$fx2/root/pavel-purma/dockering/releases"
+mkdir -p "$repo2/latest/download" "$repo2/download/v$CLAIMED_VERSION"
+printf '{"version":"%s"}\n' "$CLAIMED_VERSION" >"$repo2/latest/download/dockering-update.json"
+printf 'stub signature\n' >"$repo2/latest/download/dockering-update.json.minisig"
+cp "$out/new.AppImage" "$repo2/download/v$CLAIMED_VERSION/Dockering-x86_64.AppImage"
+printf 'stub-public-key\n' >"$fx2/public-key.txt"
 
 fails_of() { awk '$2 == "FAIL" { print $1 }' "$1" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
 skips_of() { awk '$2 == "SKIP" { print $1 }' "$1" 2>/dev/null | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
@@ -88,15 +117,26 @@ sorted() { tr ' ' '\n' <<<"$1" | grep -v '^$' | LC_ALL=C sort | tr '\n' ' ' | se
 
 # run_control <entry>: one control, its verdict line in $out/verdict-<name>
 run_control() {
-  local entry=$1 name fails skips flags results rc got_fails got_skips want_fails want_skips start verdict detail
-  IFS='|' read -r name fails skips flags <<<"$entry"
+  local entry=$1 name fails skips flags scenario results rc got_fails got_skips want_fails want_skips start verdict detail
+  local version=$NEW_VERSION fixture=$fx new_version="" quit_delay=""
+  IFS='|' read -r name fails skips flags scenario <<<"$entry"
+  scenario=${scenario:-s1}
   want_fails=$(sorted "$fails")
   want_skips=$(sorted "$skips")
   results="$out/out-$name/results.txt"
+  if [ "$scenario" = s3 ] && [ "$(id -u)" -eq 0 ]; then
+    printf '%-18s | SKIP | root ignores chmod a-w, so s3 cannot make the install directory read-only: run the self-test as an unprivileged user\n' "$name" >"$out/verdict-$name"
+    return
+  fi
+  case "$scenario" in
+    s2) version=$CLAIMED_VERSION fixture=$fx2 new_version=$NEW_VERSION ;;
+    s4) quit_delay=$QUIT_DELAY ;;
+  esac
   mkdir -p "$out/home-$name"
   start=$(date +%s)
-  env HOME="$out/home-$name" E2E_STUB=1 E2E_STUB_FLAGS="$flags" E2E_STUB_BODY="$here/stub_app.py" \
-    E2E_OLD="$out/old.AppImage" E2E_NEW="$out/new.AppImage" E2E_FIXTURE="$fx" E2E_VERSION="$NEW_VERSION" \
+  env HOME="$out/home-$name" E2E_STUB=1 E2E_STUB_FLAGS="$flags" E2E_STUB_BODY="$here/stub_app.py" E2E_SCENARIO="$scenario" \
+    E2E_OLD="$out/old.AppImage" E2E_NEW="$out/new.AppImage" E2E_FIXTURE="$fixture" E2E_VERSION="$version" \
+    E2E_NEW_VERSION="$new_version" E2E_QUIT_DELAY_SECS="$quit_delay" \
     E2E_LEG=extract E2E_OUT="$out/out-$name" E2E_FIRST_CHECK_SECS=2 E2E_WAIT_TREE=10 E2E_WAIT_BUTTON=15 \
     E2E_WAIT_OLD_EXIT="$([ "$name" = old_lingers ] && echo 4 || echo 10)" E2E_WAIT_NEW=10 E2E_ALIVE=1 E2E_SETTLE=2 \
     bash "$here/s1.sh" >"$out/console-$name.txt" 2>&1
@@ -129,17 +169,25 @@ for entry in "${CONTROLS[@]}"; do
 done
 wait
 
-passed=0 failed=0
+passed=0 failed=0 skipped=0
 for name in "${names[@]}"; do
   selected "$name" || continue
   if [ -f "$out/verdict-$name" ]; then
     cat "$out/verdict-$name"
-    if grep -q ' | PASS | ' "$out/verdict-$name"; then passed=$((passed + 1)); else failed=$((failed + 1)); fi
+    if grep -q ' | PASS | ' "$out/verdict-$name"; then
+      passed=$((passed + 1))
+    elif grep -q ' | SKIP | ' "$out/verdict-$name"; then
+      skipped=$((skipped + 1))
+    else
+      failed=$((failed + 1))
+    fi
   else
     printf '%-18s | FAIL | the control produced no verdict\n' "$name"
     failed=$((failed + 1))
   fi
 done
-echo "== selftest: $passed passed, $failed failed (evidence: $out)"
+tally="$passed passed, $failed failed"
+[ "$skipped" -eq 0 ] || tally="$tally, $skipped skipped"
+echo "== selftest: $tally (evidence: $out)"
 if [ "$failed" -eq 0 ] && [ -z "$keep" ]; then rm -rf "$out"; fi
 [ "$failed" -eq 0 ]
