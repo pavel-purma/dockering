@@ -47,8 +47,6 @@ exceptions = [
   # 0BSD is a public-domain-equivalent permissive licence; transitive via gpui-component (gpui-kit 0.7).
   { crate = "enum-iterator", allow = ["0BSD"] },
   { crate = "enum-iterator-derive", allow = ["0BSD"] },
-  # Permissive BSD-style bzip2 licence; pure-Rust libbzip2 port, transitive via gpui's http client (async-compression).
-  { crate = "libbz2-rs-sys", allow = ["bzip2-1.0.6"] },
 ]
 
 [licenses.private]

@@ -34,7 +34,3 @@ accepted = ["0BSD"]
 
 [enum-iterator-derive]
 accepted = ["0BSD"]
-
-# Permissive BSD-style bzip2 licence, transitive via gpui's http client (async-compression).
-[libbz2-rs-sys]
-accepted = ["bzip2-1.0.6"]
