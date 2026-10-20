@@ -167,6 +167,9 @@ stages:  Downloading ─▶ Ready ─click─▶ Applying (memory only) ─▶ [
   `LD_LIBRARY_PATH`, `XDG_DATA_DIRS`, `PYTHONPATH`, `QT_PLUGIN_PATH`, `GST_PLUGIN_SYSTEM_PATH*`, removing a variable that
   ends up empty. (Edition 2024: `remove_var` is `unsafe`, `unsafe_code` is denied, and a variable would leak into
   terminal shells and `docker` children, which is why the pid isn't passed that way.)
+  Descriptors: both children also get every inherited fd from 3 up marked close-on-exec in a `pre_exec` closure
+  (`apply/appimage/fds.rs`, the one `unsafe` block of this strategy, `libc` on Linux only; ADR-0007): the runtime's mount-directory
+  descriptor would otherwise keep the old mount alive (found by S1's FUSE leg).
 - **Relaunch wait (UPD-017, SHL-022):** `main.rs` order becomes panic hook → `wait_for_predecessor` (only with
   `--update-relaunch=1` and a non-terminal stdin; blocks until stdin EOF, a read error or 30 s, on a helper thread with
   `recv_timeout`) → `load_config` → logging → single-instance. The wait comes before the config and `state.json` reads,
@@ -430,7 +433,7 @@ Order: 1 first (it touches many files); 2 and 4 next, then 3a → 3b → 9, 10; 
 | The scrub misses a variable and the new instance can't find its libraries. | S1 on the real AppImage; the new `AppRun` re-prepends its own paths. |
 | A broken new AppImage strands the user. | Self-test before the swap, offer degraded to *Download* (S2). |
 | `APPIMAGE` aimed at an arbitrary writable file. | ELF magic plus the type 2 marker, exe under `APPDIR`, and the signed hash first. |
-| A crash during staging leaves a 19 MB hidden file in `~/.local/bin`. | The startup sweep of `.dockering-update-<pid>-*` with dead pids. |
+| A crash during staging leaves a 19 MB hidden file in `~/.local/bin`. | The startup sweep removes `.dockering-update-*` files in the install directory that are more than an hour old (UPD-012). |
 | A withdrawn or yanked release stays installable. | UPD-017: a successful check withdraws it; offline copies expire after 14 days. |
 | Lost or mis-set update keys. | `keys/README.md` rotation; REL-084 requires the *current* key. Key compromise has no revocation: ship a new release with rotated keys (ADR-0007). |
 | The test seam leaks into a release. | Explicit feature list, marker scan of the unpackaged binary, inert-without-variables test; the E2E workflow has no secrets and uploads no release asset. |

@@ -569,6 +569,14 @@ jobs:
       - name: Manifest signature verifies against the app's public keys (UPD-003)
         if: needs.verify.outputs.sign_manifest == 'true'
         run: target/debug/xtask verify-manifest --assets dist
+      # REL-084: made by the CURRENT key (a secret set to the rotation key fails), the release's version, every entry
+      # equal to its asset. Runs for `none` too: an unsigned manifest is then allowed, a present signature is checked.
+      - name: Manifest matches the assets, the version and the current key (REL-084)
+        shell: bash
+        env:
+          UPDATER: ${{ needs.verify.outputs.updater }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: target/debug/xtask verify-update-artifacts --assets dist --version "$VERSION" --updater "$UPDATER"
       - name: Release notes from CHANGELOG.md
         shell: bash
         env:

@@ -118,7 +118,7 @@ The macOS `.dmg` is built by cargo-packager's pinned `create-dmg` script, which 
 
 Releases go out through GitHub Releases and OS package managers (winget; Homebrew cask and Flathub post-v1).
 
-[distribution.md](features/distribution.md) UPD-001…017 and [proposed ADR-0007](../plan/adr/0007-cross-platform-updater.md): a planned shared opt-out updater on Windows, macOS and Linux (schedule, manual checks, signed-manifest trust, one notification per version, title-bar button, retained offer, Settings). `UPDATER=none|all` is independent of OS signing and a signed manifest stays mandatory; updates install without OS code signing. Only the install strategy differs: the Inno installer (Windows) and an in-place AppImage swap (Linux) install; macOS (in-app install deferred, UPD-016) and every other install show *Download*, never install-success. Gate and artifact checks: REL-083/084/087. Release flow: REL-010.
+[distribution.md](features/distribution.md) UPD-001…017 and [ADR-0007](../plan/adr/0007-cross-platform-updater.md): a shared opt-out updater on Windows, macOS and Linux (schedule, manual checks, signed-manifest trust, one notification per version, title-bar button, retained offer, Settings). `UPDATER=none|all` is independent of OS signing and a signed manifest stays mandatory; updates install without OS code signing. Only the install strategy differs: the Inno installer (Windows) and an in-place AppImage swap (Linux) install; macOS (in-app install deferred, UPD-016) and every other install show *Download*, never install-success. Gate and artifact checks: REL-083/084/087. Release flow: REL-010.
 
 ## Versioning
 

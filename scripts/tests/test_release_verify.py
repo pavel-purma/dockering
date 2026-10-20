@@ -981,6 +981,23 @@ class ReleaseWorkflowStaticTests(unittest.TestCase):
         # The seam marker is scanned for, never enabled: its string lives in the script, not the workflow.
         self.assertNotIn(SEAM_MARKER.decode(), code)
 
+    def test_rel_084_assemble_checks_the_manifest_against_the_assets_and_the_current_key(self):
+        step = find_step("assemble", "Manifest matches the assets, the version and the current key")
+        script = step_script_of(step)
+        self.assertIn(
+            'target/debug/xtask verify-update-artifacts --assets dist --version "$VERSION" --updater "$UPDATER"', script
+        )
+        text = "\n".join(step)
+        self.assertIn("UPDATER: ${{ needs.verify.outputs.updater }}", text)
+        self.assertIn("VERSION: ${{ needs.verify.outputs.version }}", text)
+        self.assertIsNone(step_condition(step), "it also runs for updater=none: an unsigned manifest is allowed there")
+        self.assertNotIn("${{", script, "outputs reach the script through env, never interpolated")
+        names = [step_name(s) for s in job_steps("assemble")]
+        after = {"Update manifest (UPD-002)", "Build xtask (no secrets in this step)", "Sign the update manifest (UPD-003)"}
+        for earlier in after:
+            self.assertLess(names.index(earlier), names.index(step_name(step)), earlier)
+        self.assertLess(names.index(step_name(step)), names.index("Release notes from CHANGELOG.md"))
+
     def test_rel_084_workflow_wires_the_evidence(self):
         record = find_step("package", "Record updater evidence")
         build = find_step("package", "cargo build --release")

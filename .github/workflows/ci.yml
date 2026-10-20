@@ -67,6 +67,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo clippy (updater feature, UPD-005)
         run: cargo clippy --workspace --all-targets --locked --features dockering/updater -- -D warnings
+      # The end-to-end test seam (REL-086) is compiled by no release and by no other CI step; the path-filtered
+      # linux-update-e2e.yml would be the first to notice a break.
+      - name: cargo clippy (update-e2e seam, REL-086)
+        run: cargo clippy --workspace --all-targets --locked --features dockering/update-e2e -- -D warnings
       - name: cargo deny (licences, bans, sources, advisories)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

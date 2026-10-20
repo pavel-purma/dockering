@@ -51,4 +51,6 @@ and 0006 are not in this checkout; spec 10/21 and AGENTS.md carry their layering
 The update signing key becomes release-critical (custody, rotation, `verify-update-artifacts` requiring the *current* key).
 `apply_update()` and `update_status()` change shape (`ApplyOutcome`, `UpdateSnapshot`). The first updater release is
 installed by hand, and a live proof needs a second release. Windows behaviour beyond the existing installer smoke tests
-is a spike (W1) and is not claimed. This draft authorises no production code, keys, release or changelog entry.
+is a spike (W1) and is not claimed. This ADR authorises no keys, release or changelog entry: those stay with the maintainer and the `/release` skill.
+
+One exception to "no `unsafe` in the AppImage strategy" was found by the end-to-end test and accepted (2026-10-20): the child of the swap marks the descriptors it inherits close-on-exec in a `pre_exec` closure (`dk-update/src/apply/appimage/fds.rs`, a raw `close_range` or `fcntl` loop, no allocation), because the AppImage runtime keeps an fd on its mount directory without `CLOEXEC` and the old mount (and its FUSE daemon) would otherwise outlive the update. It adds `libc` as a Linux-only dependency of `dk-update`. The environment scrub itself stays free of `unsafe` (it is set on the `Command`).
