@@ -58,7 +58,7 @@ chown dk: "$runtime" /work
 chmod 700 "$runtime"
 
 # the owner of the evidence: files made by root in the bind mount would otherwise be root's on the host
-# shellcheck disable=SC2329 # runs from the EXIT trap
+# shellcheck disable=SC2317,SC2329 # runs from the EXIT trap (older shellchecks say SC2317, newer ones SC2329)
 finish() {
   local rc=$?
   cp -a /work/out/. /out/ 2>/dev/null

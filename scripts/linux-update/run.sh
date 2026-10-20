@@ -131,7 +131,7 @@ if [ -z "$xtask" ]; then
     fi
   done
 fi
-[ -n "$xtask" ] && [ -x "$xtask" ] || { echo "run.sh: no xtask binary: run 'cargo build -p xtask' or set DOCKERING_XTASK" >&2; exit 1; }
+if [ -z "$xtask" ] || [ ! -x "$xtask" ]; then echo "run.sh: no xtask binary: run 'cargo build -p xtask' or set DOCKERING_XTASK" >&2; exit 1; fi
 command -v docker >/dev/null 2>&1 || { echo "run.sh: docker is not installed" >&2; exit 1; }
 
 [ -n "$out" ] || out=$PWD/linux-update-out
@@ -178,13 +178,14 @@ legs_of() { # <scenario>
 summary=()
 status=0
 fixture=""
-# shellcheck disable=SC2329 # runs from the EXIT trap
+# shellcheck disable=SC2317,SC2329 # runs from the EXIT trap (older shellchecks say SC2317, newer ones SC2329)
 cleanup() {
   if [ -n "$fixture" ]; then rm -rf "$fixture"; fi
 }
 trap cleanup EXIT
 
 run_leg() { # <scenario> <leg>
+  # (an empty array is `unbound` under `set -u` in bash 3.2, macOS's: expanded with the `${name[@]+...}` form)
   local sc=$1 lg=$2 leg_out="$out/$1-$2" rc=0 flags=() env_args=() fixture_args=() var shown=$version
   fixture="$out/.fixture-$sc-$lg"
   rm -rf "$fixture" "$leg_out"
@@ -196,7 +197,7 @@ run_leg() { # <scenario> <leg>
     env_args+=(-e "E2E_NEW_VERSION=$version")
   fi
   # the fixture is written on the host and never needs the container: a key pair, the signed manifest, the server root
-  if ! (cd "$repo" && "$xtask" update-e2e-fixture --out "$fixture" --appimage "$new" --version "$version" "${fixture_args[@]}") >"$leg_out/xtask.log" 2>&1; then
+  if ! (cd "$repo" && "$xtask" update-e2e-fixture --out "$fixture" --appimage "$new" --version "$version" ${fixture_args[@]+"${fixture_args[@]}"}) >"$leg_out/xtask.log" 2>&1; then
     echo "run.sh: cargo xtask update-e2e-fixture failed:" >&2
     tail -n 5 "$leg_out/xtask.log" >&2
     return 1
@@ -209,10 +210,10 @@ run_leg() { # <scenario> <leg>
     if [ -n "${!var:-}" ]; then env_args+=(-e "$var"); fi
   done
   echo "run.sh: $sc, $lg leg" >&2
-  if docker run --rm --name "linux-update-$sc-$lg-$$" --shm-size=512m "${flags[@]}" \
+  if docker run --rm --name "linux-update-$sc-$lg-$$" --shm-size=512m ${flags[@]+"${flags[@]}"} \
     -v "$here:/scripts:ro" -v "$old:/in/old.AppImage:ro" -v "$new:/in/new.AppImage:ro" \
     -v "$fixture/root:/fixture/root:ro" -v "$fixture/public-key.txt:/fixture/public-key.txt:ro" -v "$leg_out:/out" \
-    -e "E2E_SCENARIO=$sc" -e "E2E_LEG=$lg" -e "E2E_VERSION=$shown" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" "${env_args[@]}" \
+    -e "E2E_SCENARIO=$sc" -e "E2E_LEG=$lg" -e "E2E_VERSION=$shown" -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" ${env_args[@]+"${env_args[@]}"} \
     "$image" bash /scripts/entry.sh "$sc" 2>&1 | tee "$leg_out/leg.log"; then
     rc=0
   else
