@@ -1481,7 +1481,13 @@ async fn upd_e2e_s7_opt_outs_make_no_requests() {
     .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     let ran = control.rig.counts();
-    assert_eq!(ran.manifest, ran.signature, "{}: {ran:?}", control.what);
+    // The control keeps checking while it is sampled: a check may be between its manifest and its
+    // signature request.
+    assert!(
+        ran.manifest == ran.signature || ran.manifest == ran.signature + 1,
+        "{}: {ran:?}",
+        control.what
+    );
     assert_eq!(ran.asset, 1, "the control downloaded the payload once");
     for case in &cases {
         assert_eq!(

@@ -6,7 +6,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::UpdateError;
-use crate::source::release_asset_name;
+use crate::source::{REPO, release_asset_name};
 
 /// The signed update manifest published with the latest stable GitHub Release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +104,16 @@ pub fn evaluate(
     // signed manifest can't point anywhere else; checked here so no offer (and no Download
     // fallback) ever exists for a rejected manifest.
     release_asset_name(&asset.url, &manifest.version.to_string())?;
+    // The release notes open in the user's browser: this project's releases only.
+    if !manifest
+        .notes_url
+        .starts_with(&format!("https://github.com/{REPO}/releases/"))
+    {
+        return Err(UpdateError::Manifest(format!(
+            "unexpected release notes URL {}",
+            manifest.notes_url
+        )));
+    }
 
     Ok(Some((manifest, asset)))
 }
@@ -228,6 +238,32 @@ mod tests {
                 .expect("valid")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn upd_001_release_notes_url_outside_the_project_is_rejected() {
+        let current = Version::parse("1.0.0").expect("valid test version");
+        for url in [
+            "https://evil.example/pavel-purma/dockering/releases/tag/v1.2.3",
+            "https://github.com/someone-else/dockering/releases/tag/v1.2.3",
+            "http://github.com/pavel-purma/dockering/releases/tag/v1.2.3",
+            "https://github.com/pavel-purma/dockering/issues/1",
+            "https://github.com.evil.example/pavel-purma/dockering/releases/tag/v1.2.3",
+            "javascript:alert(1)",
+            "",
+        ] {
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&manifest_json(1, "1.2.3")).expect("json");
+            value["notes_url"] = json!(url);
+            let bytes = serde_json::to_vec(&value).expect("serializable");
+            assert!(
+                matches!(
+                    evaluate(&bytes, &current, "windows-x86_64"),
+                    Err(UpdateError::Manifest(_))
+                ),
+                "{url}"
+            );
+        }
     }
 
     #[test]

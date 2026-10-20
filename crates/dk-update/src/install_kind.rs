@@ -146,6 +146,13 @@ pub fn detect_appimage(env: &AppImageEnv, probe: &dyn AppImageProbe) -> Option<P
         return None;
     }
     let appdir = probe.canonicalize(appdir)?;
+    // A root names no directory of the AppImage: every executable lies under `/`.
+    if !appdir
+        .components()
+        .any(|c| matches!(c, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
     let exe = probe.canonicalize(&env.exe)?;
     if exe == appdir || !exe.starts_with(&appdir) {
         return None;
@@ -470,6 +477,15 @@ mod tests {
         // APPDIR names a directory that doesn't exist.
         let env = AppImageEnv {
             appdir: Some(layout.appdir.join("gone").into_os_string()),
+            ..layout.env()
+        };
+        assert_eq!(detect_appimage(&env, &probe), None);
+
+        // APPDIR is the root: every executable lies under `/`, so a `.deb` build started with
+        // `APPDIR=/` and a stray APPIMAGE must not aim the updater at that AppImage.
+        probe.dirs.insert(PathBuf::from("/"));
+        let env = AppImageEnv {
+            appdir: Some("/".into()),
             ..layout.env()
         };
         assert_eq!(detect_appimage(&env, &probe), None);

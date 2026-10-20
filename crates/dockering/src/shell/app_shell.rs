@@ -332,8 +332,9 @@ impl AppShell {
             .read(cx)
             .actionable_offer()
             .and_then(update_button::notice_for);
-        // `mark_update_notified` is atomic and persisted: a restart, an offline start or a
-        // restored offer of an announced version gets the button and no second toast.
+        // `mark_update_notified` answers `true` once per version and persists the answer (only this
+        // one UI thread calls it): a restart, an offline start or a restored offer of an announced
+        // version gets the button and no second toast.
         if let Some(notice) = notice
             && AppState::hub(cx).mark_update_notified(&notice.version)
         {

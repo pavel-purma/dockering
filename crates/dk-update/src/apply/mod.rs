@@ -1,6 +1,7 @@
 //! Applying a verified update: starting the Windows installer (UPD-007) and replacing a Linux
 //! AppImage in place (UPD-014, in [`appimage`]).
 
+#[cfg(windows)]
 use std::path::Path;
 
 use crate::UpdateError;
@@ -51,33 +52,6 @@ fn require_inno(kind: InstallKind) -> Result<(), UpdateError> {
     } else {
         Err(UpdateError::Unsupported)
     }
-}
-
-/// Starts `installer` detached, without a shell (NFR-022); all-users installs ask for UAC
-/// first. Returns once the installer has started (or the user declined elevation, which is an
-/// error, so the app keeps running). The caller then quits; the installer waits for it through
-/// `AppMutex` (REL-024).
-///
-/// This starts the file **as it is**: nothing holds it between a check and the run. The app
-/// applies a Windows update through [`spawn_installer_locked`] instead (UPD-007), which holds the
-/// file share-locked from the checks until the app exits; this stays for callers that have
-/// already verified the file themselves.
-///
-/// Only the Inno kinds start an installer (an AppImage or portable payload is `Unsupported`).
-pub fn spawn_installer(installer: &Path, kind: InstallKind) -> Result<(), UpdateError> {
-    require_inno(kind)?;
-    if !installer.is_absolute() || !installer.is_file() {
-        return Err(UpdateError::Spawn(format!(
-            "{} is not an installer file",
-            installer.display()
-        )));
-    }
-    spawn(
-        installer,
-        &installer_args(kind),
-        kind == InstallKind::InnoMachine,
-        false,
-    )
 }
 
 /// Per-user installs: a plain detached child. All-users installs: `ShellExecuteExW` with the
@@ -158,16 +132,6 @@ mod runas {
     }
 }
 
-#[cfg(not(windows))]
-fn spawn(
-    _installer: &Path,
-    _args: &[&str],
-    _elevate: bool,
-    _held: bool,
-) -> Result<(), UpdateError> {
-    Err(UpdateError::Unsupported)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,23 +146,17 @@ mod tests {
             Some(&"/ALLUSERS")
         );
         assert_eq!(
-            spawn_installer(Path::new("/nope.exe"), InstallKind::Portable),
+            require_inno(InstallKind::Portable),
             Err(UpdateError::Unsupported)
         );
-        assert!(matches!(
-            spawn_installer(Path::new("relative.exe"), InstallKind::InnoUser),
-            Err(UpdateError::Spawn(_))
-        ));
+        assert_eq!(require_inno(InstallKind::InnoUser), Ok(()));
+        assert_eq!(require_inno(InstallKind::InnoMachine), Ok(()));
     }
 
     /// UPD-007, UPD-014: an AppImage payload is never started as an installer, even though
-    /// `InstallKind::AppImage.can_install()` is true and the file exists.
+    /// `InstallKind::AppImage.can_install()` is true.
     #[test]
-    fn spawn_installer_rejects_non_inno_kinds() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("payload");
-        std::fs::write(&file, b"not an installer").expect("write");
-        assert!(file.is_absolute() && file.is_file());
+    fn require_inno_rejects_non_inno_kinds() {
         assert!(InstallKind::AppImage.can_install());
         for kind in [
             InstallKind::AppImage,
@@ -206,7 +164,7 @@ mod tests {
             InstallKind::Other,
         ] {
             assert_eq!(
-                spawn_installer(&file, kind),
+                require_inno(kind),
                 Err(UpdateError::Unsupported),
                 "{kind:?}"
             );

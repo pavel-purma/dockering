@@ -61,3 +61,44 @@ pub(super) fn env_of(command: &Command, name: &str) -> Option<OsString> {
         .find(|(key, _)| *key == OsStr::new(name))
         .and_then(|(_, value)| value.map(OsStr::to_owned))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::process::Stdio;
+
+    use super::*;
+
+    /// UPD-014: both children of an update (the self-test and the relaunch) come from `command`,
+    /// so a descriptor without close-on-exec, like the one the AppImage runtime keeps on its
+    /// mount directory, must not reach them. Dropping the call in `command` fails this test.
+    #[test]
+    #[allow(unsafe_code)]
+    fn upd_014_command_children_do_not_inherit_open_descriptors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = dir.path().join("the-old-mount");
+        std::fs::write(&marker, b"x").expect("write");
+        let file = File::open(&marker).expect("open");
+        // SAFETY: `dup` of a descriptor this test owns returns a new descriptor it then owns.
+        let inheritable = unsafe { OwnedFd::from_raw_fd(libc::dup(file.as_raw_fd())) };
+        assert!(inheritable.as_raw_fd() >= 3);
+
+        let vars = vec![(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))];
+        let env = ChildEnv::new(&vars);
+        let output = env
+            .command(Path::new("/bin/sh"))
+            .args(["-c", "for f in /proc/$$/fd/*; do readlink \"$f\"; done"])
+            .stdin(Stdio::null())
+            .output()
+            .expect("sh runs");
+        let seen = String::from_utf8_lossy(&output.stdout);
+        // The shell ran: its stdin is `/dev/null`. (Its exit status isn't checked: the last `readlink`
+        // can name the descriptor the glob itself had open.)
+        assert!(seen.contains("/dev/null"), "the shell did not run: {seen}");
+        assert!(
+            !seen.contains(marker.to_str().expect("utf-8")),
+            "the descriptor reached the child: {seen}"
+        );
+    }
+}
