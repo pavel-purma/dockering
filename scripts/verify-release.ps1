@@ -1,7 +1,7 @@
 #Requires -Version 7.3
 # Release verifier (REL-018, REL-032, REL-084): checks a downloaded release against what release.yml promises.
 # Usage: pwsh -NoProfile -File scripts/verify-release.ps1 -Dir <dir> -Version <semver> -Expect Signed|Unsigned
-#          [-Updater none|all] [-Changelog <CHANGELOG.md>] [-Provider signpath|azure] [-SignerSubject <subject DN>]
+#          [-Updater none|all] [-Changelog <CHANGELOG.md>] [-SignerSubject <subject DN>]
 #          [-Repo owner/name] [-Attest -Commit <sha> [-SourceRef <ref>]] [-Published] [-LaunchSmoke]
 # -Expect is the OS code-signing mode (Authenticode, certificate tables, the Signed/Unsigned notes). -Updater (default none) is the
 #   update channel the draft was built for (REL-083, the `updater` output of release.yml's verify job), independent of -Expect: the
@@ -24,7 +24,6 @@ param(
     [string] $Expect,
     [string] $Updater = 'none',
     [string] $Changelog,
-    [string] $Provider = 'signpath',
     [string] $SignerSubject,
     [string] $Repo = 'pavel-purma/dockering',
     [switch] $Attest,
@@ -59,7 +58,6 @@ $LinuxArchs = @(
     @{ Name = 'aarch64'; Triple = 'aarch64-unknown-linux-gnu'; Elf = 0xB7; Deb = 'arm64' }
 )
 $DigestSha256 = '2.16.840.1.101.3.4.2.1'
-$AttributionLine = 'Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)'
 # The one sentence about updates that release.yml's "Release notes from CHANGELOG.md" step writes into the notes (REL-083), by
 # channel: the updater is built ('all'), or not, with a signed ('none-signed') or an unsigned ('none-unsigned') manifest.
 # scripts/tests/test_verify_release_wording.py fails when these and the workflow's sentences differ.
@@ -345,8 +343,6 @@ function Test-Notes {
     } else {
         if (-not $notes.Contains('**Signed release:**')) { $problems.Add('no **Signed release:** note') }
         if ($notes.Contains('**Unsigned release:**')) { $problems.Add('has the unsigned note') }
-        if (-not $notes.Contains('#code-signing-policy')) { $problems.Add('no link to the code signing policy') }
-        if ($ctx.Provider -eq 'signpath' -and -not $notes.Contains($AttributionLine)) { $problems.Add('no SignPath attribution') }
     }
     # REL-083: the notes say what the build contains, by update channel and independently of the OS signing mode.
     $channel = Get-UpdaterChannel
@@ -760,7 +756,6 @@ function Test-Usage {
     if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$') { $problems.Add('-Version must be a SemVer version without build metadata') }
     if ($Expect -cnotin 'Signed', 'Unsigned') { $problems.Add('-Expect must be Signed or Unsigned') }
     if ($Updater -cnotin 'none', 'all') { $problems.Add('-Updater must be none or all') }
-    if ($Provider -cnotin 'signpath', 'azure') { $problems.Add('-Provider must be signpath or azure') }
     if ($Repo -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') { $problems.Add('-Repo must be owner/name') }
     if ($Changelog -and -not (Test-Path -LiteralPath $Changelog -PathType Leaf)) { $problems.Add('-Changelog must be an existing file') }
     if ($SignerSubject -and $Expect -ne 'Signed') { $problems.Add('-SignerSubject needs -Expect Signed') }
@@ -778,7 +773,7 @@ function Invoke-Main {
     }
     $script:Ctx = [pscustomobject]@{
         Dir = (Resolve-Path -LiteralPath $Dir).Path; Version = $Version; Expect = $Expect; Updater = $Updater; Changelog = $Changelog
-        Provider = $Provider; SignerSubject = $SignerSubject; Repo = $Repo; Commit = $Commit; SourceRef = $SourceRef
+        SignerSubject = $SignerSubject; Repo = $Repo; Commit = $Commit; SourceRef = $SourceRef
     }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Add-Type -AssemblyName System.Security.Cryptography.Pkcs

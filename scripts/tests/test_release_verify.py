@@ -29,10 +29,10 @@ KEYS_WITH_KEY = 'pub const PUBLIC_KEYS: &[&str] = &["RWQf6LRCGA9i53mlYRhIjBdPYZU
 KEYS_EMPTY = "pub const PUBLIC_KEYS: &[&str] = &[];\n"
 KEYS_COMMENTED = 'pub const PUBLIC_KEYS: &[&str] = &[\n    // "RWQcommentedOut",\n];\n'
 SIGNED = {
-    "WINDOWS_SIGNING": "signpath",
-    "HAS_SIGNPATH": "true",
+    "WINDOWS_SIGNING": "azure",
+    "HAS_AZURE": "true",
     "HAS_UPDATE_KEY": "true",
-    "WINDOWS_SIGNER_SUBJECT": "CN=SignPath Foundation, O=SignPath Foundation, L=Lewes, S=Delaware, C=US",
+    "WINDOWS_SIGNER_SUBJECT": "CN=Dockering Test, O=Dockering Test, L=Test, S=Test, C=US",
 }
 # The six release targets (the `package` matrix) and the two marker strings of REL-084/REL-086.
 TARGETS = (
@@ -182,7 +182,6 @@ class ReleaseVerifyTests(unittest.TestCase):
                 MACOS_SIGNING="none",
                 WINDOWS_SIGNER_SUBJECT="",
                 HAS_AZURE="false",
-                HAS_SIGNPATH="false",
                 HAS_APPLE="false",
                 HAS_UPDATE_KEY="false",
                 GITHUB_REF="refs/heads/main",
@@ -288,13 +287,17 @@ class ReleaseVerifyTests(unittest.TestCase):
     def test_rel_031_signed_mode_needs_a_windows_provider(self):
         env = {"REQUESTED_UNSIGNED": "false", **SIGNED, "WINDOWS_SIGNING": "none"}
         result, _ = self.run_verify(env)
-        self.assertRejected(result, "signed mode requires WINDOWS_SIGNING=azure or signpath")
+        self.assertRejected(result, "signed mode requires WINDOWS_SIGNING=azure")
+
+    def test_rel_031_azure_is_the_only_windows_provider(self):
+        env = {"REQUESTED_UNSIGNED": "false", **SIGNED}
+        for provider in ("other", "yes", ""):
+            with self.subTest(provider=provider):
+                result, _ = self.run_verify({**env, "WINDOWS_SIGNING": provider})
+                self.assertRejected(result, "signed mode requires WINDOWS_SIGNING=azure")
 
     def test_rel_031_incomplete_provider_configuration_rejected(self):
-        env = {"REQUESTED_UNSIGNED": "false", **SIGNED, "HAS_SIGNPATH": "false"}
-        result, _ = self.run_verify(env)
-        self.assertRejected(result, "SignPath signing configuration is incomplete")
-        env = {"REQUESTED_UNSIGNED": "false", **SIGNED, "WINDOWS_SIGNING": "azure"}
+        env = {"REQUESTED_UNSIGNED": "false", **SIGNED, "HAS_AZURE": "false"}
         result, _ = self.run_verify(env)
         self.assertRejected(result, "Azure signing configuration is incomplete")
 
@@ -473,8 +476,8 @@ class ReleaseVerifyTests(unittest.TestCase):
                 label=f"branch, input {requested}",
             )
 
-    def test_rel_031_unsigned_updater_all_needs_no_signpath(self):
-        env = {"UPDATER": "all", "HAS_UPDATE_KEY": "true", "WINDOWS_SIGNING": "none", "HAS_SIGNPATH": "false"}
+    def test_rel_031_unsigned_updater_all_needs_no_signing_provider(self):
+        env = {"UPDATER": "all", "HAS_UPDATE_KEY": "true", "WINDOWS_SIGNING": "none", "HAS_AZURE": "false"}
         for base in ({}, self.unsigned_tag()):  # a branch rehearsal and an unsigned tag
             outputs = self.assertChannel({**base, **env}, "all", "true", "true", label=str(base))
             self.assertEqual(outputs["macos_signed"], "false")
@@ -819,7 +822,6 @@ class ReleaseStepScriptTests(unittest.TestCase):
                 "MACOS_SIGNED": "false",
                 "UPDATER": "none",
                 "SIGN_MANIFEST": "false",
-                "WINDOWS_SIGNING": "none",
                 "PUBLIC_REPOSITORY": "true",
                 "GITHUB_REPOSITORY": "pavel-purma/dockering",
             }
@@ -844,12 +846,12 @@ class ReleaseStepScriptTests(unittest.TestCase):
             "unsigned, updater all": ({"UNSIGNED": "true", "UPDATER": "all", "SIGN_MANIFEST": "true"}, "all", True),
             "unsigned, updater none": ({"UNSIGNED": "true", "UPDATER": "none", "SIGN_MANIFEST": "false"}, "none", False),
             "signed, updater none": (
-                {"UNSIGNED": "false", "UPDATER": "none", "SIGN_MANIFEST": "true", "WINDOWS_SIGNING": "signpath"},
+                {"UNSIGNED": "false", "UPDATER": "none", "SIGN_MANIFEST": "true"},
                 "none",
                 True,
             ),
             "signed, updater all": (
-                {"UNSIGNED": "false", "UPDATER": "all", "SIGN_MANIFEST": "true", "WINDOWS_SIGNING": "signpath"},
+                {"UNSIGNED": "false", "UPDATER": "all", "SIGN_MANIFEST": "true"},
                 "all",
                 True,
             ),

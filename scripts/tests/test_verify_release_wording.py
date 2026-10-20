@@ -170,11 +170,11 @@ class VerifierFakeBundleTests(unittest.TestCase):
     """Run verify-release.ps1 on a fake bundle whose notes come from the workflow's own notes step."""
 
     COMBINATIONS = (
-        # (-Expect, -Updater, sign_manifest, WINDOWS_SIGNING, UNSIGNED)
-        ("Unsigned", "none", False, "none", "true"),
-        ("Unsigned", "all", True, "none", "true"),
-        ("Signed", "none", True, "signpath", "false"),
-        ("Signed", "all", True, "signpath", "false"),
+        # (-Expect, -Updater, sign_manifest, UNSIGNED)
+        ("Unsigned", "none", False, "true"),
+        ("Unsigned", "all", True, "true"),
+        ("Signed", "none", True, "false"),
+        ("Signed", "all", True, "false"),
     )
     CHECKED = (
         "files.set",
@@ -196,7 +196,7 @@ class VerifierFakeBundleTests(unittest.TestCase):
             return "all"
         return "none-signed" if sign_manifest else "none-unsigned"
 
-    def notes_by_workflow(self, root, *, updater, sign_manifest, windows_signing, unsigned):
+    def notes_by_workflow(self, root, *, updater, sign_manifest, unsigned):
         """RELEASE_NOTES.md as the workflow's step writes it, into <root>/dist."""
         script = root / "notes-step.sh"
         script.write_text(
@@ -210,7 +210,6 @@ class VerifierFakeBundleTests(unittest.TestCase):
                 "MACOS_SIGNED": "false",
                 "UPDATER": updater,
                 "SIGN_MANIFEST": "true" if sign_manifest else "false",
-                "WINDOWS_SIGNING": windows_signing,
                 "PUBLIC_REPOSITORY": "true",
                 "GITHUB_REPOSITORY": "pavel-purma/dockering",
             }
@@ -227,13 +226,11 @@ class VerifierFakeBundleTests(unittest.TestCase):
 
     def make_bundle(self, root, combo, *, minisig, notes_channel_of=None):
         """A bundle with every file the verifier looks at. `notes_channel_of` takes the notes of another combination."""
-        _, updater, sign_manifest, windows_signing, unsigned = notes_channel_of or combo
+        _, updater, sign_manifest, unsigned = notes_channel_of or combo
         dist = root / "dist"
         dist.mkdir()
         (root / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
-        self.notes_by_workflow(
-            root, updater=updater, sign_manifest=sign_manifest, windows_signing=windows_signing, unsigned=unsigned
-        )
+        self.notes_by_workflow(root, updater=updater, sign_manifest=sign_manifest, unsigned=unsigned)
         for name in DISTRIBUTIONS:
             (dist / name).write_bytes(f"fake {name}".encode())
         platforms = {}

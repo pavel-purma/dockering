@@ -37,17 +37,16 @@ Inno Setup if the Windows runner does not already provide it. macOS CI/release p
 most three package attempts, and detaches only a reported disk whose image path is verified
 inside the current target distribution directory. Other failures retain their original exit status.
 
-**Release signing** is optional for the explicitly authorized unsigned releases (REL-016).
+**Release signing** is optional, and no release has it: every release so far is explicitly unsigned (REL-016),
+and signing can be added later without changing the pipeline.
 Unsigned mode skips OS signing/notarization even when secrets exist. The independent
 `UPDATER=none|all` gate controls the updater on all six targets (REL-083, implemented in `release.yml`; the updater's behaviour in the app is planned), not OS signing.
 Updater-enabled unsigned binaries still have a signed manifest. Tag pushes default to unsigned while `PUBLIC_RELEASES` is not true; manual dispatches
 expose an `unsigned` boolean defaulting to true. Public build-provenance attestations remain
 independent of signing. The signed channel (`PUBLIC_RELEASES=true`) supports `WINDOWS_SIGNING` =
-`signpath` | `azure` and, independently, `MACOS_SIGNING` = `apple` | `none` (REL-034); its secrets live
+`azure` and, independently, `MACOS_SIGNING` = `apple` | `none` (REL-034); its secrets live
 in the `release` environment, which only `main` and `v*` refs can use. Setup and operation:
 [signing guide](../signing.md); the release steps: [runbook](../release.md) and the `/release` skill.
-SignPath: `SIGNPATH_API_TOKEN` and the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`; the artifact
-configurations are in `packaging/signpath/`.
 Azure: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`.
 macOS: `APPLE_CERTIFICATE` (base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`.
 Updater: `UPDATE_SIGNING_KEY` (minisign), reviewed current/next public keys in `crates/dk-update/src/keys.rs`, and `UPDATER` (`none` | `all`, default none; REL-083). A manual run has the input `updater` = `inherit` (default) | `none` | `all`, so an unsigned or signed rehearsal can build the updater before the variable is set. Missing keys fail closed. The manifest is signed when the updater is built or the build is OS-signed, and `cargo xtask verify-update-artifacts` (REL-084) requires the **first** key of `PUBLIC_KEYS` to have signed it. The workflow gate, the evidence files and that command are implemented; the updater's behaviour in the app is planned.
@@ -100,7 +99,7 @@ Known gap: a pull request whose branch predates `ci.yml`'s `gate` job never repo
 
 | OS | Artifacts | Signing |
 |---|---|---|
-| Windows | `Dockering-Setup-<x64|arm64>.exe` (Inno) + `Dockering-<x64|arm64>.zip` | Optional Authenticode via SignPath or Azure. Explicit unsigned first release permitted (REL-016); signed channel requires verified signatures. |
+| Windows | `Dockering-Setup-<x64|arm64>.exe` (Inno) + `Dockering-<x64|arm64>.zip` | Unsigned today (REL-016). Optional Authenticode via Azure Artifact Signing in the signed channel, which requires verified signatures. |
 | macOS | `.dmg` with `Dockering.app`, per architecture | Developer ID/notarization in signed mode; unsigned first release permitted with documented Gatekeeper prompts (REL-016). |
 | Linux | `.AppImage`, `.deb`, `.tar.gz` (Flatpak post-v1) | — |
 

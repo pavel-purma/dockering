@@ -1,7 +1,7 @@
 //! Authenticode check of a downloaded installer (UPD-003): when the running `dockering.exe` is
 //! signed, the installer must carry a valid signature from the same signer. "Same" means the
 //! full subject DN *and* the issuer DN of the signing certificate, not just the display name
-//! (e.g. every SignPath Foundation project shares the CN "SignPath Foundation").
+//! (a shared signing service can give unrelated projects the same CN).
 //!
 //! The *decision* (what counts as unsigned, invalid or trusted, and the PE certificate-table
 //! probe) is pure and runs on every OS; only the `WinVerifyTrust` / `CryptQueryObject` calls in
@@ -472,15 +472,15 @@ mod tests {
         assert_eq!(decide(None, None), Ok(TrustCheck::Skipped));
         assert_eq!(decide(None, Some("Anyone")), Ok(TrustCheck::Skipped));
         assert_eq!(
-            decide(Some("SignPath Foundation"), Some("SignPath Foundation")),
+            decide(Some("Test Publisher"), Some("Test Publisher")),
             Ok(TrustCheck::Trusted)
         );
         assert_eq!(
-            decide(Some("SignPath Foundation"), None),
+            decide(Some("Test Publisher"), None),
             Err(UpdateError::UntrustedInstaller)
         );
         assert_eq!(
-            decide(Some("SignPath Foundation"), Some("Mallory")),
+            decide(Some("Test Publisher"), Some("Mallory")),
             Err(UpdateError::UntrustedInstaller)
         );
     }
@@ -511,7 +511,7 @@ mod tests {
 
     // ---- UPD-003: the trust decision, pure, on every OS ---------------------------------
 
-    const SUBJECT: &str = "CN=SignPath Foundation | CN=SignPath Root";
+    const SUBJECT: &str = "CN=Test Publisher | CN=Test Root";
 
     /// A `WinVerifyTrust` status that is neither success nor `TRUST_E_NOSIGNATURE`.
     const OTHER_STATUSES: [u32; 10] = [
