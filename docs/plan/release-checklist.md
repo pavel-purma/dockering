@@ -16,13 +16,13 @@ These unchecked gates do not alter any historical release result below.
   manifest URL/kind/hash/size/version match the draft.
 - [ ] Shared on all three OSes (view tests in CI): one notification per version, title-bar button from the offer,
   retention through re-checks and offline start, withdrawal of a pulled release, Settings offer row.
-- [ ] Windows x64/ARM64, CI (REL-087 b): the `installer-smoke.ps1` update leg (`-UpdateFrom` / `-UpdateFromSums`; build step
+- [x] Windows x64/ARM64, CI (REL-087 b): the `installer-smoke.ps1` update leg (`-UpdateFrom` / `-UpdateFromSums`; build step
   *Update leg, last release to this build*) is green on `windows-2025` and `windows-11-arm`: the last stable release's installer,
   checked against its `SHA256SUMS`, installed per user; the installer under test run with exactly the updater's argv; version,
   files and a `/RELAUNCH` process from the install dir checked; silent uninstall leaves nothing. Record the run, the commit, the
   old and the new version and which mode ran: strict (a version bump) or `-AllowSameVersion` (the last release has this
   version, so the version change itself is not asserted; the step prints a `SKIP` line). A skipped step (no release, no GitHub)
-  is not a pass. A CI run is not a W1 result and proves none of the rows below. *Not run on Windows yet.*
+  is not a pass. A CI run is not a W1 result and proves none of the rows below. **Green 2026-10-20 on both architectures:** [run 39393494930](https://github.com/pavel-purma/dockering/actions/runs/39393494930), commit `2ab9bec` (pull request #54), `Dockering-Setup-x64.exe` and `Dockering-Setup-arm64.exe` of v0.3.0 over a build that also reports 0.3.0, so the mode was `-AllowSameVersion` and the step printed its `SKIP` line (the version change is not asserted until a newer build exists, so the next release's PR is the first strict run). The installer under test ran with `/SILENT /SUPPRESSMSGBOXES /NORESTART /SP- /UPDATE /RELAUNCH /CURRENTUSER` and exited 0, `/RELAUNCH` started `dockering.exe`, the uninstall was clean.
 - [ ] Windows, **spike W1, manual** (REL-087 a): the maintainer on a real Windows 10/11 machine, with a throwaway per-user
   profile or VM for the all-users rows. Record per row: pass or fail, Windows build and architecture, the commit, the installer's
   artifact name and SHA-256, and a screenshot for UAC and SmartScreen. A Linux run, a mock or a CI runner completes none of
