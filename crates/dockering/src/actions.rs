@@ -330,6 +330,16 @@ pub mod palette {
     );
 }
 
+pub mod toast {
+    gpui_kit::actions!(
+        toast,
+        [
+            /// `Esc` in the focused toast stack: closes the newest toast (KBD-074).
+            Dismiss,
+        ]
+    );
+}
+
 // ── M6: Images, Volumes, Networks (IMG-*, VOL-*, NET-*) ─────────────────────────────────────
 pub mod res {
     use gpui_kit::{Action, SharedString};

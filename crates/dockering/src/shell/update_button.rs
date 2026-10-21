@@ -11,8 +11,7 @@
 
 use dk_hub::{OfferMode, OfferStage, UpdateOffer};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{Disableable, Sizable, WindowExt};
+use gpui_kit::component::{Disableable, Sizable};
 use gpui_kit::prelude::*;
 use gpui_kit::{Action, AnyElement, App, FocusHandle, IntoElement, Window};
 
@@ -20,6 +19,7 @@ use crate::actions::{RestartToUpdate, ViewReleaseNotes};
 use crate::assets::Lucide;
 use crate::strings as s;
 use crate::ui::dispatch;
+use crate::ui::toast::{self, Toast, ToastAction};
 use crate::ui::widgets::focus_wrap;
 
 /// The element id of the title-bar button (also its `debug_selector`).
@@ -209,31 +209,24 @@ pub fn notice_for(offer: &UpdateOffer) -> Option<Notice> {
 /// Shows `notice`. Toasts render outside the shell, so their clicks dispatch from `root`. The
 /// body opens the release notes; the action button runs the notice's command and closes the toast
 /// (an action keeps a toast from hiding by itself).
-pub fn push_notice(notice: &Notice, root: &FocusHandle, window: &mut Window, cx: &mut App) {
+pub fn push_notice(notice: &Notice, root: &FocusHandle, _: &mut Window, cx: &mut App) {
     let (label, id, command) = (notice.action_label, notice.action_id, notice.command);
     let body_root = root.clone();
     let action_root = root.clone();
-    let note = Notification::info(notice.message.clone())
+    // The toast body opens the release notes too: the action button's click doesn't reach it,
+    // so *Restart now* doesn't also open a browser.
+    let action = ToastAction::new(id, label, move |window, cx| {
+        dispatch::dispatch_from(&action_root, command.action().as_ref(), window, cx)
+    })
+    .dismiss();
+    let action = match command {
+        Command::RestartToUpdate => action.primary(),
+        Command::ViewReleaseNotes => action,
+    };
+    let note = Toast::info(notice.message.clone())
         .on_click(dispatch::on_click(&body_root, Box::new(ViewReleaseNotes)))
-        .action(move |_, _, cx| {
-            let origin = action_root.clone();
-            let button = Button::new(id)
-                .small()
-                .label(label)
-                .debug_selector(|| id.into())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    // The toast body opens the release notes too: the action button's click
-                    // stops here, so *Restart now* doesn't also open a browser.
-                    cx.stop_propagation();
-                    this.dismiss(window, cx);
-                    dispatch::dispatch_from(&origin, command.action().as_ref(), window, cx);
-                }));
-            match command {
-                Command::RestartToUpdate => button.primary(),
-                Command::ViewReleaseNotes => button,
-            }
-        });
-    window.push_notification(note, cx);
+        .action(action);
+    toast::push(note, cx);
 }
 
 #[cfg(test)]

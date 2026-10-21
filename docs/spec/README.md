@@ -24,6 +24,7 @@ the spec changes in the same change set (see [Spec workflow](#spec-workflow)).
 | Feature | File | Status |
 |---|---|---|
 | Engine connections & switching | [features/engines.md](features/engines.md) | implemented (2026-10-04 WSLC repair; cross-OS release gate open; 2026-10-05 status-bar change in progress; 2026-10-11 WSLC no-session state planned) |
+| Start and set up engines (Windows) | [features/windows-engine-start.md](features/windows-engine-start.md) | planned (2026-10-21, ENG-142…162, REL-088/089; [plan](../plan/features/windows-engine-start.md) draft) |
 | Containers list & grouping | [features/containers.md](features/containers.md) | implemented |
 | Container detail | [features/container-detail.md](features/container-detail.md) | implemented (2026-10-04 WSLC inspect parity; cross-OS release gate open; 2026-10-10 keyboard viewing of the tabs planned) |
 | Container logs | [features/container-logs.md](features/container-logs.md) | implemented |

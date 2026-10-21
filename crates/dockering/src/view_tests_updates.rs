@@ -14,7 +14,6 @@ use dk_hub::{
 };
 use futures::FutureExt as _;
 use futures::channel::oneshot;
-use gpui_kit::component::WindowExt;
 use gpui_kit::{Bounds, Entity, Pixels, TestAppContext};
 
 use crate::nav::SettingsSection;
@@ -123,7 +122,7 @@ fn open_updates(h: &Harness, cx: &mut TestAppContext) {
 }
 
 fn notifications(h: &Harness, cx: &mut TestAppContext) -> usize {
-    h.update(cx, |_, window, cx| window.notifications(cx).len())
+    h.update(cx, |_, _, cx| crate::ui::toast::count(cx))
 }
 
 /// The painted bounds of the element with `selector`, after a draw.
@@ -170,9 +169,9 @@ fn settle(h: &Harness, cx: &mut TestAppContext, selector: &'static str) {
 
 /// Closes every toast and waits until none is left.
 fn clear_toasts(h: &Harness, cx: &mut TestAppContext) {
-    h.update(cx, |_, window, cx| window.clear_notifications(cx));
-    h.wait_until(cx, "toasts gone", |window, cx| {
-        window.notifications(cx).is_empty()
+    h.update(cx, |_, _, cx| crate::ui::toast::clear(cx));
+    h.wait_until(cx, "toasts gone", |_, cx| {
+        crate::ui::toast::mounted(cx) == 0
     });
 }
 
@@ -501,6 +500,47 @@ fn upd_008_first_launch_after_update_shows_notice(cx: &mut TestAppContext) {
     );
     h.wait_containers(cx);
     assert_eq!(notifications(&h, cx), 1);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn shl_003_toasts_sit_bottom_right_above_the_status_bar(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.update(cx, |_, window, cx| {
+        crate::ui::notify::info(window, cx, "Saved")
+    });
+    h.pump(cx, 400);
+    let toasts = bounds(&h, cx, "toasts").expect("the stack is drawn");
+    let status = bounds(&h, cx, "status-left").expect("the status bar is drawn");
+    let window = h.update(cx, |_, window, _| window.viewport_size());
+    assert!(
+        toasts.bottom() <= status.top(),
+        "above the status bar: {toasts:?} vs {status:?}"
+    );
+    assert!(toasts.bottom() > window.height * 0.7, "near the bottom");
+    assert!(
+        toasts.right() > window.width - gpui_kit::px(40.),
+        "against the right edge"
+    );
+    assert!(
+        toasts.left() > window.width * 0.5,
+        "not across the whole window"
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn shl_003_toast_hides_by_itself(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.update(cx, |_, window, cx| {
+        crate::ui::notify::info(window, cx, "Saved")
+    });
+    assert_eq!(notifications(&h, cx), 1);
+    h.wait_until(cx, "the toast hides", |_, cx| {
+        crate::ui::toast::mounted(cx) == 0
+    });
     h.shutdown();
 }
 

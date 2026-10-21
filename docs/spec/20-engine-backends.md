@@ -46,11 +46,20 @@ disappears stays listed as *unavailable* until the user removes it or it reappea
 | ENG-003 | Default local socket `/var/run/docker.sock` | Linux, macOS | `GET /_ping` |
 | ENG-004 | Rootless socket `$XDG_RUNTIME_DIR/docker.sock` | Linux | `GET /_ping` |
 | ENG-005 | Docker Desktop / Colima / OrbStack / Rancher / Podman sockets: `~/.docker/run/docker.sock`, `~/.colima/default/docker.sock`, `~/.orbstack/run/docker.sock`, `~/.rd/docker.sock`, `$XDG_RUNTIME_DIR/podman/podman.sock` | macOS, Linux | `GET /_ping`, then name from `/info.Name` / `OperatingSystem` |
-| ENG-006 | Named pipe `\\.\pipe\docker_engine` (Docker Desktop / Docker CE for Windows) and `\\.\pipe\dockerDesktopLinuxEngine` | Windows | Pipe exists → `GET /_ping` |
+| ENG-006 | Named pipe `\\.\pipe\docker_engine` (Docker Desktop / Docker CE for Windows) and `\\.\pipe\dockerDesktopLinuxEngine` | Windows | Pipe exists → `GET /_ping`. *Planned (ENG-143, 2026-10-21):* if the pipe is absent but Docker Desktop is installed (registry `InstallLocation` + `Docker Desktop.exe`; no process spawned), list `docker-desktop` as `Stopped` with a `StartPrompt` (§2.1) |
 | ENG-007 | WSL distros (see §4.2) | Windows | Registry enumeration + per-distro probe |
 | ENG-008 | WSLC (see §5.2) | Windows | WSL version from `wslservice.exe` (no COM) ≥ 2.9.3, plus the COM class registered or `wslc.exe` present |
 
 Transport selection for WSLC (ENG-013) is specified in §5.3.
+
+### 2.1 Starting engines on Windows (planned 2026-10-21, ENG-142…162)
+
+Spec: [windows-engine-start](features/windows-engine-start.md). Summary of the backend rules:
+
+- **Docker Desktop** (in `dk-engine-docker`, `cfg(windows)`): start = `<InstallLocation>\resources\bin\docker.exe desktop start --timeout 120` (argv, no console window); older installs without the `desktop` plugin fall back to a detached `Docker Desktop.exe` plus polling the pipe for ≤ 120 s. Status = `docker desktop status --format json`, read only after a failed connect or inside the start action. Resource Saver is not stopped (the engine wakes on first use). Verified locally 2026-10-21 on Docker Desktop 4.95.0: `docker desktop start` has `--detach` and `--timeout`, and `status --format json` returns `{"PauseType","SessionID","Status"}` (`running` seen; the other values are spike W-1).
+- **Docker inside a distro** (in `dk-wsl`): a running distro whose probe finds Docker installed but no socket (new probe exit code 14, §4.2) is listed `Stopped`; *Start Docker* runs `wsl.exe -d <distro> -u root --exec systemctl start docker` (systemd) or `service docker start` (spike W-2).
+- **Dedicated distro** (in `dk-wsl`): `wsl.exe --import dockering-engine <dir> <rootfs> --version 2` of a pinned, SHA-256-verified Docker root filesystem that the user picks from two images, **Alpine** or **Ubuntu** (ENG-152/153/162). Never touches a distro Dockering didn't create in the same run (ENG-155). Never installs or updates WSL (ENG-156).
+- The hub treats a failed connect as `Stopped` only when the factory says so (`stopped_after`, ENG-146).
 
 **De-duplication (ENG-009, revised 2026-10-04).** Discovery de-duplicates by canonical endpoint string (for example, a context that points at
 the default socket). After a successful connect the hub learns the **daemon identity** (`/info.ID`). Engines that share one are **annotated, never hidden** (ENG-114):
@@ -89,6 +98,7 @@ distro's Linux VM. Windows processes can't open that socket directly.
    | 11 | `no-docker` (no socket) |
    | 12 | `socket-no-client` (socket, but neither `docker` nor `socat`) |
    | 13 | `permission-denied` (socket not readable/writable by the user, §4.3) |
+   | 14 | `installed-not-running` (planned, ENG-148: the `docker` client or `dockerd` is installed but there is no socket; listed `Stopped` with *Start Docker*, ENG-149) |
 
 5. **Stopped** distros are not probed, because probing would boot them. They're listed as *"Ubuntu (stopped) — Start & connect"*. Connecting starts the distro.
 6. Results: `available` (socket and bridge tool present), `no-docker` (hidden by default, shown with "Show all WSL distros"), `socket-no-client` (offer the TCP mode or suggest `apt install socat`), `permission-denied` (hint in §4.3).

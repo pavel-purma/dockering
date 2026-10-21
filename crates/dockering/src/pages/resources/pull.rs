@@ -3,8 +3,8 @@
 //! `hub.subscribe(engine, |e| e.pull_image(..))` stream consumed by a task stored here;
 //! dropping the task (Cancel) drops the stream, which cancels the producer on the hub.
 //!
-//! Progress shows in one notification per pull (`Notification::id1::<PullNote>(id)`, pushed
-//! again to update in place): per-layer bars when the engine has `PULL_PROGRESS`, otherwise a
+//! Progress shows in one toast per pull (keyed by [`note_key`], its body reads this entity so
+//! it updates in place): per-layer bars when the engine has `PULL_PROGRESS`, otherwise a
 //! status line. Updates are batched (at most every 100 ms). Registry credentials are resolved
 //! by the backend; nothing here logs or stores them (NFR-020).
 
@@ -13,9 +13,6 @@ use std::time::Duration;
 
 use dk_core::{Capabilities, EngineError, EngineId, PullProgress};
 use futures::StreamExt;
-use gpui_kit::component::WindowExt;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{ActiveTheme, Sizable, v_flex};
 use gpui_kit::prelude::*;
@@ -27,14 +24,17 @@ use super::ops::pull_error_message;
 use crate::state::AppState;
 use crate::strings as s;
 use crate::ui::notify;
+use crate::ui::toast::{self, Toast, ToastAction};
 
 /// How often a running pull repaints its notification.
 pub const PULL_FLUSH: Duration = Duration::from_millis(100);
 /// At most this many layer bars are shown (the rest are summarised).
 pub const MAX_LAYERS: usize = 8;
 
-/// Notification id type for pull toasts.
-pub struct PullNote;
+/// The toast key of pull `id`.
+fn note_key(id: u64) -> SharedString {
+    format!("pull-{id}").into()
+}
 
 /// One layer's latest state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,9 +238,7 @@ impl PullManager {
         );
         let manager = cx.entity().downgrade();
         window
-            .update(cx, |_, window, cx| {
-                window.push_notification(progress_note(id, manager), cx);
-            })
+            .update(cx, |_, _, cx| toast::push(progress_note(id, manager), cx))
             .ok();
         cx.notify();
         id
@@ -258,7 +256,7 @@ impl PullManager {
         self.finished.push(state);
         window
             .update(cx, |_, window, cx| {
-                window.remove_notification1::<PullNote>(id as usize, cx);
+                toast::remove(&note_key(id), cx);
                 notify::info(window, cx, s::PULL_CANCELLED);
             })
             .ok();
@@ -283,7 +281,7 @@ impl PullManager {
         self.finished.push(job.state);
         window
             .update(cx, |_, window, cx| {
-                window.remove_notification1::<PullNote>(id as usize, cx);
+                toast::remove(&note_key(id), cx);
                 match phase {
                     PullPhase::Failed(msg) => {
                         notify::error(window, cx, s::pull_failed(&reference), msg)
@@ -314,6 +312,7 @@ impl PullManager {
         for job in self.jobs.values_mut() {
             job.dirty = false;
         }
+        toast::refresh(cx);
         cx.notify();
     }
 
@@ -323,14 +322,14 @@ impl PullManager {
     }
 }
 
-/// The progress notification of one pull: title, status line, per-layer bars (structured
-/// progress only), and a *Cancel* action.
-fn progress_note(id: u64, manager: gpui_kit::WeakEntity<PullManager>) -> Notification {
+/// The progress toast of one pull: title, status line, per-layer bars (structured progress
+/// only), and a *Cancel* action.
+fn progress_note(id: u64, manager: gpui_kit::WeakEntity<PullManager>) -> Toast {
     let content_manager = manager.clone();
-    Notification::new()
-        .id1::<PullNote>(id as usize)
+    Toast::custom()
+        .key(note_key(id))
         .autohide(false)
-        .content(move |_, _, cx| {
+        .body(move |_, cx| {
             let Some(state) = content_manager
                 .upgrade()
                 .and_then(|m| m.read(cx).state(id).cloned())
@@ -386,17 +385,13 @@ fn progress_note(id: u64, manager: gpui_kit::WeakEntity<PullManager>) -> Notific
                 })
                 .into_any_element()
         })
-        .action(move |_, _, _| {
-            let manager = manager.clone();
-            Button::new(SharedString::from(format!("pull-cancel-{id}")))
-                .small()
-                .ghost()
-                .label(s::CANCEL)
-                .tooltip(s::PULL_CANCEL)
-                .on_click(move |_, _, cx| {
-                    manager.update(cx, |m, cx| m.cancel(id, cx)).ok();
-                })
-        })
+        .action(
+            ToastAction::new(format!("pull-cancel-{id}"), s::CANCEL, move |_, cx| {
+                manager.update(cx, |m, cx| m.cancel(id, cx)).ok();
+            })
+            .ghost()
+            .tooltip(s::PULL_CANCEL),
+        )
 }
 
 #[cfg(test)]

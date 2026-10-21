@@ -5,6 +5,7 @@
 //! | [`list_table`] | Generic `ListTable<D>` over GPUI Kit `DataTable` with roving focus, groups, checkbox selection, quick find |
 //! | [`confirm`] | Destructive confirmation dialog (KBD-071, SHL-002) |
 //! | [`notify`] | Success/error notifications with *Copy details* (SHL-003) |
+//! | [`toast`] | The window's toast stack: bottom-right, countdown bar, pause on hover/focus (SHL-003) |
 //! | [`status_chip`] | Container/engine status chips with text labels (spec 30 §4) |
 //! | [`states`] | Empty state, error panel with Retry, skeleton rows |
 //! | [`widgets`] | Section heading, copy-id, port link, relative time, keyboard hint tooltips |
@@ -26,6 +27,7 @@ pub mod scroll;
 pub mod segmented;
 pub mod states;
 pub mod status_chip;
+pub mod toast;
 pub mod widgets;
 
 pub use states::{empty_state, error_panel, skeleton_rows};
