@@ -52,12 +52,12 @@ disappears stays listed as *unavailable* until the user removes it or it reappea
 
 Transport selection for WSLC (ENG-013) is specified in §5.3.
 
-### 2.1 Starting engines on Windows (planned 2026-10-21, ENG-142…162)
+### 2.1 Starting engines on Windows (planned 2026-10-21, ENG-142…164)
 
 Spec: [windows-engine-start](features/windows-engine-start.md). Summary of the backend rules:
 
-- **Docker Desktop** (in `dk-engine-docker`, `cfg(windows)`): start = `<InstallLocation>\resources\bin\docker.exe desktop start --timeout 120` (argv, no console window); older installs without the `desktop` plugin fall back to a detached `Docker Desktop.exe` plus polling the pipe for ≤ 120 s. Status = `docker desktop status --format json`, read only after a failed connect or inside the start action. Resource Saver is not stopped (the engine wakes on first use). Verified locally 2026-10-21 on Docker Desktop 4.95.0: `docker desktop start` has `--detach` and `--timeout`, and `status --format json` returns `{"PauseType","SessionID","Status"}` (`running` seen; the other values are spike W-1).
-- **Docker inside a distro** (in `dk-wsl`): a running distro whose probe finds Docker installed but no socket (new probe exit code 14, §4.2) is listed `Stopped`; *Start Docker* runs `wsl.exe -d <distro> -u root --exec systemctl start docker` (systemd) or `service docker start` (spike W-2).
+- **Docker Desktop** (in `dk-engine-docker`, `cfg(windows)`): start = `<InstallLocation>\resources\bin\docker.exe desktop start --timeout 120` (argv, no console window); older installs without the `desktop` plugin fall back to a detached `Docker Desktop.exe` plus polling the pipe for ≤ 120 s. Status = `docker desktop status --format json`, read only after a failed connect or inside the start action. Resource Saver is not stopped (the engine wakes on first use). Verified locally 2026-10-21 on Docker Desktop 4.95.0: `docker desktop start` has `--detach` and `--timeout`, and `status --format json` returns `{"PauseType","SessionID","Status"}` (`running` seen; other values unverified, the public docs list none).
+- **Docker inside a distro** (in `dk-wsl`): a running distro whose probe finds Docker installed but no socket (new probe exit code 14, §4.2) is listed `Stopped`; *Start Docker* runs `wsl.exe -d <distro> -u root --exec systemctl start docker` (systemd) or `/usr/sbin/service docker start` (verified 2026-10-21, spike W-2; the connect check polls `GET /_ping`, not the socket file).
 - **Dedicated distro** (in `dk-wsl`): `wsl.exe --import dockering-engine <dir> <rootfs> --version 2` of a pinned, SHA-256-verified Docker root filesystem that the user picks from two images, **Alpine** or **Ubuntu** (ENG-152/153/162). Never touches a distro Dockering didn't create in the same run (ENG-155). Never installs or updates WSL (ENG-156).
 - The hub treats a failed connect as `Stopped` only when the factory says so (`stopped_after`, ENG-146).
 
@@ -98,14 +98,14 @@ distro's Linux VM. Windows processes can't open that socket directly.
    | 11 | `no-docker` (no socket) |
    | 12 | `socket-no-client` (socket, but neither `docker` nor `socat`) |
    | 13 | `permission-denied` (socket not readable/writable by the user, §4.3) |
-   | 14 | `installed-not-running` (planned, ENG-148: the `docker` client or `dockerd` is installed but there is no socket; listed `Stopped` with *Start Docker*, ENG-149) |
+   | 14 | `installed-not-running` (planned, ENG-148: a `dockerd` binary, `/etc/init.d/docker` or a `docker.service` unit exists and no live `dockerd` owns the socket, which is absent or stale; the `docker` client alone, including Docker Desktop's integration symlink, stays 11, and a systemd distro with `docker.socket` active is `available`; listed `Stopped` with *Start Docker*, ENG-149) |
 
 5. **Stopped** distros are not probed, because probing would boot them. They're listed as *"Ubuntu (stopped) — Start & connect"*. Connecting starts the distro.
 6. Results: `available` (socket and bridge tool present), `no-docker` (hidden by default, shown with "Show all WSL distros"), `socket-no-client` (offer the TCP mode or suggest `apt install socat`), `permission-denied` (hint in §4.3).
 
 All `wsl.exe` invocations use `CREATE_NO_WINDOW` and a 10 s timeout. stdout is decoded as
 UTF-8 for `--exec` and as UTF-16LE for `--list`. `wsl.exe`'s **own** error messages (for example
-`WSL_E_DISTRO_NOT_FOUND`) are UTF-16LE even with `--exec`. The runner detects them (NUL-interleaved
+`WSL_E_DISTRO_NOT_FOUND`, exit 127 for a missing distro) are UTF-16LE even with `--exec`, and carry a stable `Error code: Wsl/…` token (matched instead of the localised text). The runner detects them (NUL-interleaved
 bytes) and decodes them as UTF-16LE.
 
 ### 4.3 Transport modes
