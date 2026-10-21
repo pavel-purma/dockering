@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use dk_core::engine::preference;
-use dk_core::fake::{FakeEngine, fixtures};
+use dk_core::fake::{FakeEngine, FakeFactory, FakeSetupStep, fixtures};
 use dk_core::*;
 use futures::{SinkExt, StreamExt};
 use tempfile::TempDir;
@@ -39,6 +39,7 @@ struct TestFactory {
     probe_results: Mutex<HashMap<EngineId, ProbeResult>>,
     start_error: Mutex<Option<EngineError>>,
     start_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    stopped_after: Mutex<bool>,
 }
 
 fn sock_cfg(id: &str) -> EngineConfig {
@@ -139,6 +140,9 @@ impl EngineFactory for TestFactory {
             body: "Start it to continue.".into(),
             action_label: "Start".into(),
         })
+    }
+    async fn stopped_after(&self, _cfg: &EngineConfig, _error: &EngineError) -> bool {
+        *lock(&self.stopped_after)
     }
     async fn start(&self, cfg: &EngineConfig) -> EngineResult<()> {
         lock(&self.starts).push(cfg.id.clone());
@@ -2792,5 +2796,302 @@ async fn eng_106_start_during_switch() {
     .await;
     assert_eq!(hub.active_engine(), Some(w));
     assert_ne!(state_of(&hub, "a"), Some(EngineState::Connecting));
+    hub.shutdown();
+}
+
+// ───────────────────────────── stopped_after and setup (ENG-142…162) ─────────────────────────────
+
+#[tokio::test(start_paused = true)]
+async fn eng_146_stopped_after_true_is_stopped_not_failed() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    *lock(&f.stopped_after) = true;
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(EngineError::unreachable("pipe missing")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "a") == Some(EngineState::Stopped)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(state_of(&hub, "a"), Some(EngineState::Stopped));
+    assert_eq!(f.connects().len(), 1, "no backoff retries");
+    assert!(status_of(&hub, "a").await.start_prompt.is_some());
+    hub.shutdown();
+
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    *lock(&f.stopped_after) = true;
+    f.add(FakeEngine::new("b"), preference::LOCAL_SOCKET);
+    f.set_connect_error("b", Some(EngineError::unreachable("pipe missing")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), last_engine("b"));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, "b") == Some(EngineState::Stopped)
+    })
+    .await;
+    assert_eq!(hub.active_engine(), Some(EngineId::new("b")));
+    assert_eq!(f.connects().len(), 1);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_146_false_stays_failed() {
+    let f = TestFactory::new();
+    f.set_prompt(true);
+    f.add(FakeEngine::new("a"), preference::LOCAL_SOCKET);
+    f.set_connect_error("a", Some(EngineError::unreachable("pipe missing")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub, "a"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    hub.shutdown();
+
+    let f = TestFactory::new();
+    *lock(&f.stopped_after) = true;
+    f.add(FakeEngine::new("b"), preference::LOCAL_SOCKET);
+    f.set_connect_error("b", Some(EngineError::unreachable("pipe missing")));
+    let (hub, _dir) = start_paused(f.clone(), Config::default(), UiState::default());
+    until(Duration::from_secs(5), || {
+        matches!(state_of(&hub, "b"), Some(EngineState::Failed { .. }))
+    })
+    .await;
+    assert!(
+        status_of(&hub, "b").await.start_prompt.is_none(),
+        "no start prompt: stays Failed"
+    );
+    hub.shutdown();
+}
+
+fn offer(id: &str, choices: &[&str]) -> SetupOffer {
+    SetupOffer {
+        id: id.into(),
+        title: format!("Set up {id}"),
+        body: "Creates an engine.".into(),
+        action_label: "Set up".into(),
+        choices: choices
+            .iter()
+            .map(|c| SetupChoice {
+                id: (*c).into(),
+                label: c.to_uppercase(),
+                description: format!("The {c} image"),
+                download_bytes: 100,
+                disk_bytes: 1000,
+            })
+            .collect(),
+    }
+}
+
+fn phase(phase: SetupPhase, fraction: Option<f32>) -> FakeSetupStep {
+    FakeSetupStep::Progress(SetupProgress::Phase {
+        phase,
+        fraction,
+        detail: String::new(),
+    })
+}
+
+fn setup_options(dir: &TempDir, factories: Vec<Arc<dyn EngineFactory>>) -> HubOptions {
+    HubOptions {
+        paths: Paths::in_dir(dir.path()),
+        config: Config::default(),
+        ui_state: UiState::default(),
+        factories: Some(factories),
+        discover_on_start: false,
+        worker_threads: 2,
+        demo: false,
+    }
+}
+
+/// A hub whose only factory is a `FakeFactory` that offers `offers`.
+fn setup_hub(offers: Vec<SetupOffer>) -> (HubHandle, Arc<FakeFactory>, TempDir) {
+    let ff = FakeFactory::new();
+    ff.set_setup_offers(offers);
+    let dir = tempfile::tempdir().unwrap();
+    let o = setup_options(&dir, vec![ff.clone() as Arc<dyn EngineFactory>]);
+    let h = HubInner::start_for_test(o, tokio::runtime::Handle::current());
+    (h, ff, dir)
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_142_defaults_offer_nothing() {
+    let f = TestFactory::new();
+    let (hub, _dir) = start_paused(f, Config::default(), UiState::default());
+    assert!(hub.setup_offers().await.unwrap().is_empty());
+    let mut s = hub.run_setup("anything", "");
+    let r = next(&mut s, Duration::from_secs(5)).await.unwrap();
+    assert!(r.is_err());
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_150_setup_offers_collects_from_factories() {
+    let a = FakeFactory::new();
+    a.set_setup_offers(vec![offer("one", &["x", "y"])]);
+    let b = FakeFactory::new();
+    b.set_setup_offers(vec![offer("two", &[]), offer("three", &["z"])]);
+    let c = FakeFactory::new();
+    let dir = tempfile::tempdir().unwrap();
+    let o = setup_options(
+        &dir,
+        vec![
+            a as Arc<dyn EngineFactory>,
+            c as Arc<dyn EngineFactory>,
+            b as Arc<dyn EngineFactory>,
+        ],
+    );
+    let hub = HubInner::start_for_test(o, tokio::runtime::Handle::current());
+    let ids: Vec<String> = hub
+        .setup_offers()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|o| o.id)
+        .collect();
+    assert_eq!(ids, vec!["one", "two", "three"]);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_154_run_setup_streams_progress_and_registers_engine() {
+    let (hub, ff, _dir) = setup_hub(vec![offer("wsl", &["alpine", "ubuntu"])]);
+    let mut cfg = ff.add(FakeEngine::new("made"));
+    cfg.origin = EngineOrigin::Manual;
+    ff.set_setup_script(vec![
+        phase(SetupPhase::Checking, None),
+        phase(SetupPhase::Downloading, Some(0.5)),
+        phase(SetupPhase::Starting, None),
+        FakeSetupStep::Progress(SetupProgress::Done(cfg.clone())),
+    ]);
+    assert!(hub.engines().await.unwrap().is_empty());
+
+    let mut s = hub.run_setup("wsl", "alpine");
+    let mut phases = Vec::new();
+    let mut done = None;
+    while let Some(item) = next(&mut s, Duration::from_secs(5)).await {
+        match item.unwrap() {
+            Feed::Item(SetupProgress::Phase { phase, .. }) => phases.push(phase),
+            Feed::Item(SetupProgress::Done(c)) => done = Some(c),
+            Feed::Lagged { .. } => panic!("lagged"),
+        }
+    }
+    assert_eq!(
+        phases,
+        vec![
+            SetupPhase::Checking,
+            SetupPhase::Downloading,
+            SetupPhase::Starting
+        ]
+    );
+    assert_eq!(done.map(|c| c.id), Some(cfg.id.clone()));
+    assert_eq!(ff.setups(), vec![("wsl".to_string(), "alpine".to_string())]);
+    assert_eq!(hub.active_engine(), Some(cfg.id.clone()));
+    until(Duration::from_secs(5), || {
+        state_of(&hub, cfg.id.as_str()) == Some(EngineState::Connected)
+    })
+    .await;
+    let stored = hub.config().get().engines.entries;
+    assert!(stored.iter().any(|e| e.id == cfg.id), "persisted (ENG-115)");
+
+    ff.set_setup_script(vec![FakeSetupStep::Pending]);
+    let mut again = hub.run_setup("wsl", "ubuntu");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), again.next())
+            .await
+            .is_err(),
+        "a new setup starts after the first one finished"
+    );
+    drop(again);
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_154_dropping_the_stream_cancels() {
+    let (hub, ff, _dir) = setup_hub(vec![offer("wsl", &["alpine"])]);
+    ff.set_setup_script(vec![
+        phase(SetupPhase::Downloading, Some(0.1)),
+        FakeSetupStep::Pending,
+    ]);
+    let mut s = hub.run_setup("wsl", "alpine");
+    let first = next(&mut s, Duration::from_secs(5)).await.unwrap().unwrap();
+    assert!(matches!(
+        first,
+        Feed::Item(SetupProgress::Phase {
+            phase: SetupPhase::Downloading,
+            ..
+        })
+    ));
+    assert_eq!(ff.setups_dropped(), 0);
+    drop(s);
+    until(Duration::from_secs(5), || ff.setups_dropped() == 1).await;
+    assert!(
+        hub.engines().await.unwrap().is_empty(),
+        "nothing registered"
+    );
+
+    let mut s = hub.run_setup("wsl", "alpine");
+    assert!(next(&mut s, Duration::from_secs(5)).await.unwrap().is_ok());
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_154_second_setup_while_running_is_conflict() {
+    let (hub, ff, _dir) = setup_hub(vec![offer("wsl", &["alpine"])]);
+    ff.set_setup_script(vec![
+        phase(SetupPhase::Checking, None),
+        FakeSetupStep::Pending,
+    ]);
+    let mut first = hub.run_setup("wsl", "alpine");
+    assert!(
+        next(&mut first, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .is_ok()
+    );
+    let mut second = hub.run_setup("wsl", "alpine");
+    let err = next(&mut second, Duration::from_secs(5))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(err, EngineError::Conflict(_)), "{err:?}");
+    assert_eq!(ff.setups().len(), 1, "the factory ran once");
+    drop(first);
+    until(Duration::from_secs(5), || ff.setups_dropped() == 1).await;
+    let mut third = hub.run_setup("wsl", "alpine");
+    assert!(
+        next(&mut third, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .is_ok()
+    );
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_162_unknown_choice_id_rejected_before_factory() {
+    let (hub, ff, _dir) = setup_hub(vec![offer("wsl", &["alpine", "ubuntu"])]);
+    for bad in ["debian", "", "ALPINE"] {
+        let mut s = hub.run_setup("wsl", bad);
+        let r = next(&mut s, Duration::from_secs(5)).await.unwrap();
+        assert!(r.is_err(), "'{bad}' must be rejected");
+        assert!(next(&mut s, Duration::from_secs(5)).await.is_none());
+    }
+    assert!(ff.setups().is_empty(), "the factory was never called");
+    hub.shutdown();
+}
+
+#[tokio::test(start_paused = true)]
+async fn eng_162_missing_offer_rejected() {
+    let (hub, ff, _dir) = setup_hub(vec![offer("wsl", &["alpine"])]);
+    let mut s = hub.run_setup("nope", "alpine");
+    let r = next(&mut s, Duration::from_secs(5)).await.unwrap();
+    assert!(r.is_err());
+    assert!(ff.setups().is_empty());
+    ff.set_setup_script(vec![
+        phase(SetupPhase::Checking, None),
+        FakeSetupStep::Pending,
+    ]);
+    let mut ok = hub.run_setup("wsl", "alpine");
+    assert!(next(&mut ok, Duration::from_secs(5)).await.unwrap().is_ok());
     hub.shutdown();
 }

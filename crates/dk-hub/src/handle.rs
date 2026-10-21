@@ -8,7 +8,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use dk_core::{
     Engine, EngineConfig, EngineConfigSchema, EngineError, EngineEvent, EngineId, EngineInfo,
-    EngineResult, EngineStatus, ExecRequest, StatsSample,
+    EngineResult, EngineStatus, ExecRequest, SetupOffer, SetupProgress, StatsSample,
 };
 use futures::Stream;
 
@@ -100,6 +100,16 @@ impl HubHandle {
     /// ENG-106: explicit user action only.
     pub fn start_engine(&self, id: &EngineId) -> HubCall<()> {
         crate::hub::start_engine(self, id)
+    }
+    /// ENG-150: setup offers of every factory (e.g. a dedicated Docker-in-WSL distro).
+    pub fn setup_offers(&self) -> HubCall<Vec<SetupOffer>> {
+        crate::setup::setup_offers(self)
+    }
+    /// ENG-154/162: runs one offer with the user's explicit choice. An unknown offer or choice
+    /// is rejected before any factory work, and a second setup while one runs gets `Conflict`.
+    /// Dropping the stream cancels the setup. `Done` means the engine is registered and active.
+    pub fn run_setup(&self, offer_id: &str, choice_id: &str) -> HubStream<Feed<SetupProgress>> {
+        crate::setup::run_setup(self, offer_id, choice_id)
     }
     /// Add-engine dialog schemas from all registered factories.
     pub fn engine_schemas(&self) -> Vec<EngineConfigSchema> {

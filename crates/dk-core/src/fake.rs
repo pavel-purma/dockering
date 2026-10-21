@@ -5,6 +5,7 @@
 //! live streams fed by `push_*`/`emit_event`; exec is a loopback TTY (echoes input).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -962,6 +963,22 @@ pub struct FakeFactory {
     engines: Mutex<Vec<(EngineConfig, Arc<FakeEngine>)>>,
     connect_errors: Mutex<HashMap<EngineId, EngineError>>,
     connects: Mutex<Vec<EngineId>>,
+    stopped_after: Mutex<bool>,
+    offers: Mutex<Vec<SetupOffer>>,
+    script: Mutex<Vec<FakeSetupStep>>,
+    setups: Mutex<Vec<(String, String)>>,
+    setups_dropped: Arc<AtomicUsize>,
+}
+
+/// One step of a scripted `FakeFactory::setup` stream.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FakeSetupStep {
+    /// Yields `Ok(progress)`.
+    Progress(SetupProgress),
+    /// Yields `Err(error)`.
+    Error(EngineError),
+    /// Never yields again; the stream lives until it is dropped.
+    Pending,
 }
 
 impl FakeFactory {
@@ -970,6 +987,11 @@ impl FakeFactory {
             engines: Mutex::new(Vec::new()),
             connect_errors: Mutex::new(HashMap::new()),
             connects: Mutex::new(Vec::new()),
+            stopped_after: Mutex::new(false),
+            offers: Mutex::new(Vec::new()),
+            script: Mutex::new(Vec::new()),
+            setups: Mutex::new(Vec::new()),
+            setups_dropped: Arc::new(AtomicUsize::new(0)),
         })
     }
     /// Add an engine discovered as a local socket `/fake/<id>.sock`.
@@ -1008,6 +1030,37 @@ impl FakeFactory {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+    /// The answer of `stopped_after` (default `false`).
+    pub fn set_stopped_after(&self, v: bool) {
+        *self.stopped_after.lock().unwrap_or_else(|e| e.into_inner()) = v;
+    }
+    /// The offers `setup_offers` returns (default none).
+    pub fn set_setup_offers(&self, offers: Vec<SetupOffer>) {
+        *self.offers.lock().unwrap_or_else(|e| e.into_inner()) = offers;
+    }
+    /// The stream every later `setup` call plays.
+    pub fn set_setup_script(&self, steps: Vec<FakeSetupStep>) {
+        *self.script.lock().unwrap_or_else(|e| e.into_inner()) = steps;
+    }
+    /// `(offer_id, choice_id)` of every `setup` call, in order.
+    pub fn setups(&self) -> Vec<(String, String)> {
+        self.setups
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    /// How many `setup` streams have been dropped.
+    pub fn setups_dropped(&self) -> usize {
+        self.setups_dropped.load(Ordering::SeqCst)
+    }
+}
+
+struct CountDrop(Arc<AtomicUsize>);
+
+impl Drop for CountDrop {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -1071,6 +1124,46 @@ impl EngineFactory for FakeFactory {
         } else {
             ProbeResult::Reachable
         }
+    }
+    async fn stopped_after(&self, _cfg: &EngineConfig, _error: &EngineError) -> bool {
+        *self.stopped_after.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    async fn setup_offers(&self) -> Vec<SetupOffer> {
+        self.offers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    fn setup(&self, offer_id: &str, choice_id: &str) -> EngineStream<SetupProgress> {
+        self.setups
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((offer_id.to_owned(), choice_id.to_owned()));
+        let script = self
+            .script
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let guard = CountDrop(self.setups_dropped.clone());
+        let pending = script.contains(&FakeSetupStep::Pending);
+        let items: Vec<EngineResult<SetupProgress>> = script
+            .into_iter()
+            .map_while(|s| match s {
+                FakeSetupStep::Progress(p) => Some(Ok(p)),
+                FakeSetupStep::Error(e) => Some(Err(e)),
+                FakeSetupStep::Pending => None,
+            })
+            .collect();
+        let head = futures::stream::iter(items);
+        let s: EngineStream<SetupProgress> = if pending {
+            Box::pin(head.chain(futures::stream::pending()))
+        } else {
+            Box::pin(head)
+        };
+        Box::pin(s.map(move |item| {
+            let _keep = &guard;
+            item
+        }))
     }
 }
 
