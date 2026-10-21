@@ -1581,15 +1581,18 @@ dependencies = [
  "bollard",
  "bytes",
  "dk-core",
+ "dk-engine-docker",
  "futures",
  "insta",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "time",
  "tokio",
  "tokio-util",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

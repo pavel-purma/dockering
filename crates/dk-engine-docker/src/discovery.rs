@@ -10,12 +10,13 @@ use dk_core::engine::preference;
 use dk_core::{
     ConfigField, ConfigFieldKind, DiscoveredEngine, Engine, EngineConfig, EngineConfigSchema,
     EngineEndpoint, EngineError, EngineFactory, EngineId, EngineKind, EngineOrigin, EngineResult,
-    EngineState, ProbeResult, TlsFiles,
+    EngineState, ProbeResult, StartPrompt, TlsFiles,
 };
 use futures::future::join_all;
 use serde_json::Value;
 
 use crate::connect::{self, PROBE_TIMEOUT};
+use crate::desktop::{Desktop, DesktopStatus};
 use crate::errors::{ErrCtx, map_err};
 use crate::registry_auth::docker_config_dir;
 use crate::{DockerEngine, DockerEngineOptions, DockerTarget};
@@ -23,12 +24,22 @@ use crate::{DockerEngine, DockerEngineOptions, DockerTarget};
 const SSH_UNSUPPORTED: &str = "ssh contexts are not supported in v1";
 
 pub struct DockerFactory {
-    _private: (),
+    desktop: Desktop,
 }
 
 impl DockerFactory {
     pub fn new() -> Self {
-        Self { _private: () }
+        Self {
+            desktop: Desktop::new(),
+        }
+    }
+
+    /// Docker Desktop against a fake install tree and fake pipes (tests only).
+    #[cfg(feature = "test-support")]
+    pub fn for_desktop_tests(config: crate::DesktopTestConfig) -> Self {
+        Self {
+            desktop: Desktop::for_tests(config),
+        }
     }
 }
 
@@ -454,8 +465,7 @@ async fn probe_socket(c: &Candidate) -> (bool, Option<String>) {
         .unwrap_or((false, None))
 }
 
-async fn local_engines() -> Vec<DiscoveredEngine> {
-    let candidates = socket_candidates();
+async fn local_engines(candidates: Vec<Candidate>) -> Vec<DiscoveredEngine> {
     let probes = candidates.into_iter().map(|c| async move {
         let path = endpoint_path(&c.endpoint)?;
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
@@ -472,6 +482,60 @@ async fn local_engines() -> Vec<DiscoveredEngine> {
         ))
     });
     join_all(probes).await.into_iter().flatten().collect()
+}
+
+/// Definitely not there (`NotFound`); a busy pipe or a permission error is not "absent".
+async fn pipe_absent(path: &str) -> bool {
+    matches!(tokio::fs::try_exists(path).await, Ok(false))
+}
+
+impl DockerFactory {
+    fn candidates(&self) -> Vec<Candidate> {
+        if !self.desktop.pipes_only {
+            return socket_candidates();
+        }
+        let pipe = |id, name, path: &str, sniff_name| Candidate {
+            id,
+            name,
+            endpoint: EngineEndpoint::NamedPipe { path: path.into() },
+            sniff_name,
+        };
+        vec![
+            pipe(
+                "docker-desktop",
+                "Docker Desktop",
+                &self.desktop.engine_pipe,
+                true,
+            ),
+            pipe(
+                "docker-desktop-linux",
+                "Docker Desktop (Linux engine)",
+                &self.desktop.linux_pipe,
+                false,
+            ),
+        ]
+    }
+
+    /// ENG-143: an installed Docker Desktop whose pipe is absent is listed as `Stopped`.
+    async fn stopped_desktop(&self, locals: &[DiscoveredEngine]) -> Option<DiscoveredEngine> {
+        if locals
+            .iter()
+            .any(|d| d.config.id.as_str() == "docker-desktop")
+            || !pipe_absent(&self.desktop.engine_pipe).await
+        {
+            return None;
+        }
+        let mut d = discovered(
+            "docker-desktop".into(),
+            "Docker Desktop".into(),
+            EngineEndpoint::NamedPipe {
+                path: self.desktop.engine_pipe.clone(),
+            },
+            preference::LOCAL_SOCKET,
+        );
+        d.initial_state = Some(EngineState::Stopped);
+        Some(d)
+    }
 }
 
 /// Dedupe key (ENG-009): canonical endpoint, with Unix sockets resolved through symlinks.
@@ -552,9 +616,26 @@ impl EngineFactory for DockerFactory {
     }
 
     async fn discover(&self) -> Vec<DiscoveredEngine> {
-        let (contexts, locals) = futures::join!(context_engines(), local_engines());
-        let mut all: Vec<DiscoveredEngine> = docker_host_engine().into_iter().collect();
+        let (contexts, locals, install) = futures::join!(
+            async {
+                if self.desktop.pipes_only {
+                    Vec::new()
+                } else {
+                    context_engines().await
+                }
+            },
+            local_engines(self.candidates()),
+            self.desktop.refresh()
+        );
+        let mut all: Vec<DiscoveredEngine> = if self.desktop.pipes_only {
+            Vec::new()
+        } else {
+            docker_host_engine().into_iter().collect()
+        };
         all.extend(contexts);
+        if install.is_some() {
+            all.extend(self.stopped_desktop(&locals).await);
+        }
         all.extend(locals);
         let mut keyed = Vec::with_capacity(all.len());
         for d in all {
@@ -569,6 +650,32 @@ impl EngineFactory for DockerFactory {
         let engine =
             DockerEngine::connect(cfg.id.clone(), target, DockerEngineOptions::default()).await?;
         Ok(Arc::new(engine))
+    }
+
+    fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> {
+        self.desktop.prompt_for(cfg)
+    }
+
+    async fn start(&self, cfg: &EngineConfig) -> EngineResult<()> {
+        self.desktop.start(cfg).await
+    }
+
+    async fn stopped_after(&self, cfg: &EngineConfig, error: &EngineError) -> bool {
+        if !self.desktop.is_desktop_endpoint(&cfg.endpoint) {
+            return false;
+        }
+        let daemon_down = match error {
+            EngineError::Unreachable { .. } => true,
+            EngineError::Api { status, .. } => matches!(status, 500 | 503),
+            _ => false,
+        };
+        if !daemon_down {
+            return false;
+        }
+        let Some(install) = self.desktop.load().await else {
+            return false;
+        };
+        self.desktop.status(&install).await == DesktopStatus::NotRunning
     }
 
     fn config_schema(&self) -> Vec<EngineConfigSchema> {
@@ -663,6 +770,14 @@ impl EngineFactory for DockerFactory {
         let Some(target) = target_for(&cfg.endpoint) else {
             return ProbeResult::Unreachable(unsupported_endpoint(&cfg.endpoint));
         };
+        // ENG-145: a pipe check only; the status command never runs from a probe.
+        if self.desktop.is_desktop_endpoint(&cfg.endpoint)
+            && let DockerTarget::NamedPipe(path) = &target
+            && pipe_absent(path).await
+            && self.desktop.load().await.is_some()
+        {
+            return ProbeResult::Stopped;
+        }
         let ctx = ErrCtx {
             hint: connect::hint_ctx(&target, false),
             timeout: PROBE_TIMEOUT,
