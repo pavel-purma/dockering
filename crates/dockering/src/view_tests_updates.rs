@@ -538,9 +538,18 @@ fn shl_003_toast_hides_by_itself(cx: &mut TestAppContext) {
         crate::ui::notify::info(window, cx, "Saved")
     });
     assert_eq!(notifications(&h, cx), 1);
-    h.wait_until(cx, "the toast hides", |_, cx| {
-        crate::ui::toast::mounted(cx) == 0
-    });
+    // Move the test clock in big steps: the toast needs its enter, 5 s and exit, and drawing
+    // the window each 20 ms step is too slow on CI runners to get there in time.
+    for _ in 0..80 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+    }
+    assert_eq!(
+        cx.read(crate::ui::toast::mounted),
+        0,
+        "the toast hid and left"
+    );
     h.shutdown();
 }
 
