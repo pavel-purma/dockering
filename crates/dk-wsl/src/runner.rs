@@ -7,8 +7,78 @@
 //! Encodings: `wsl.exe --list …` and `wsl.exe`'s own error messages are UTF-16LE. Output of a
 //! Linux program run through `--exec` is passed through unchanged (UTF-8).
 
+use std::io;
+
+use async_trait::async_trait;
+
+use crate::discovery::BridgeTool;
+
 #[cfg(windows)]
-pub(crate) use platform::{command, run};
+pub(crate) use platform::command;
+
+/// The `wsl.exe` seam: production runs the real binary, tests inject a fake so no unit test
+/// touches a distro.
+#[async_trait]
+pub(crate) trait Wsl: std::fmt::Debug + Send + Sync + 'static {
+    /// False where WSL can't exist (non-Windows); callers then fail fast.
+    fn supported(&self) -> bool {
+        true
+    }
+    /// Runs `wsl.exe <args>` to completion (argv vector, no shell, timeout).
+    async fn run(&self, args: &[&str]) -> io::Result<WslOutput>;
+    /// Raw HTTP reply to `GET /_ping` sent through `tool` inside `distro`, the path the bridge
+    /// uses (ENG-149). Empty when Docker doesn't answer.
+    async fn ping(&self, distro: &str, tool: BridgeTool) -> io::Result<String>;
+}
+
+/// The real `wsl.exe` (Windows only; elsewhere every call is `Unsupported`).
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct RealWsl;
+
+#[cfg(windows)]
+#[async_trait]
+impl Wsl for RealWsl {
+    async fn run(&self, args: &[&str]) -> io::Result<WslOutput> {
+        platform::run(args).await
+    }
+
+    async fn ping(&self, distro: &str, tool: BridgeTool) -> io::Result<String> {
+        platform::ping(distro, tool).await
+    }
+}
+
+#[cfg(not(windows))]
+#[async_trait]
+impl Wsl for RealWsl {
+    fn supported(&self) -> bool {
+        false
+    }
+
+    async fn run(&self, _args: &[&str]) -> io::Result<WslOutput> {
+        Err(not_windows())
+    }
+
+    async fn ping(&self, _distro: &str, _tool: BridgeTool) -> io::Result<String> {
+        Err(not_windows())
+    }
+}
+
+#[cfg(not(windows))]
+fn not_windows() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "WSL is only available on Windows",
+    )
+}
+
+/// Whether `reply` starts with a `200` status line (Docker's answer to `GET /_ping`).
+pub(crate) fn ping_ok(reply: &str) -> bool {
+    reply
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("HTTP/1."))
+        .is_some_and(|rest| rest.split_whitespace().nth(1) == Some("200"))
+}
 
 /// `wsl.exe --list` emits UTF-16LE, with or without a BOM. An odd trailing byte is ignored.
 pub(crate) fn decode_utf16le(bytes: &[u8]) -> String {
@@ -52,57 +122,66 @@ fn looks_utf16le(bytes: &[u8]) -> bool {
     nul_odd * 2 >= odd
 }
 
+#[derive(Debug)]
+pub(crate) struct WslOutput {
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+}
+
+impl WslOutput {
+    pub(crate) fn success(&self) -> bool {
+        self.code == Some(0)
+    }
+
+    /// stdout of an `--exec` child.
+    pub(crate) fn stdout_utf8(&self) -> String {
+        decode_utf8(&self.stdout)
+    }
+
+    /// A single-line, human-readable failure message from stderr, else stdout.
+    pub(crate) fn error_message(&self) -> String {
+        let stderr = decode_message(&self.stderr);
+        let text = if stderr.trim().is_empty() {
+            decode_message(&self.stdout)
+        } else {
+            stderr
+        };
+        let text = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text.is_empty() {
+            format!("wsl.exe exited with {:?}", self.code)
+        } else {
+            text
+        }
+    }
+}
+
 #[cfg(windows)]
 mod platform {
-    use std::ffi::OsStr;
     use std::io;
     use std::process::Stdio;
     use std::time::Duration;
 
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::process::Command;
     use tokio::time::timeout;
 
+    use super::WslOutput;
+    use crate::discovery::BridgeTool;
+
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     pub(crate) const WSL_TIMEOUT: Duration = Duration::from_secs(10);
+    const PING_TIMEOUT: Duration = Duration::from_secs(5);
+    const PING_REQUEST: &[u8] = b"GET /_ping HTTP/1.1
+Host: docker
+Connection: close
 
-    #[derive(Debug)]
-    pub(crate) struct WslOutput {
-        pub(crate) code: Option<i32>,
-        pub(crate) stdout: Vec<u8>,
-        pub(crate) stderr: Vec<u8>,
-    }
-
-    impl WslOutput {
-        pub(crate) fn success(&self) -> bool {
-            self.code == Some(0)
-        }
-
-        /// stdout of an `--exec` child.
-        pub(crate) fn stdout_utf8(&self) -> String {
-            super::decode_utf8(&self.stdout)
-        }
-
-        /// A single-line, human-readable failure message from stderr, else stdout.
-        pub(crate) fn error_message(&self) -> String {
-            let stderr = super::decode_message(&self.stderr);
-            let text = if stderr.trim().is_empty() {
-                super::decode_message(&self.stdout)
-            } else {
-                stderr
-            };
-            let text = text
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if text.is_empty() {
-                format!("wsl.exe exited with {:?}", self.code)
-            } else {
-                text
-            }
-        }
-    }
+";
 
     /// A `wsl.exe` command with no window, null stdin, and kill-on-drop. Callers add argv items
     /// with `.arg`/`.args` only — never a shell string built from user input (NFR-022).
@@ -116,11 +195,7 @@ mod platform {
     }
 
     /// Runs `wsl.exe <args>` to completion with the 10 s timeout.
-    pub(crate) async fn run<I, S>(args: I) -> io::Result<WslOutput>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
+    pub(crate) async fn run(args: &[&str]) -> io::Result<WslOutput> {
         let mut command = command();
         command
             .args(args)
@@ -140,6 +215,38 @@ mod platform {
             stdout: output.stdout,
             stderr: output.stderr,
         })
+    }
+
+    /// One `GET /_ping` through `docker system dial-stdio` (or socat) in `distro`.
+    pub(crate) async fn ping(distro: &str, tool: BridgeTool) -> io::Result<String> {
+        let mut command = command();
+        command
+            .args(["-d", distro, "--exec"])
+            .args(tool.dial_argv())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command.spawn()?;
+        let (Some(mut stdin), Some(mut stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            return Err(io::Error::other("wsl.exe child stdio unavailable"));
+        };
+        // The status line is enough; the child is killed on drop.
+        let exchange = async {
+            stdin.write_all(PING_REQUEST).await?;
+            let (mut reply, mut chunk) = (Vec::new(), [0u8; 512]);
+            while !reply.contains(&b'\n') && reply.len() < 4096 {
+                let read = stdout.read(&mut chunk).await?;
+                if read == 0 {
+                    break;
+                }
+                reply.extend_from_slice(&chunk[..read]);
+            }
+            Ok::<_, io::Error>(reply)
+        };
+        let reply = timeout(PING_TIMEOUT, exchange)
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Docker ping timed out"))??;
+        Ok(super::decode_utf8(&reply))
     }
 }
 
@@ -185,6 +292,25 @@ mod tests {
     }
 
     #[test]
+    fn eng_149_ping_ok_needs_a_200_status_line() {
+        assert!(ping_ok(
+            "HTTP/1.1 200 OK
+Api-Version: 1.50
+"
+        ));
+        assert!(!ping_ok(
+            "HTTP/1.1 500 Internal Server Error
+"
+        ));
+        assert!(!ping_ok(
+            "HTTP/1.1 503 Service Unavailable
+"
+        ));
+        assert!(!ping_ok(""));
+        assert!(!ping_ok("OK 200"));
+    }
+
+    #[test]
     fn eng_107_decodes_wsl_errors_in_either_encoding() {
         let bytes = include_bytes!("../fixtures/no-such-distro.utf16le.bin");
         let text = decode_message(bytes);
@@ -195,5 +321,178 @@ mod tests {
         );
         assert_eq!(decode_message(&utf16le("x", true)), "x");
         assert_eq!(decode_message(b""), "");
+    }
+}
+
+/// A scripted `wsl.exe`: records every argv and answers from queues. Never touches a distro.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::collections::VecDeque;
+    use std::io;
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+
+    use super::{Wsl, WslOutput};
+    use crate::discovery::{BridgeTool, PROBE_SCRIPT};
+
+    #[derive(Debug, Default)]
+    struct State {
+        running: Vec<String>,
+        probes: VecDeque<i32>,
+        pings: VecDeque<bool>,
+        systemd: bool,
+        start_exit: i32,
+        calls: Vec<Vec<String>>,
+        pinged: Vec<String>,
+    }
+
+    #[derive(Debug, Default)]
+    pub(crate) struct FakeWsl {
+        state: Mutex<State>,
+    }
+
+    fn pop_or_last<T: Copy>(queue: &mut VecDeque<T>, default: T) -> T {
+        match queue.len() {
+            0 => default,
+            1 => queue[0],
+            _ => queue.pop_front().unwrap_or(default),
+        }
+    }
+
+    fn utf16le(text: &str) -> Vec<u8> {
+        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+    }
+
+    fn output(code: i32, stdout: &[u8], stderr: &[u8]) -> io::Result<WslOutput> {
+        Ok(WslOutput {
+            code: Some(code),
+            stdout: stdout.to_vec(),
+            stderr: stderr.to_vec(),
+        })
+    }
+
+    impl FakeWsl {
+        pub(crate) fn new(running: &[&str]) -> Arc<Self> {
+            let fake = Self::default();
+            fake.lock().running = running.iter().map(|name| (*name).to_owned()).collect();
+            Arc::new(fake)
+        }
+
+        fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+            self.state.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        /// Probe-script exit codes, in order; the last one repeats (default 11).
+        pub(crate) fn probes(&self, codes: &[i32]) -> &Self {
+            self.lock().probes = codes.iter().copied().collect();
+            self
+        }
+
+        /// `GET /_ping` outcomes, in order; the last one repeats (default: no answer).
+        pub(crate) fn pings(&self, answers: &[bool]) -> &Self {
+            self.lock().pings = answers.iter().copied().collect();
+            self
+        }
+
+        pub(crate) fn systemd(&self, on: bool) -> &Self {
+            self.lock().systemd = on;
+            self
+        }
+
+        pub(crate) fn start_exit(&self, code: i32) -> &Self {
+            self.lock().start_exit = code;
+            self
+        }
+
+        pub(crate) fn calls(&self) -> Vec<Vec<String>> {
+            self.lock().calls.clone()
+        }
+
+        /// Distros a `GET /_ping` was sent to.
+        pub(crate) fn pinged(&self) -> Vec<String> {
+            self.lock().pinged.clone()
+        }
+    }
+
+    #[async_trait]
+    impl Wsl for FakeWsl {
+        async fn run(&self, args: &[&str]) -> io::Result<WslOutput> {
+            let mut state = self.lock();
+            state
+                .calls
+                .push(args.iter().map(|arg| (*arg).to_owned()).collect());
+            match args {
+                ["--list", "--running", "--quiet"] => {
+                    let names = state.running.join(
+                        "
+",
+                    );
+                    output(i32::from(names.is_empty()), &utf16le(&names), b"")
+                }
+                ["-d", _, "--exec", "sh", "-c", script] if *script == PROBE_SCRIPT => {
+                    let code = pop_or_last(&mut state.probes, 11);
+                    let stdout: &[u8] = if matches!(code, 0 | 13) {
+                        b"/usr/bin/docker
+"
+                    } else {
+                        b""
+                    };
+                    output(code, stdout, b"")
+                }
+                ["-d", _, "--exec", "test", "-d", "/run/systemd/system"] => {
+                    output(i32::from(!state.systemd), b"", b"")
+                }
+                [
+                    "-d",
+                    _,
+                    "-u",
+                    "root",
+                    "--exec",
+                    "systemctl",
+                    "start",
+                    "docker",
+                ]
+                | [
+                    "-d",
+                    _,
+                    "-u",
+                    "root",
+                    "--exec",
+                    "/usr/sbin/service",
+                    "docker",
+                    "start",
+                ] => {
+                    let code = state.start_exit;
+                    output(
+                        code,
+                        b"",
+                        if code == 0 {
+                            b""
+                        } else {
+                            b"boom: unit failed
+"
+                        },
+                    )
+                }
+                ["-d", _, "--exec", "true"] => output(0, b"", b""),
+                _ => Err(io::Error::other(format!(
+                    "unexpected wsl.exe argv: {args:?}"
+                ))),
+            }
+        }
+
+        async fn ping(&self, distro: &str, _tool: BridgeTool) -> io::Result<String> {
+            let mut state = self.lock();
+            state.pinged.push(distro.to_owned());
+            let up = pop_or_last(&mut state.pings, false);
+            Ok(if up {
+                "HTTP/1.1 200 OK
+"
+                .to_owned()
+            } else {
+                String::new()
+            })
+        }
     }
 }
