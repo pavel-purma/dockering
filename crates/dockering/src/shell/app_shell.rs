@@ -41,7 +41,7 @@ use crate::pages;
 use crate::pages::containers::ContainersPage;
 use crate::state::{
     AppState, Collection, EngineListEvent, EngineListStore, EngineStore, EngineStoreEvent,
-    ManualCheck, UpdateStore,
+    ManualCheck, SetupStore, UpdateStore,
 };
 use crate::strings as s;
 use crate::theme;
@@ -50,6 +50,7 @@ use crate::ui::menu::TrackBounds as _;
 use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
+use crate::ui::setup_dialog::{SetupDialog, SetupDialogEvent};
 use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
 use crate::ui::toast::{self, Toast, ToastAction, ToastHost};
 
@@ -155,6 +156,15 @@ pub struct AppShell {
     start_focus: FocusHandle,
     /// The prompt of the engine whose start is in flight, so the page stays up as *Starting…*.
     starting: Option<(EngineId, dk_core::StartPrompt)>,
+    /// The last engine the user started, kept until it connects: a failed start offers *Start*
+    /// again (ENG-147).
+    last_start: Option<(EngineId, dk_core::StartPrompt)>,
+    /// Setup offers (ENG-150); fetched when the landing page or palette needs them.
+    setup: Entity<SetupStore>,
+    /// The open *Set up* dialog (one at a time, ENG-154).
+    setup_dialog: Option<(Entity<SetupDialog>, Subscription)>,
+    /// The first-run / no-engine page was on screen at the last check (initial focus, ENG-159).
+    landing_was_shown: bool,
     status_focus: FocusHandle,
     switcher_btn_focus: FocusHandle,
     overflow_focus: FocusHandle,
@@ -190,6 +200,7 @@ impl AppShell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let hub = AppState::hub(cx);
         let engines = cx.new(|cx| EngineListStore::new(hub, cx));
+        let setup = SetupStore::global(cx).expect("setup store installed");
         let ui = AppState::ui_state(cx);
         // SET-001: the configured start page decides where the app opens (`last_route` is
         // still recorded in state.json, spec 10 §6).
@@ -237,8 +248,10 @@ impl AppShell {
             cx.subscribe_in(&engines, window, Self::on_engine_list_event),
             cx.observe_in(&engines, window, |this, _, window, cx| {
                 this.sync_engine_state(window, cx);
+                this.sync_landing(window, cx);
                 cx.notify();
             }),
+            cx.observe(&setup, |_, _, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| {
                 let cfg = AppState::config(cx).general.clone();
                 if cfg.theme == ThemeMode::System {
@@ -276,6 +289,10 @@ impl AppShell {
             content_focus,
             start_focus,
             starting: None,
+            last_start: None,
+            setup,
+            setup_dialog: None,
+            landing_was_shown: false,
             status_focus,
             switcher_btn_focus,
             overflow_focus,
@@ -605,6 +622,9 @@ impl AppShell {
             if !matches!(state, Some(EngineState::Connecting)) {
                 self.starting = None;
             }
+            if state.as_ref().is_some_and(|s| s.is_usable()) {
+                self.last_start = None;
+            }
             let had_page = !matches!(self.page, ShellPage::None);
             self.mount_page(window, cx);
             if self.start_page_shown(cx) {
@@ -626,6 +646,34 @@ impl AppShell {
                 }
             }
         }
+    }
+
+    /// The first-run / no-engine page appearing takes initial focus unless the user is elsewhere
+    /// (ENG-159).
+    fn sync_landing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.landing_shown(cx);
+        if shown && !self.landing_was_shown {
+            let elsewhere = window
+                .focused(cx)
+                .is_some_and(|f| !self.content_focus.contains(&f, window) && f != self.root_focus);
+            if !elsewhere {
+                self.focus_page_pending.set(true);
+            }
+        }
+        self.landing_was_shown = shown;
+    }
+
+    /// The first-run or no-active-engine page is what the content region shows (ENG-158).
+    fn landing_shown(&self, cx: &App) -> bool {
+        let list = self.engines.read(cx);
+        list.loaded()
+            && list.active().is_none()
+            && !matches!(self.history.current(), Route::Settings { .. })
+    }
+
+    /// The *Set up* dialog, while open (tests).
+    pub fn setup_dialog(&self) -> Option<&Entity<SetupDialog>> {
+        self.setup_dialog.as_ref().map(|(d, _)| d)
     }
 
     fn on_engine_list_event(
@@ -665,6 +713,9 @@ impl AppShell {
             return;
         }
         let had_engine = self.store.is_some();
+        if self.last_start.as_ref().map(|(i, _)| i) != id.as_ref() {
+            self.last_start = None;
+        }
         self.store = None;
         self.store_subs.clear();
         // A list page belongs to its engine: none outlives a switch (SHL-014).
@@ -735,25 +786,109 @@ impl AppShell {
     }
 
     fn on_start_engine(&mut self, _: &StartEngine, window: &mut Window, cx: &mut Context<Self>) {
-        if self.starting.is_some()
-            || self
-                .engines
-                .read(cx)
-                .active()
-                .is_some_and(|s| matches!(s.state, EngineState::Connecting))
+        if self
+            .engines
+            .read(cx)
+            .active()
+            .is_some_and(|s| matches!(s.state, EngineState::Connecting))
         {
             return;
         }
         let Some(id) = self.engines.read(cx).active_id().cloned() else {
             return;
         };
-        if let Some(status) = self.engines.read(cx).active()
-            && let Some(p) = &status.start_prompt
-        {
+        self.begin_start(id, window, cx);
+    }
+
+    /// ENG-158: a listed `Stopped` engine becomes the active one and is started, like
+    /// `StartEngine` on its own page.
+    fn on_start_listed(
+        &mut self,
+        a: &StartListedEngine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = EngineId::new(a.id.to_string());
+        if self.starting.is_some() || self.engines.read(cx).get(&id).is_none() {
+            return;
+        }
+        // The shell switches within one frame (ENG-102); the hub activates before it starts.
+        self.engines
+            .update(cx, |e, cx| e.mark_switching(id.clone(), cx));
+        let activate = AppState::hub(cx).set_active(&id);
+        let prompt = self.start_prompt_for(&id, cx);
+        if let Some(p) = prompt {
             self.starting = Some((id.clone(), p.clone()));
+            self.last_start = Some((id.clone(), p));
+        }
+        let call = AppState::hub(cx).start_engine(&id);
+        self.action_task = Some(cx.spawn_in(window, async move |_, cx| {
+            let result = match activate.await {
+                Ok(()) => call.await,
+                Err(e) => Err(e),
+            };
+            if let Err(err) = result {
+                cx.update(|window, cx| {
+                    notify::engine_error(window, cx, s::START_AND_CONNECT, &err)
+                })
+                .ok();
+            }
+        }));
+        cx.notify();
+    }
+
+    /// The prompt to show while `id` starts: its own while `Stopped`, else the last one used.
+    fn start_prompt_for(&self, id: &EngineId, cx: &App) -> Option<dk_core::StartPrompt> {
+        self.engines
+            .read(cx)
+            .get(id)
+            .and_then(|s| s.start_prompt.clone())
+            .or_else(|| {
+                self.last_start
+                    .as_ref()
+                    .filter(|(i, _)| i == id)
+                    .map(|(_, p)| p.clone())
+            })
+    }
+
+    fn begin_start(&mut self, id: EngineId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.starting.is_some() {
+            return;
+        }
+        if let Some(p) = self.start_prompt_for(&id, cx) {
+            self.starting = Some((id.clone(), p.clone()));
+            self.last_start = Some((id.clone(), p));
         }
         let call = AppState::hub(cx).start_engine(&id);
         self.hub_call(s::START_AND_CONNECT, call, window, cx);
+    }
+
+    // ── set up (ENG-150…154, 162) ──────────────────────────────────────────────────────
+
+    /// *Set up Docker in WSL…*: opens the consent dialog for the offer (the first one when
+    /// none is named). Nothing starts before *Set up* inside it (ENG-151).
+    fn on_set_up_engine(&mut self, a: &SetUpEngine, window: &mut Window, cx: &mut Context<Self>) {
+        if self.setup_dialog.is_some() {
+            return;
+        }
+        let Some(offer) = self.setup.read(cx).offer(&a.offer).cloned() else {
+            return;
+        };
+        let dialog = SetupDialog::open(offer, window, cx);
+        let sub = cx.subscribe_in(
+            &dialog,
+            window,
+            |this, _, e: &SetupDialogEvent, window, cx| match e {
+                SetupDialogEvent::Closed => {
+                    this.setup_dialog = None;
+                    // Focus returned to the invoker; if that vanished, to the page (KBD-002).
+                    this.focus_page_pending.set(true);
+                    window.refresh();
+                    cx.notify();
+                }
+            },
+        );
+        self.setup_dialog = Some((dialog, sub));
     }
 
     fn on_set_active_default(
@@ -779,7 +914,17 @@ impl AppShell {
 
     fn on_rescan(&mut self, _: &Rescan, window: &mut Window, cx: &mut Context<Self>) {
         let call = AppState::hub(cx).rescan();
-        self.hub_call(s::RESCAN, call, window, cx);
+        let setup = self.setup.clone();
+        self.action_task = Some(cx.spawn_in(window, async move |_, cx| {
+            let result = call.await;
+            cx.update(|window, cx| {
+                if let Err(err) = result {
+                    notify::engine_error(window, cx, s::RESCAN, &err);
+                }
+                setup.update(cx, |st, cx| st.refresh(cx));
+            })
+            .ok();
+        }));
     }
 
     // ── navigation ─────────────────────────────────────────────────────────────────────
@@ -943,7 +1088,9 @@ impl AppShell {
         if matches!(self.history.current(), Route::Settings { .. }) {
             return Some(self.sidebar_focus.clone());
         }
-        if matches!(self.page, ShellPage::None) && self.start_page_shown(cx) {
+        if matches!(self.page, ShellPage::None)
+            && (self.start_page_shown(cx) || self.landing_shown(cx))
+        {
             return Some(self.start_focus.clone());
         }
         self.page.primary_focus(cx)
@@ -1379,6 +1526,7 @@ impl AppShell {
         }
         self.close_overlays(window, cx);
         self.remember_invoker(window, cx);
+        self.setup.update(cx, |s, cx| s.ensure(cx));
         let state = cx.new(|cx| CommandState::new(window, cx));
         state.update(cx, |s, cx| s.focus(window, cx));
         self.palette = Some(state);
@@ -1849,7 +1997,35 @@ impl AppShell {
             .into_any_element()
     }
 
+    /// What the first-run and no-engine pages list (ENG-158).
+    fn landing(&self, cx: &App) -> (Vec<engine_views::StartRow>, Vec<dk_core::SetupOffer>) {
+        let starts = self
+            .engines
+            .read(cx)
+            .engines()
+            .iter()
+            .filter(|e| e.config.enabled && !e.config.hidden)
+            .filter(|e| matches!(e.state, EngineState::Stopped))
+            .filter_map(|e| {
+                Some(engine_views::StartRow {
+                    id: e.id().clone(),
+                    name: e.config.name.clone(),
+                    prompt: e.start_prompt.clone()?,
+                })
+            })
+            .collect();
+        (starts, self.setup.read(cx).offers().to_vec())
+    }
+
     fn render_content(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        if self.landing_shown(cx) {
+            self.setup.update(cx, |s, cx| s.ensure(cx));
+        }
+        let (starts, offers) = self.landing(cx);
+        let landing = engine_views::Landing {
+            starts: &starts,
+            offers: &offers,
+        };
         let list = self.engines.read(cx);
         if !list.loaded() {
             return crate::ui::skeleton_rows(8, 5);
@@ -1861,13 +2037,23 @@ impl AppShell {
             return v.into_any_element();
         }
         if list.is_empty() {
-            return engine_views::first_run(&self.content_focus, cx);
+            return engine_views::first_run(&landing, &self.start_focus, &self.content_focus, cx);
         }
         let Some(status) = list.active().cloned() else {
             if list.none_usable() {
-                return engine_views::first_run(&self.content_focus, cx);
+                return engine_views::first_run(
+                    &landing,
+                    &self.start_focus,
+                    &self.content_focus,
+                    cx,
+                );
             }
-            return engine_views::no_active_engine(&self.content_focus);
+            return engine_views::no_active_engine(
+                &landing,
+                &self.start_focus,
+                &self.content_focus,
+                cx,
+            );
         };
         match &status.state {
             EngineState::Connected | EngineState::Degraded => {
@@ -1894,7 +2080,18 @@ impl AppShell {
                 _ => crate::ui::skeleton_rows(8, 5),
             },
             _ => {
-                engine_views::disconnected_page(&status, &self.content_focus, &self.start_focus, cx)
+                let restart = self
+                    .last_start
+                    .as_ref()
+                    .filter(|(id, _)| id == status.id())
+                    .map(|(_, p)| p);
+                engine_views::disconnected_page(
+                    &status,
+                    restart,
+                    &self.content_focus,
+                    &self.start_focus,
+                    cx,
+                )
             }
         }
     }
@@ -1995,6 +2192,7 @@ impl AppShell {
                 on_detail: self.history.current().is_detail(),
                 update_ready: UpdateStore::global(cx)
                     .is_some_and(|u| u.read(cx).restartable_version().is_some()),
+                has_setup_offer: !self.setup.read(cx).offers().is_empty(),
             };
             let shell = cx.entity().downgrade();
             let list_cap = cap - px(PALETTE_CHROME_H) * rem_scale(window);
@@ -2161,6 +2359,8 @@ impl Render for AppShell {
             .on_action(cx.listener(Self::on_switch_engine))
             .on_action(cx.listener(Self::on_retry))
             .on_action(cx.listener(Self::on_start_engine))
+            .on_action(cx.listener(Self::on_start_listed))
+            .on_action(cx.listener(Self::on_set_up_engine))
             .on_action(cx.listener(Self::on_rescan))
             .on_action(cx.listener(Self::on_set_active_default))
             .on_action(cx.listener(Self::on_engine_switcher))

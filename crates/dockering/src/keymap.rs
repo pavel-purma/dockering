@@ -64,6 +64,8 @@ pub mod ctx {
     pub const LOGS: &str = "Logs";
     pub const TERMINAL: &str = dk_terminal::KEY_CONTEXT;
     pub const DIALOG: &str = "Dialog";
+    /// A radio group (ENG-162): arrows move and select, `Space` selects.
+    pub const CHOICE_GROUP: &str = "ChoiceGroup";
     pub const PALETTE: &str = "Palette";
     /// The toast stack (KBD-074).
     pub const TOASTS: &str = "Toasts";
@@ -955,6 +957,30 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
         DLG,
         Os::ALL,
         "Remove row",
+        Dialogs
+    ),
+    b!(
+        "up",
+        choice::Prev,
+        Some(CHOICE_GROUP),
+        Os::ALL,
+        "Previous choice",
+        Dialogs
+    ),
+    b!(
+        "down",
+        choice::Next,
+        Some(CHOICE_GROUP),
+        Os::ALL,
+        "Next choice",
+        Dialogs
+    ),
+    b!(
+        "space",
+        choice::Select,
+        Some(CHOICE_GROUP),
+        Os::ALL,
+        "Select the focused choice",
         Dialogs
     ),
     // ── container detail (KBD-044, KBD-051, KBD-070; wip/detail) ────────────────────────

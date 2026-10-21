@@ -63,6 +63,8 @@ pub enum When {
     AnyDetail,
     /// A verified update is ready to install (KBD-076).
     UpdateReady,
+    /// At least one setup offer exists (ENG-159).
+    SetupAvailable,
 }
 
 /// Context passed to availability checks.
@@ -75,6 +77,8 @@ pub struct CommandContext {
     pub on_detail: bool,
     /// KBD-076: *Restart to update* is offered only then.
     pub update_ready: bool,
+    /// ENG-159: *Set up Docker in WSL…* is offered only then.
+    pub has_setup_offer: bool,
 }
 
 pub struct CommandSpec {
@@ -182,6 +186,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         Engines,
         Engine,
         &["wsl", "boot", "session"]
+    ),
+    c!(
+        s::CMD_SET_UP_ENGINE,
+        SetUpEngine { offer: "".into() },
+        Engines,
+        SetupAvailable,
+        &["docker", "wsl", "install", "create"]
     ),
     c!(s::CMD_REFRESH, Refresh, General, Engine, &["reload"]),
     c!(s::CMD_PALETTE, CommandPalette, General, Always),
@@ -596,7 +607,11 @@ fn resource_when(when: When, cx: &CommandContext) -> bool {
         When::ResourcePages => matches!(page, Some(Page::Images | Page::Volumes | Page::Networks)),
         When::ContainerDetail => page == Some(Page::Containers) && cx.on_detail,
         When::AnyDetail => cx.on_detail,
-        When::Always | When::Engine | When::ContainersPage | When::UpdateReady => false,
+        When::Always
+        | When::Engine
+        | When::ContainersPage
+        | When::UpdateReady
+        | When::SetupAvailable => false,
     }
 }
 
@@ -607,6 +622,7 @@ impl CommandSpec {
             When::Engine => cx.has_engine,
             When::ContainersPage => cx.has_engine && cx.on_containers,
             When::UpdateReady => cx.update_ready,
+            When::SetupAvailable => cx.has_setup_offer,
             other => cx.has_engine && resource_when(other, cx),
         }
     }
@@ -625,6 +641,8 @@ pub fn plumbing_action(name: &str) -> bool {
         "dk::SwitchEngine",
         "dk::CopyText",
         "dk::OpenUrl",
+        // ENG-158: first-run rows (Tab-reachable buttons); *Start engine* is the palette entry.
+        "dk::StartListedEngine",
         "dk::CloseWindow",
         // Windows/Linux only (bound to a lone Alt there); macOS has the native menu bar.
         "dk::FocusMenuBar",
