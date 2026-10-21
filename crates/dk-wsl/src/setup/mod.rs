@@ -39,11 +39,13 @@ pub(crate) const OFFER_ID: &str = "docker-in-wsl";
 pub(crate) const DISTRO: &str = "dockering-engine";
 
 const OFFER_TITLE: &str = "Set up Docker in WSL";
-/// Consent text (ENG-151, ENG-163); the dialog adds the sizes of the selected image.
+/// Consent text (ENG-151); the dialog adds the sizes of the selected image.
 const CONSENT: &str = "Dockering will create a Linux distro named \"dockering-engine\" that runs \
 Docker Engine. It is stored in %LOCALAPPDATA%\\Dockering\\wsl\\dockering-engine and downloaded \
-from github.com. No administrator rights are needed, and your other distros are not touched. \
-The engine and its containers run only while Dockering, or another WSL session, is open.";
+from github.com. No administrator rights are needed, and your other distros are not touched.";
+/// The lifetime sentence shown in the consent and the start prompt (ENG-163).
+pub(crate) const LIFETIME: &str =
+    "The engine and its containers run only while Dockering, or another WSL session, is open.";
 
 /// Conservative gate for `systemd=true` and the `[boot]` command (spike W-3.9).
 const MIN_WSL: WslVersion = (2, 0, 0, 0);
@@ -54,8 +56,12 @@ const READY_POLL: Duration = Duration::from_millis(500);
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const SETTLE: Duration = Duration::from_secs(2);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+/// A re-check of the cached file slower than this is shown as *Verifying*.
+const RECHECK_VISIBLE: Duration = Duration::from_millis(300);
 
 type FreeSpace = dyn Fn(&Path) -> io::Result<u64> + Send + Sync;
+#[cfg(test)]
+type AfterVerify = dyn Fn(&Path) + Send + Sync;
 
 /// Everything outside the flow's logic: processes, disk roots, the network and the table.
 pub(crate) struct SetupEnv {
@@ -77,6 +83,9 @@ pub(crate) struct SetupEnv {
     pub(crate) import_timeout: Duration,
     /// Serialises runs, so a new one waits for the previous one's cleanup.
     gate: Arc<tokio::sync::Mutex<()>>,
+    /// Test seam: runs on the cached file after the download was verified.
+    #[cfg(test)]
+    pub(crate) after_verify: Option<Box<AfterVerify>>,
 }
 
 impl std::fmt::Debug for SetupEnv {
@@ -109,6 +118,8 @@ impl SetupEnv {
             ready_timeout: READY_TIMEOUT,
             import_timeout: IMPORT_TIMEOUT,
             gate: Arc::default(),
+            #[cfg(test)]
+            after_verify: None,
         }
     }
 
@@ -194,7 +205,7 @@ pub(crate) async fn offers(env: Option<&SetupEnv>) -> Vec<SetupOffer> {
     vec![SetupOffer {
         id: OFFER_ID.to_owned(),
         title: OFFER_TITLE.to_owned(),
-        body: CONSENT.to_owned(),
+        body: format!("{CONSENT} {LIFETIME}"),
         action_label: OFFER_TITLE.to_owned(),
         choices,
     }]
@@ -259,17 +270,18 @@ async fn run(
         state: state.clone(),
         files: vec![part.clone(), file.clone()],
         done: false,
+        turn: None,
     };
     // One run at a time; the turn is held until this run's cleanup is finished.
-    let gate = env.gate.clone();
     let turn = tokio::select! {
         biased;
         () = token.cancelled() => None,
-        turn = gate.lock() => Some(turn),
+        turn = env.gate.clone().lock_owned() => Some(turn),
     };
     let result = if turn.is_none() {
         Err(EngineError::Cancelled)
     } else {
+        guard.turn = turn;
         tokio::select! {
             biased;
             () = token.cancelled() => Err(EngineError::Cancelled),
@@ -380,8 +392,13 @@ async fn flow(
         .map_err(|_| messages::cannot_save(&drive))?;
 
     // 4. Importing: never over an existing distro, and `imported` is set before the spawn.
-    phase(&mut tx, SetupPhase::Importing, None, "Creating the engine").await;
     preflight(env).await?;
+    #[cfg(test)]
+    if let Some(hook) = &env.after_verify {
+        hook(file);
+    }
+    recheck(&mut tx, file, pin).await?;
+    phase(&mut tx, SetupPhase::Importing, None, "Creating the engine").await;
     let dir = env.distro_dir();
     let (Some(dir_arg), Some(file_arg)) = (dir.to_str(), file.to_str()) else {
         return Err(messages::fail(
@@ -401,10 +418,9 @@ async fn flow(
     state.importing.store(false, Ordering::SeqCst);
     let output = output.map_err(|e| import::map_io(&e))?;
     if !output.success() {
-        if import::import_hit_existing(&output) {
-            // Nothing of ours was created; the other distro or folder stays untouched.
-            state.imported.store(false, Ordering::SeqCst);
-        }
+        // Without our own disk nothing of ours was created: never unregister that name.
+        let ours = import::created_our_disk(env, &output).await;
+        state.imported.store(ours, Ordering::SeqCst);
         return Err(import::map_failure(Step::Import, &output, env, &drive));
     }
 
@@ -438,6 +454,24 @@ async fn flow(
 
     // 7. The config discovery would produce for this distro.
     Ok(crate::factory::discovered_config(&env.distro))
+}
+
+/// The bytes about to be imported must still match the pin (the cache is writable by others).
+async fn recheck(tx: &mut Events, file: &Path, pin: &RootfsPin) -> EngineResult<()> {
+    let hash = download::sha256_file(file);
+    tokio::pin!(hash);
+    let digest = tokio::select! {
+        digest = &mut hash => digest,
+        () = tokio::time::sleep(RECHECK_VISIBLE) => {
+            phase(tx, SetupPhase::Verifying, None, "Checking the download").await;
+            hash.await
+        }
+    };
+    if digest.is_ok_and(|d| d.eq_ignore_ascii_case(pin.sha256)) {
+        return Ok(());
+    }
+    let _ = tokio::fs::remove_file(file).await;
+    Err(messages::verification_failed())
 }
 
 /// The leaf may be absent or an empty directory (a stray file there fails the import).

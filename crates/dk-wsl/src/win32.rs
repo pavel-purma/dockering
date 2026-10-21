@@ -366,7 +366,6 @@ fn query_dword(key: &OwnedRegKey, name: &str) -> Option<u32> {
         .then_some(value)
 }
 
-/// Test-only DACL inspection (NFR-021 ACL test).
 /// Bytes available to the current user on the volume holding `path` (which must exist).
 pub(crate) fn free_space(path: &Path) -> io::Result<u64> {
     let wide = wide_nul(path);
@@ -421,6 +420,7 @@ fn file_version(path: &Path) -> Option<(u32, u32, u32, u32)> {
     ))
 }
 
+/// Test-only DACL inspection (NFR-021 ACL test).
 #[cfg(test)]
 pub(crate) use dacl::object_dacl;
 

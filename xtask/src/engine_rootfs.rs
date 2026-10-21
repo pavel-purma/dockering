@@ -658,7 +658,7 @@ fn check_rust_table(pins: &Pins, source: &str) -> Vec<String> {
     {
         if !found.contains(cell.asset.url.as_str()) {
             problems.push(format!(
-                "{}/{}: pins.toml publishes `{}`, but the Rust table does not pin it as one literal url (with its size and sha256 in the same entry)",
+                "{}/{}: pins.toml publishes `{}`, but the Rust table does not pin it as one literal url (with its size and sha256 in the same entry); rewrite the table with literals",
                 cell.image, cell.arch, cell.asset.url
             ));
         }
@@ -1009,6 +1009,65 @@ sha256 = "{digest}"
     fn rel_089_rust_table_with_only_unpublished_cells_is_empty_and_fine() {
         let p = pins(false);
         assert!(check_rust_table(&p, "pub const PINS: &[Pin] = &[];").is_empty());
+    }
+
+    /// The shape `pins.rs` has to take once cells are published: one literal entry per cell.
+    fn published_literal_table(p: &Pins) -> String {
+        let mut s = String::from(
+            "pub(crate) const PINS: [Pin; 4] = [
+",
+        );
+        for c in &p.cells {
+            s.push_str(&format!(
+                "    Pin {{
+        image: \"{}\",
+        arch: \"{}\",
+        url: \"{}\",
+        size_bytes: {},
+        sha256: \"{}\",
+        disk_bytes: 1_000,
+        published: true,
+    }},
+",
+                c.image, c.arch, c.asset.url, c.asset.size, c.asset.sha256
+            ));
+        }
+        s.push_str(
+            "];
+",
+        );
+        s
+    }
+
+    #[test]
+    fn rel_089_published_cells_with_literal_table_pass() {
+        let p = pins(true);
+        let table = published_literal_table(&p);
+        let problems = check_rust_table(&p, &table);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        // The `concat!` form of an unpublished table cannot stand for a published cell.
+        let concat = format!(
+            "pub(crate) const PINS: [Pin; 4] = [
+{}];
+",
+            p.cells
+                .iter()
+                .map(|c| format!(
+                    "    Pin {{ url: concat!(\"https://github.com/{REPO}/releases/download/rootfs-7/dockering-engine-\", \"{}\", \"-\", \"{}\", \".tar.xz\"), size_bytes: {}, sha256: \"{}\", published: true }},
+",
+                    c.image, c.arch, c.asset.size, c.asset.sha256
+                ))
+                .collect::<String>()
+        );
+        let problems = check_rust_table(&p, &concat);
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert!(
+            problems
+                .iter()
+                .all(|m| m.contains("rewrite the table with literals")),
+            "{problems:?}"
+        );
     }
 
     #[test]

@@ -68,8 +68,12 @@ fn landing(cx: &mut TestAppContext, offers: Vec<SetupOffer>) -> (Harness, Arc<St
         },
         vec![f.clone() as Arc<dyn EngineFactory>],
     );
+    let expect = offers.len();
     h.factory.set_setup_offers(offers);
     h.wait_until(cx, "landing rows", |_, _| true);
+    h.wait_until(cx, "offers loaded", |_, cx| {
+        crate::state::SetupStore::global(cx).is_some_and(|st| st.read(cx).offers().len() == expect)
+    });
     h.wait_until(cx, "stopped engine listed, nothing active", |_, cx| {
         let list = h.shell.read(cx).engines().read(cx);
         list.active().is_none()
@@ -382,10 +386,9 @@ fn eng_154_enter_on_enabled_set_up_runs_it(cx: &mut TestAppContext) {
     h.wait_until(cx, "running", |_, cx| {
         matches!(d.read(cx).stage(), Stage::Running { .. })
     });
-    assert_eq!(
-        h.factory.setups(),
-        vec![(OFFER.to_owned(), "beta".to_owned())]
-    );
+    h.wait_until(cx, "setup reached the hub", |_, _| {
+        h.factory.setups() == vec![(OFFER.to_owned(), "beta".to_owned())]
+    });
     h.shutdown();
 }
 
@@ -429,7 +432,7 @@ fn eng_154_cancel_drops_the_setup(cx: &mut TestAppContext) {
     h.wait_until(cx, "running", |_, cx| {
         matches!(d.read(cx).stage(), Stage::Running { .. })
     });
-    assert_eq!(h.factory.setups().len(), 1);
+    h.wait_until(cx, "first setup", |_, _| h.factory.setups().len() == 1);
     h.press(cx, "escape");
     assert!(!h.has_dialog(cx));
     h.wait_until(cx, "stream dropped", |_, _| h.factory.setups_dropped() == 1);
@@ -440,7 +443,7 @@ fn eng_154_cancel_drops_the_setup(cx: &mut TestAppContext) {
     h.wait_until(cx, "second run", |_, cx| {
         matches!(d2.read(cx).stage(), Stage::Running { .. })
     });
-    assert_eq!(h.factory.setups().len(), 2);
+    h.wait_until(cx, "second setup", |_, _| h.factory.setups().len() == 2);
     h.shutdown();
 }
 

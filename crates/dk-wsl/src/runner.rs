@@ -214,11 +214,7 @@ mod platform {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     pub(crate) const WSL_TIMEOUT: Duration = Duration::from_secs(10);
     const PING_TIMEOUT: Duration = Duration::from_secs(5);
-    const PING_REQUEST: &[u8] = b"GET /_ping HTTP/1.1
-Host: docker
-Connection: close
-
-";
+    const PING_REQUEST: &[u8] = b"GET /_ping HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n";
 
     /// A `wsl.exe` command with no window, null stdin, and kill-on-drop. Callers add argv items
     /// with `.arg`/`.args` only — never a shell string built from user input (NFR-022).
@@ -355,19 +351,9 @@ mod tests {
 
     #[test]
     fn eng_149_ping_ok_needs_a_200_status_line() {
-        assert!(ping_ok(
-            "HTTP/1.1 200 OK
-Api-Version: 1.50
-"
-        ));
-        assert!(!ping_ok(
-            "HTTP/1.1 500 Internal Server Error
-"
-        ));
-        assert!(!ping_ok(
-            "HTTP/1.1 503 Service Unavailable
-"
-        ));
+        assert!(ping_ok("HTTP/1.1 200 OK\r\nApi-Version: 1.50\r\n"));
+        assert!(!ping_ok("HTTP/1.1 500 Internal Server Error\r\n"));
+        assert!(!ping_ok("HTTP/1.1 503 Service Unavailable\r\n"));
         assert!(!ping_ok(""));
         assert!(!ping_ok("OK 200"));
     }
@@ -416,6 +402,8 @@ pub(crate) mod fake {
         import_fail: Option<(i32, String)>,
         import_delay: Duration,
         timeouts: Vec<Duration>,
+        panic_on_boot: bool,
+        unregister_delay: Duration,
     }
 
     #[derive(Debug, Default)]
@@ -484,6 +472,17 @@ pub(crate) mod fake {
             self
         }
 
+        /// The next `-d <distro> --exec true` panics once (a crashed setup).
+        pub(crate) fn panic_once_on_boot(&self) -> &Self {
+            self.lock().panic_on_boot = true;
+            self
+        }
+
+        pub(crate) fn unregister_delay(&self, delay: Duration) -> &Self {
+            self.lock().unregister_delay = delay;
+            self
+        }
+
         /// Timeouts passed to `run_timeout`, in call order.
         pub(crate) fn timeouts(&self) -> Vec<Duration> {
             self.lock().timeouts.clone()
@@ -533,8 +532,17 @@ pub(crate) mod fake {
 
         async fn run_timeout(&self, args: &[&str], timeout: Duration) -> io::Result<WslOutput> {
             self.lock().timeouts.push(timeout);
+            if matches!(args, ["-d", _, "--exec", "true"]) {
+                let mut state = self.lock();
+                if std::mem::take(&mut state.panic_on_boot) {
+                    drop(state);
+                    panic!("injected panic");
+                }
+            }
             let delay = if args.first() == Some(&"--import") {
                 self.lock().import_delay
+            } else if args.first() == Some(&"--unregister") {
+                self.lock().unregister_delay
             } else {
                 Duration::ZERO
             };
@@ -559,10 +567,7 @@ pub(crate) mod fake {
                 .push(args.iter().map(|arg| (*arg).to_owned()).collect());
             match args {
                 ["--list", "--running", "--quiet"] => {
-                    let names = state.running.join(
-                        "
-",
-                    );
+                    let names = state.running.join("\n");
                     output(i32::from(names.is_empty()), &utf16le(&names), b"")
                 }
                 ["-d", _, "--exec", "sh", "-c", script] if *script == PROBE_SCRIPT => {
@@ -646,9 +651,7 @@ pub(crate) mod fake {
             state.pinged.push(distro.to_owned());
             let up = pop_or_last(&mut state.pings, false);
             Ok(if up {
-                "HTTP/1.1 200 OK
-"
-                .to_owned()
+                "HTTP/1.1 200 OK\r\n".to_owned()
             } else {
                 String::new()
             })

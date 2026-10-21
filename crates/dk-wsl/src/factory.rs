@@ -497,10 +497,21 @@ impl EngineFactory for WslDistroFactory {
         }
     }
 
-    /// *Start Docker* only for a distro last seen as installed-not-running; any other distro
-    /// keeps the generic *Start & connect* (ENG-106, ENG-148).
+    /// *Start Docker* for a distro last seen as installed-not-running, and for the engine
+    /// Dockering set up (ENG-163, it states the lifetime); any other distro keeps the generic
+    /// *Start & connect* (ENG-106, ENG-148).
     fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> {
         let (distro, _) = distro_endpoint(cfg).ok()?;
+        if distro.eq_ignore_ascii_case(setup::DISTRO) {
+            return Some(StartPrompt {
+                title: "The Docker engine isn't running".into(),
+                body: format!(
+                    "{} Start it to see your containers and images.",
+                    setup::LIFETIME
+                ),
+                action_label: START_DOCKER_LABEL.into(),
+            });
+        }
         self.remembered_not_running(distro).then(|| StartPrompt {
             title: format!("Docker isn't running in {distro}"),
             body: START_DOCKER_BODY.into(),
@@ -889,6 +900,40 @@ mod tests {
         assert_eq!(factory.start_prompt(&found[1].config), None);
         // Only the running distro was probed (ENG-106).
         assert_eq!(fake.calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn eng_163_dockering_engine_start_prompt_states_lifetime() {
+        let fake = FakeWsl::new(&[]);
+        let factory = factory(&fake);
+        let found = factory
+            .discover_from(vec![distro("Dockering-Engine", false)])
+            .await;
+        assert_eq!(found[0].initial_state, Some(EngineState::Stopped));
+        let prompt = factory.start_prompt(&found[0].config).expect("prompt");
+        assert_eq!(prompt.title, "The Docker engine isn't running");
+        assert!(prompt.body.contains(setup::LIFETIME), "{}", prompt.body);
+        assert_eq!(prompt.action_label, "Start Docker");
+        // Same text through the exact name, without any remembered state.
+        let again = self::factory(&fake);
+        assert_eq!(
+            again.start_prompt(&discovered_config("dockering-engine")),
+            Some(prompt)
+        );
+    }
+
+    #[tokio::test]
+    async fn eng_163_other_distros_keep_default_prompt() {
+        let fake = FakeWsl::new(&[]);
+        let factory = factory(&fake);
+        let found = factory
+            .discover_from(vec![
+                distro("Idle", false),
+                distro("dockering-engine2", false),
+            ])
+            .await;
+        assert_eq!(factory.start_prompt(&found[0].config), None);
+        assert_eq!(factory.start_prompt(&found[1].config), None);
     }
 
     #[tokio::test]

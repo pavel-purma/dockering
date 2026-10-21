@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use dk_core::EngineError;
+use tokio::sync::OwnedMutexGuard;
 
 use super::SetupEnv;
 use super::messages as m;
@@ -52,6 +53,14 @@ pub(crate) fn import_hit_existing(output: &WslOutput) -> bool {
         token_of(output).as_deref(),
         Some("ERROR_ALREADY_EXISTS" | "ERROR_FILE_EXISTS")
     )
+}
+
+/// True if a failed import still created our disk: only then is the registered name ours.
+pub(crate) async fn created_our_disk(env: &SetupEnv, output: &WslOutput) -> bool {
+    !import_hit_existing(output)
+        && tokio::fs::try_exists(env.distro_dir().join("ext4.vhdx"))
+            .await
+            .unwrap_or(false)
 }
 
 /// Which `wsl.exe` call failed.
@@ -176,12 +185,15 @@ pub(crate) struct CleanupGuard {
     pub(crate) state: Arc<RunState>,
     pub(crate) files: Vec<PathBuf>,
     pub(crate) done: bool,
+    /// The run's turn at the gate; it is released only once the cleanup has finished.
+    pub(crate) turn: Option<OwnedMutexGuard<()>>,
 }
 
 impl CleanupGuard {
     pub(crate) async fn finish(&mut self, keep_distro: bool) {
         self.done = true;
         cleanup(&self.env, &self.state, &self.files, keep_distro).await;
+        self.turn = None;
     }
 }
 
@@ -192,7 +204,11 @@ impl Drop for CleanupGuard {
         }
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let (env, state, files) = (self.env.clone(), self.state.clone(), self.files.clone());
-            handle.spawn(async move { cleanup(&env, &state, &files, false).await });
+            let turn = self.turn.take();
+            handle.spawn(async move {
+                cleanup(&env, &state, &files, false).await;
+                drop(turn);
+            });
         }
     }
 }

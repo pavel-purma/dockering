@@ -585,6 +585,28 @@ async fn eng_152_digest_mismatch_deletes_and_fails() {
 }
 
 #[tokio::test]
+async fn eng_152_file_changed_after_download_is_refused() {
+    let body = payload();
+    let h = Harness::with(Reply::Body(body.clone()), both(&body), |env| {
+        env.after_verify = Some(Box::new(|file| {
+            let mut bytes = std::fs::read(file).unwrap();
+            bytes[7] ^= 0xff;
+            std::fs::write(file, bytes).unwrap();
+        }));
+    })
+    .await;
+    let items = drain(h.setup("alpine")).await;
+    assert!(
+        last_error(&items)
+            .to_string()
+            .contains("The download failed verification."),
+    );
+    assert_eq!(h.imports(), 0);
+    assert_eq!(h.unregisters(), 0);
+    assert!(h.cache_files().is_empty(), "{:?}", h.cache_files());
+}
+
+#[tokio::test]
 async fn eng_152_streams_to_disk_not_memory() {
     let body = payload();
     let half = body.len() / 2;
@@ -1020,7 +1042,14 @@ async fn eng_155_failure_before_import_never_unregisters() {
 #[tokio::test]
 async fn eng_155_failed_import_is_unregistered_only_for_this_run() {
     let body = payload();
-    let h = Harness::new(Reply::Body(body.clone()), both(&body)).await;
+    let h = Harness::with(Reply::Body(body.clone()), both(&body), |env| {
+        let target = env.distro_dir();
+        env.after_verify = Some(Box::new(move |_| {
+            std::fs::create_dir_all(&target).unwrap();
+            std::fs::write(target.join("ext4.vhdx"), b"disk").unwrap();
+        }));
+    })
+    .await;
     h.fake.import_fails(
         -1,
         "Importing the distribution failed.\nError code: Wsl/Service/RegisterDistro/WSL_E_IMPORT_FAILED",
@@ -1032,6 +1061,79 @@ async fn eng_155_failed_import_is_unregistered_only_for_this_run() {
             .contains("couldn't be created")
     );
     wait_until("the unregister", || h.unregisters() == 1).await;
+}
+
+/// Gives the hook a handle on the fake once the harness exists.
+type FakeSlot = Arc<std::sync::Mutex<Option<Arc<FakeWsl>>>>;
+
+fn slot_of(h: &Harness, slot: &FakeSlot) {
+    *slot.lock().unwrap() = Some(h.fake.clone());
+}
+
+const UNPARSABLE: &str = "Something went wrong in a language nobody parses.";
+
+#[tokio::test]
+async fn eng_155_failed_import_without_our_vhdx_never_unregisters() {
+    let body = payload();
+    let slot = FakeSlot::default();
+    let hook_slot = slot.clone();
+    let h = Harness::with(Reply::Body(body.clone()), both(&body), move |env| {
+        // Someone else registers the name after the preflight, before our import.
+        env.after_verify = Some(Box::new(move |_| {
+            if let Some(fake) = hook_slot.lock().unwrap().as_ref() {
+                fake.distros(&[DISTRO]);
+            }
+        }));
+    })
+    .await;
+    slot_of(&h, &slot);
+    h.fake.import_fails(-1, UNPARSABLE);
+    let items = drain(h.setup("alpine")).await;
+    assert!(last_error(&items).to_string().contains("couldn't create"));
+    assert_eq!(h.imports(), 1);
+    // Let a (wrong) cleanup task run before asserting.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(h.unregisters(), 0);
+    assert_eq!(
+        h.fake.registered(),
+        [DISTRO],
+        "the other distro is untouched"
+    );
+    assert!(h.cache_files().is_empty());
+}
+
+#[tokio::test]
+async fn eng_155_failed_import_with_our_vhdx_is_unregistered() {
+    let body = payload();
+    let h = Harness::with(Reply::Body(body.clone()), both(&body), |env| {
+        let target = env.distro_dir();
+        env.after_verify = Some(Box::new(move |_| {
+            std::fs::create_dir_all(&target).unwrap();
+            std::fs::write(target.join("ext4.vhdx"), b"disk").unwrap();
+        }));
+    })
+    .await;
+    h.fake.import_fails(-1, UNPARSABLE);
+    let items = drain(h.setup("alpine")).await;
+    assert!(last_error(&items).to_string().contains("couldn't create"));
+    wait_until("the unregister", || h.unregisters() == 1).await;
+}
+
+#[tokio::test]
+async fn eng_155_panic_cleanup_holds_the_gate() {
+    let body = payload();
+    let h = Harness::new(Reply::Body(body.clone()), both(&body)).await;
+    h.fake.panic_once_on_boot();
+    h.fake.unregister_delay(Duration::from_millis(300));
+    // The first run panics after the import; its stream just ends.
+    let first = drain(h.setup("alpine")).await;
+    assert!(!matches!(first.last(), Some(Ok(SetupProgress::Done(_)))));
+    // The second run must wait for the cleanup: the name is free again when it starts.
+    let second = drain(h.setup("alpine")).await;
+    done_config(&second);
+    assert_eq!(h.unregisters(), 1, "exactly one unregister");
+    assert_eq!(h.imports(), 2);
+    assert_eq!(h.fake.registered(), [DISTRO]);
 }
 
 // ── ENG-156 guidance ─────────────────────────────────────────────────────────────────────

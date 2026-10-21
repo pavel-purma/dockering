@@ -9,7 +9,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use reqwest::Url;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::pins::Pin;
 
@@ -195,7 +195,22 @@ pub(crate) async fn fetch(
         on_progress(received);
     }
     file.flush().await.map_err(FetchError::Io)?;
+    file.sync_all().await.map_err(FetchError::Io)?;
     Ok(Fetched {
         sha256: hex::encode(hasher.finalize()),
     })
+}
+
+/// SHA-256 of a file on disk, streamed in 1 MiB chunks.
+pub(crate) async fn sha256_file(path: &Path) -> std::io::Result<String> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let read = file.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(hex::encode(hasher.finalize()));
+        }
+        hasher.update(&buffer[..read]);
+    }
 }
