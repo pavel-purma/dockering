@@ -38,7 +38,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Charts | `AreaChart`, `LineChart` | |
 | Raw JSON | `Input` in multi-line code-editor mode, read-only, with JSON syntax highlighting (`highlighter`) | |
 | Confirmations | `Dialog` / `AlertDialog` | |
-| Toasts | `Notification` via `window.push_notification` | |
+| Toasts | Dockering's own `ToastHost` (`ui/toast.rs`) | Not GPUI Kit's `Notification`: it has no countdown and can't be moved below the content (SHL-003) |
 | Empty states | `empty` component + illustration icon + CTA | |
 | Loading | `Skeleton` rows (first load), `Spinner` in header (refresh) | |
 | Status bar | `StatusBar` | Left: state dot and label │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, and the transient update item (*Downloading…*, and *Checking…* or the error during a manual check; UPD-008). The state dot is the only colour: never a route note or coloured chip (ENG-108, ENG-110) |
@@ -77,7 +77,7 @@ pub enum Route {
 
 - **SHL-001** Every action that calls the engine shows progress within 100 ms. A row action replaces its button with a `Spinner`; a page action shows a header spinner.
 - **SHL-002** Destructive actions (delete, prune, force-remove, kill) need a confirmation `Dialog`. The dialog says what will be removed and reclaimed. "Don't ask again" is offered only for delete of a *stopped* container.
-- **SHL-003** Errors from actions → error `Notification` with the engine message and a *Copy details* action. Errors from list loads → inline panel with *Retry*.
+- **SHL-003** Errors from actions → error toast with the engine message and a *Copy details* action. Toasts stack in the bottom-right corner of the content area, above the status bar, so they stay clear of the selection actions at the top. An autohiding toast (5 s once it has settled) shows a bar along its bottom edge that drains until it hides; hovering or focusing the stack pauses it. Error toasts and toasts with an action never hide by themselves. Errors from list loads → inline panel with *Retry*.
 - **SHL-004** Lists keep the previous data while refreshing. Rows never flicker or reorder unless the sort key changed.
 - **SHL-005** Selection: checkbox column plus `Shift`/`Ctrl`-click. The checkbox column's header is a select-all checkbox: checked when every visible row is; a click selects every visible row, or clears a non-empty selection. While any row is checked (even one), the selection actions (count, page-specific actions such as Start/Stop, Delete, Clear) replace the summary counts in the page header's second row, left of the page `⋮`, and act on exactly the checked rows. Networks has no checkbox column.
 - **SHL-026** Row actions column: fixed icon slots in the same position on every row: start/stop (toggles with state), restart, then `⋮` (the row menu with every other action, including Delete). Pages without start/restart show only the slots they have, ending with `⋮`. Delete is never an inline row button: it's reached through `⋮`, the context menu, `Del`, or the selection actions.

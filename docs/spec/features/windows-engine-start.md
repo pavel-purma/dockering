@@ -1,0 +1,92 @@
+# Feature: Start and set up engines on Windows
+
+- **Status:** planned (2026-10-21)
+- **Requirement prefix:** ENG (ENG-142…162), REL (REL-088…089)
+- **Plan:** [windows-engine-start](../../plan/features/windows-engine-start.md) (draft)
+- **Builds on:** `StartPrompt` / `EngineFactory::start` / `HubHandle::start_engine` (ENG-106, ENG-137…141, [engines.md](engines.md)); WSL distro backend ([20 §4](../20-engine-backends.md)).
+
+## User stories
+
+- As a Windows user whose Docker Desktop is stopped, I open Dockering and see *Docker Desktop isn't running* with a **Start Docker Desktop** button. One click starts it and Dockering connects when it answers.
+- As a user with Docker installed inside an Ubuntu WSL distro whose `dockerd` isn't running, I get **Start Docker** for that distro.
+- As a user with no engine at all, I can choose **Set up Docker in WSL**, pick **Ubuntu** (familiar, larger) or **Alpine** (smallest, fastest), and Dockering creates a dedicated distro that runs Docker Engine, then connects to it. I need no Docker Desktop licence and no admin rights.
+
+## Scope and boundaries
+
+All of this is Windows-only (`#[cfg(windows)]` inside the backend crates). Every crate still compiles on every OS, and on Linux and macOS no start or setup offer exists. The UI stays generic: it renders a factory's `StartPrompt` and `SetupOffer` and never branches on `EngineKind` (ENG-030).
+
+Product-scope change (this feature edits [00-product.md](../00-product.md)): Dockering still never installs or manages **Docker Desktop**, WSL itself, or VM resources. The one exception is a single dedicated Docker-in-WSL distro that the user explicitly asks for (ENG-150…156).
+
+## Requirements
+
+### Starting an installed engine
+
+| ID | Requirement |
+|---|---|
+| ENG-142 | **Windows only, factory-driven.** Start and setup logic MUST live in the backend crates (`dk-engine-docker` for Docker Desktop, `dk-wsl` for WSL), behind `#[cfg(windows)]`, and reach the UI only through `EngineFactory` (`start_prompt`, `start`, `stopped_after`, `setup_offers`, `setup`) and `HubHandle`. No new `EngineKind`. No UI code names Docker Desktop, `wsl.exe`, `dockerd` or any process (ENG-030). |
+| ENG-143 | **Installed but stopped Docker Desktop is listed.** Discovery (ENG-006) MUST find Docker Desktop without spawning a process: `HKLM` then `HKCU` `Software\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop` → `InstallLocation`, and `<InstallLocation>\Docker Desktop.exe` exists. When that is true and `\\.\pipe\docker_engine` is absent, the engine `docker-desktop` (same id and endpoint as today) MUST be listed with `initial_state = Stopped` and a `StartPrompt`, instead of being left out (which today leads to the first-run page). When the pipe appears later, the engine connects as before. |
+| ENG-144 | **Start Docker Desktop.** The *Start* action (ENG-106) for that engine MUST run `docker desktop start --timeout 120` using the `docker.exe` under `<InstallLocation>\resources\bin\` (never a `PATH` lookup), argv only, no console window, as a background child. If the `desktop` plugin isn't there (older Docker Desktop), it MUST fall back to spawning `<InstallLocation>\Docker Desktop.exe` detached and polling the engine pipe (`GET /_ping`) for up to 120 s. It runs only on an explicit user action: never from discovery, probes, retries or reconnects (ENG-106). |
+| ENG-145 | **Status, Resource Saver.** The factory MUST read `docker desktop status --format json` (`Status`, `PauseType`) only after a connect failure or inside the start action, never from the background probe (ENG-020: the probe stays a pipe ping). Resource Saver is not *Stopped*: Docker Desktop wakes it on the first request, so Dockering connects with the normal flow and a longer first-connect timeout, and offers no start. The exact status values are a spike (W-1). |
+| ENG-146 | **A failed connect can mean "stopped".** `EngineFactory::stopped_after(cfg, &error) -> bool` (async, default `false`) lets a backend say that a failed connect really means "not started yet". When it returns `true` and the factory offers a `StartPrompt`, the hub sets `Stopped` instead of `Failed`: no failure log above `debug`, no retry countdown, no backoff (generalises ENG-137, which becomes the WSLC implementation of this hook). Docker Desktop: `Unreachable` or a 500 *daemon not running* answer, and `docker desktop status` is not `running`/Resource Saver. If Desktop says `running` and the engine still fails, the state stays `Failed` with today's hint. |
+| ENG-147 | **Start progress and result.** While starting, the engine state is `Connecting` and the button shows *Starting…* (ENG-137 UX). On success the hub connects and activates exactly as for *Start & connect* (ENG-106). On failure or timeout the state is `Failed` with the child's message and a hint. Docker Desktop often waits for the user (first-run licence, sign-in, an update); the hint says to finish that in the Docker Desktop window. |
+| ENG-148 | **Docker installed in a running distro but not running.** The WSL distro probe script (spec 20 §4.2) gains exit code `14` = `installed-not-running` (`dockerd` or the `docker` client present, socket absent). `no-docker` (11) keeps today's hiding. A distro classified `installed-not-running` MUST be listed, not hidden, with `initial_state = Stopped` and a `StartPrompt` (*Docker isn't running in <distro>*, action *Start Docker*), and `connect` against such a distro reports it through `stopped_after` (ENG-146) rather than the `no_docker_error`. |
+| ENG-149 | **Start dockerd in a distro.** The *Start* action for that state MUST run, as root with no password and no shell string, `wsl.exe -d <distro> -u root --exec <fixed argv>`: `systemctl start docker` when systemd is PID 1 (`/run/systemd/system` exists), otherwise `service docker start`. It then waits up to 30 s for the socket and returns an error with the command's message otherwise. It never edits the distro (no config files, no package installs). Explicit user action only. The commands are a spike (W-2). Permission and group problems keep their existing hints (spec 20 §4.3). |
+
+### Setting up a dedicated Docker-in-WSL distro
+
+| ID | Requirement |
+|---|---|
+| ENG-150 | **Setup offers.** `EngineFactory::setup_offers() -> Vec<SetupOffer { id, title, body, action_label, choices }>` (default empty; `choices` is described in ENG-162). The WSL factory offers *Set up Docker in WSL* only on Windows, when WSL 2 is present (non-COM version check, spec 20 §5.2 style), and when the distro `dockering-engine` does not exist yet. The hub exposes `HubHandle::setup_offers()`. The offer appears on the first-run / no-engine page (ENG-158), as the command-palette entry *Set up Docker in WSL…* (ENG-159) and as a button in Settings → Engines. |
+| ENG-151 | **Consent.** Choosing the offer opens a `Dialog` with the image choice (ENG-162) and states, in plain words: what will be created (a Linux distro named `dockering-engine` that runs Docker Engine), the download size **of the selected image** and the host it comes from (`github.com`), the disk it needs and its folder (`%LOCALAPPDATA%\Dockering\wsl\dockering-engine`), that no administrator rights are needed, and that Dockering will not touch other distros. Buttons *Set up* and *Cancel*. *Set up* is disabled until the user has explicitly chosen an image (ENG-162), and the dialog says so (*Choose an image to continue*). Until then the size lines show no figures. Changing the selection updates the sizes in the text. Nothing is downloaded or created before *Set up*. |
+| ENG-152 | **Root filesystem.** The distro is imported from a Dockering-built root filesystem published as a GitHub release asset, one per image choice (ENG-162) and CPU architecture (x86_64, aarch64): **Alpine** = Alpine Linux + Docker Engine, containerd, runc, the Docker client and `socat`; **Ubuntu** = the current Ubuntu LTS WSL root filesystem + `docker-ce` from Docker's apt repository, versions pinned at build time (REL-088). For each (choice, architecture) the HTTPS URL, byte size and **SHA-256** are constants in `dk-wsl`, selected by the offered `choice_id` (never user input, NFR-022: an unknown `choice_id` is rejected). It is downloaded to `%LOCALAPPDATA%\Dockering\cache\`, hashed while streaming, and imported only if the digest equals the pinned one; a mismatch deletes the file and fails the setup. The cached file is deleted afterwards. |
+| ENG-153 | **Provisioning steps.** (1) preflight: WSL 2 present, distro name free, ≥ 2 GiB free on the target volume; (2) download; (3) verify; (4) `wsl.exe --import dockering-engine <dir> <file> --version 2`; (5) first start of the distro; `dockerd` is started by the image itself, through a boot command in `/etc/wsl.conf` (Alpine) or `systemd=true` plus the enabled `docker.service` (Ubuntu); (6) wait up to 60 s for the socket and a successful `GET /_ping` through the bridge; (7) register the engine with the hub (`add_engine`, id `wsl-dockering-engine`, the same config discovery would produce) and activate it. Registering it directly is allowed under ENG-113 because it follows an explicit user action. From then on it is an ordinary WSL distro engine (ENG-007…012). No administrator rights, no reboot. |
+| ENG-154 | **Progress and cancel.** `EngineFactory::setup(offer_id, choice_id) -> EngineStream<SetupProgress>` reports `{ phase, fraction: Option<f32>, detail }` (phases: *Checking*, *Downloading*, *Verifying*, *Importing*, *Starting Docker*). The UI shows a progress dialog or panel and keeps the task handle on the shell; one setup runs at a time and a stale-result guard (setup id) drops late events. *Cancel* is available throughout. Cancelling before step 4 deletes the cache file. Cancelling or failing after step 4 runs `wsl.exe --unregister dockering-engine`, but only because this same run created it (ENG-155). |
+| ENG-155 | **Safety.** Dockering MUST NOT overwrite, import over, terminate or unregister any distro it didn't create in the current setup run. Both images use the same distro name, so at most one Dockering-created distro exists. If `dockering-engine` already exists, no setup is offered: the engine is simply listed (and startable) like any other distro. Removing the engine later is manual in v1 (`wsl --unregister dockering-engine`); an in-app *Remove* is deferred. |
+| ENG-156 | **Preconditions are guidance, not failures.** WSL missing or too old, virtualisation off, not enough disk space, no network, a digest mismatch and an import error each show a clear message with a hint (*run `wsl --update`*, *free space on C:*, *check your connection*). Dockering never installs or updates WSL, enables Windows features or asks for elevation (`wsl --install` needs administrator rights and a reboot). |
+| ENG-157 | **Nothing else is installed.** Dockering never installs Docker Desktop, WSL itself or a package inside a user's own distro. |
+
+### UX, keyboard and safety
+
+| ID | Requirement |
+|---|---|
+| ENG-158 | **No-engine and no-connected-engine page.** The first-run page (ENG-111) and the *no active engine* page MUST list every startable `Stopped` engine with its `StartPrompt` (activating it and running the start action on click) and every `SetupOffer`, before the generic guidance. When exactly one engine is the default or the last-used one (ENG-103), it keeps opening on its own start page as today. |
+| ENG-159 | **Keyboard.** *Start engine* (existing, ENG-141) and the new *Set up Docker in WSL…* are command-palette entries with no default chord (KBD-075). The primary action on the first-run page takes the initial focus; every list row and the dialog are Tab-reachable; the dialog takes initial focus on the image choice (a radio group with nothing selected: `↑`/`↓` move and select, `Space` selects the focused entry), `Tab` then reaches *Set up* (only once an image is selected; a disabled button is skipped) and *Cancel*, and `Esc` cancels; focus returns to the invoking control or the page after the dialog, the start action and the setup (KBD-002); no focus ring (KBD-003). The palette entry is hidden when there is no offer. |
+| ENG-160 | **Security and privacy.** Child processes get argv vectors; `docker.exe` and `Docker Desktop.exe` come from the registry install path, not `PATH`; the distro name and the in-distro commands are constants (NFR-022). No secrets are logged (NFR-020). The only network access is one HTTPS GET of the pinned asset from `github.com` / its release-asset host, after consent (NFR-023 exception, ENG-151). |
+| ENG-161 | **Wording.** User-visible text names the engine and the action, not the mechanism: *Docker Desktop isn't running*, *Start Docker Desktop*, *Docker isn't running in Ubuntu-22.04*, *Start Docker*, *Set up Docker in WSL*. The image names *Ubuntu* and *Alpine* are user-facing choices and MAY appear in the choice labels; the UI takes them from the factory's `SetupChoice` data and hard-codes none (ENG-030). No `wsl.exe`, `docker desktop start`, rootfs or COM/CLI words in chrome. Consent-dialog facts (size, folder) are allowed; process-level detail appears only in Diagnostics and logs. |
+
+| ENG-162 | **Image choice.** A `SetupOffer` carries `choices: Vec<SetupChoice { id, label, description, download_bytes, disk_bytes }>`; the WSL factory returns two, in this order: **Ubuntu** (*Familiar Ubuntu LTS. Larger download.*) and **Alpine** (*Smallest and fastest to set up.*), omitting a choice that has no published asset for this CPU architecture (none left = no offer; a single remaining choice is still shown and still has to be picked). **The user MUST choose explicitly:** the consent dialog (ENG-151) shows the choices as a radio group with **nothing selected**, no *Recommended* badge or other ranking, and *Set up* is disabled until one is selected. There is no default and no remembered choice: the dialog opens unselected every time, and `choice_id` is never `None` for an offer that has choices. A `run_setup` call without a valid `choice_id` is rejected by the factory (the hub never picks one). `HubHandle::run_setup(offer_id, choice_id)` runs the selected image. The choice only selects the root filesystem (ENG-152) and, through it, the in-distro boot mechanism; every other step, name, folder, safety rule and cleanup is identical (ENG-153…155). The choice is offered only when no Dockering-created distro exists (ENG-155); it is not a way to add a second one. |
+
+### Release engineering
+
+| ID | Requirement |
+|---|---|
+| REL-088 | **Engine root filesystem build.** A workflow `engine-rootfs.yml` builds the **Alpine** and the **Ubuntu** Docker root filesystems for x86_64 and aarch64 (a 2 × 2 matrix) reproducibly from pinned package versions (Ubuntu from Canonical's official WSL root filesystem plus Docker's apt repository at pinned versions), runs a smoke test for every matrix cell (import into WSL on the `wsl` runner, `dockerd` answers `/_ping`, `hello-world` runs, a published port and a bind mount work), publishes the assets under their own release tag `rootfs-<n>` (independent of app releases) with a checksum file and a build attestation, and ships the licence notices of its contents (REL-002). |
+| REL-089 | **Pin check.** CI MUST fail if the URL, size and SHA-256 constants in `dk-wsl` (one set per choice and architecture) don't match a published `rootfs-<n>` asset, and the release workflow MUST refuse to publish an app whose pinned asset is missing. |
+
+## UI
+
+Reuses the start page of SHL-013 (title, body, primary button) for *Docker Desktop isn't running* and *Docker isn't running in <distro>*. New: a list of *Available to start* and *Set up* rows on the first-run page; a *Set up Docker in WSL* dialog (consent) and a progress view with *Cancel*.
+
+```
+        Docker Desktop isn't running
+   Start it to see your containers and images.
+
+        [ Start Docker Desktop ]   [ Switch engine ]
+```
+
+## Contract usage
+
+`EngineFactory::{stopped_after, setup_offers, setup}` (new, default no-ops), `EngineFactory::{start_prompt, start}` (existing), `HubHandle::{start_engine, setup_offers, run_setup}`, `SetupOffer`, `SetupProgress`. No `Engine` trait change and no new `Capability`: start and setup are connection-level, not operations on a connected engine (same reasoning as ENG-139).
+
+## Acceptance
+
+Manual, on Windows (release checklist):
+
+- [ ] Docker Desktop stopped → open Dockering → *Start Docker Desktop* → it connects without any other click (Docker Desktop 4.37+; also an older version without the `desktop` plugin).
+- [ ] An Ubuntu distro with Docker installed and stopped → *Start Docker* → connects.
+- [ ] A machine with WSL but no Docker → *Set up Docker in WSL* → choose Alpine, then repeat on a clean machine choosing Ubuntu → progress → the engine is active and `hello-world` runs from the Run dialog; cancel mid-download leaves no distro and no cache file.
+- [ ] On Linux and macOS no start or setup offer appears.
+
+## Verification
+
+Filled in when implemented. See the plan's test table.

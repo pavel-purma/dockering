@@ -103,9 +103,9 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-071 | Dialogs (`Dialog`/`AlertDialog`): initial focus goes to the **safest** control. That's *Cancel* for destructive confirmations and the first field for forms. Focus is trapped inside while open. `Enter` submits (except in multi-line inputs), and `Esc` cancels. Destructive confirms require an explicit `Tab` to the destructive button, or `Mod+Enter`. |
 | KBD-072 | Forms (Run image, Create volume, Add engine, Settings): every field is reachable in visual order. Repeating rows (ports, env, mounts) support `Mod+Shift+Enter` (add row) and `Mod+Shift+Backspace` (remove row), which don't collide with text-editing chords or with `Mod+Enter` = submit/confirm (KBD-071). Each row also has Tab-reachable add/remove buttons. File pickers open with `Enter` / `Space`. |
 | KBD-073 | Menus, popovers, and selects: arrows navigate, `Enter` / `Space` activate, `Esc` closes and returns focus to the invoker. Type-ahead selects items. |
-| KBD-074 | Notifications (toasts): `Mod+Shift+N` focuses the newest notification. Its actions (*Copy details*, *Retry*) are Tab-reachable, and `Esc` dismisses it. Toasts with actions don't auto-dismiss while focused. |
+| KBD-074 | Notifications (toasts): `Mod+Shift+N` focuses the toast stack. Its actions (*Copy details*, *Retry*) are Tab-reachable, and `Esc` dismisses the newest toast and returns focus to where it was. Nothing counts down while the stack is focused or hovered. |
 | KBD-076 | Shared Windows/macOS/Linux updater actions: *Check for Updates*, *Restart to Update* (a *Ready* or *Installed, restart* offer only), *View Release Notes* (also the *Download* offer), command-palette entries with no default chord. The title-bar update button (UPD-015) is reachable through `F6`/Tab and runs the same actions, as do the Settings offer buttons; when updates are hard-disabled the actions are suppressed. No focus ring; focus returns to the title bar or the Settings owner when the button disappears. macOS also has *Check for Updates…* in the app menu (SHL-020). *(Planned revision 2026-10-18: UPD-009/015/017, shared retention/Settings and the title-bar move.)* |
-| KBD-075 | Engine switcher and Settings → Engines: all engine actions (Rescan, Test, Start / Start & connect, Set as default, Remove) are reachable with Tab, arrows, and `Enter`. *Rescan engines* and *Make active engine the default* are also command-palette entries with no default chord. |
+| KBD-075 | Engine switcher and Settings → Engines: all engine actions (Rescan, Test, Start / Start & connect, Set as default, Remove) are reachable with Tab, arrows, and `Enter`. *Rescan engines* and *Make active engine the default* are also command-palette entries with no default chord. *Planned 2026-10-21 (ENG-159):* *Set up Docker in WSL…* is a palette entry with no default chord, hidden when there is no offer; the first-run page's start and setup rows and the setup dialog are Tab-reachable with the focus rules of ENG-159. |
 
 ## Customisation (v1 scope)
 
@@ -173,7 +173,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 | KBD-071 | `kbd_071_destructive_confirm_focuses_cancel`, `kbd_071_escape_cancels_add_engine_and_restores_focus`, `kbd_071_add_engine_from_palette_escape_closes` |
 | KBD-072 | `img_005_run_dialog_runs_and_navigates`, `vol_004_create_volume_with_n` (`Mod+Shift+Enter` / `Mod+Shift+Backspace`) |
 | KBD-073 | `kbd_036_shift_f10_opens_row_menu`, `kbd_039_group_by_none_flattens` (arrows + `Enter` in `KeyMenu`) |
-| KBD-074 | `FocusNotifications` (`Mod+Shift+N`) bound and in the palette; **no test** |
+| KBD-074 | `FocusNotifications` (`Mod+Shift+N`) and `toast::Dismiss` (`Esc` in the stack) bound; `kbd_074_toasts_with_actions_or_errors_stay`, `kbd_074_newest_skips_toasts_that_are_leaving`. Focus and `Esc` themselves: **no test** |
 | KBD-075 | `kbd_021_switcher_filter_arrows_enter`, `eng_104_*` Settings view tests, `a11y_tab_walk_reaches_all_interactive_settings` |
 | KBD-082…084 | `keymap_no_conflicts_{windows,macos,linux}`, `keymap_no_altgr_chords`, `keymap_no_reserved_chords`, `kbd_083_altgr_and_option_text_is_not_encoded` |
 | KBD-085 | `keymap::install` twin bindings (`use_key_equivalents`); see Known gaps |
@@ -192,7 +192,7 @@ No digit chords are used for sorting (layout safety, KBD-083).
 ## Known gaps (v1)
 
 - **KBD-085 (Linux):** GPUI has no keyboard mapper on Linux, so digit and punctuation chords match logical keys only. On layouts whose top row isn't digits (for example Czech), `Mod+1…4`, `Mod+/`, `Mod+,`, and zoom don't fire. The command palette (`Mod+Shift+P`) always works. macOS support is partial (the system key-equivalent table).
-- **KBD-074:** `Mod+Shift+N` focuses the newest toast by walking the Tab order, because GPUI Kit keeps the toast stack's focus handle private. There's no automated test. It's in the KBD-090 walkthrough.
+- **KBD-074:** focusing the stack and `Esc` have no automated test. They're in the KBD-090 walkthrough.
 - **KBD-092:** the Tab-walk reachability test covers the Settings page only. Lists, detail pages, and dialogs are covered by the KBD-091 keystroke tests and the KBD-090 walkthrough, not by a Tab-walk harness. *Follow-up:* extend `tab_walk` to every page.
 - **KBD-090:** the keyboard-only walkthrough is a release-checklist item. Still due on macOS, on Linux, and with a Czech layout. No recorded checklist run exists in the repo yet.
 - **KBD-073:** type-ahead inside menus and selects is whatever GPUI Kit `PopupMenu`/`Select` provide. It isn't verified.

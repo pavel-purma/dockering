@@ -371,10 +371,25 @@ pub trait EngineFactory: Send + Sync + 'static {
     fn config_schema(&self) -> EngineConfigSchema;
     /// Planned (ENG-139): what to tell the user while an engine is `Stopped`. Default `None`.
     fn start_prompt(&self, cfg: &EngineConfig) -> Option<StartPrompt> { None }
+    /// Planned (ENG-146): true when a failed `connect` really means "not started yet", so the
+    /// hub sets `Stopped` (with the factory's `start_prompt`) instead of `Failed`. Default `false`.
+    async fn stopped_after(&self, cfg: &EngineConfig, error: &EngineError) -> bool { false }
+    /// Planned (ENG-150): offers that create an engine from nothing (Windows: one dedicated Docker-in-WSL distro, with an Ubuntu or Alpine image choice, ENG-162). Default empty.
+    async fn setup_offers(&self) -> Vec<SetupOffer> { vec![] }
+    /// Planned (ENG-153/154): runs one offer after the user consented; the stream reports progress and ends with the registered engine config.
+    fn setup(&self, offer_id: &str, choice_id: &str) -> EngineStream<SetupProgress> { /* default: unsupported */ }
 }
 
 /// Planned (ENG-139). Plain user-facing text; no transport or process names (ENG-030).
 pub struct StartPrompt { pub title: String, pub body: String, pub action_label: String }
+
+/// Planned (ENG-150). `body` is the consent text (ENG-151).
+pub struct SetupOffer { pub id: String, pub title: String, pub body: String, pub action_label: String, pub choices: Vec<SetupChoice> }
+/// Planned (ENG-162). Plain text from the factory; the UI renders a radio group and names no image itself.
+pub struct SetupChoice { pub id: String, pub label: String, pub description: String, pub download_bytes: u64, pub disk_bytes: u64 }  // no default: the user always chooses
+/// Planned (ENG-154). `Done` carries the engine config for the hub to register.
+pub enum SetupProgress { Phase { phase: SetupPhase, fraction: Option<f32>, detail: String }, Done(EngineConfig) }
+pub enum SetupPhase { Checking, Downloading, Verifying, Importing, Starting }
 ```
 
 | Factory | Crate | OS (cfg) | v1 |

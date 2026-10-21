@@ -7,7 +7,7 @@ engines. It feels like Docker Desktop's core screens (Containers, Images, Volume
 the rest: no AI assistant, no extensions marketplace, no Scout, no Kubernetes, no Builds view,
 no account sign-in.
 
-It is a **client only**. It does not install, bundle, or manage a container engine. It
+It is a **client first**. It does not bundle or manage a container engine, apart from the narrow Windows start/setup exceptions in the non-goals below. It
 connects to engines that already exist:
 
 - a local Docker Engine (Linux socket, macOS Docker Desktop/Colima/OrbStack socket, Windows named pipe),
@@ -45,7 +45,7 @@ macOS 15+ and Vulkan on Linux are requirements inherited from GPUI Kit
 
 ## Non-goals (v1)
 
-- Managing engine installation or VM resources (CPU and RAM limits of Docker Desktop or WSL).
+- Managing engine installation or VM resources (CPU and RAM limits of Docker Desktop or WSL). *Exceptions, Windows only (2026-10-21, [windows-engine-start](features/windows-engine-start.md)):* Dockering MAY **start** an installed Docker Desktop or a stopped Docker in an existing WSL distro, and, on the user's explicit request, **set up one dedicated Docker-in-WSL distro** (`dockering-engine`) from a pinned, checksummed root filesystem. It never installs Docker Desktop or WSL itself, never changes WSL or Windows features, and never asks for administrator rights.
 - Kubernetes, Swarm, Docker Scout or vulnerability scanning, extensions, AI features, Builds view, Docker Hub browsing, sign-in.
 - Running Compose files (`docker compose up`). Grouping is **read-only**, based on labels. Group-level start, stop, and delete act on the member containers through the engine API.
 - File browser inside containers or volumes. This MAY come post-v1.

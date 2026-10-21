@@ -12,7 +12,6 @@ use gpui_kit::component::ThemeStyled as _;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
-use gpui_kit::component::notification::Notification;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::sidebar::Sidebar;
 use gpui_kit::component::spinner::Spinner;
@@ -52,6 +51,7 @@ use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
+use crate::ui::toast::{self, Toast, ToastAction, ToastHost};
 
 /// The mounted page.
 pub enum ShellPage {
@@ -181,6 +181,8 @@ pub struct AppShell {
     /// *Restart to update* (UPD-007); separate so a container action can't cancel the quit.
     update_task: Option<Task<()>>,
     store_subs: Vec<Subscription>,
+    /// The window's toast stack (SHL-003), drawn over the content region.
+    toasts: Entity<ToastHost>,
     _subs: Vec<Subscription>,
 }
 
@@ -291,6 +293,7 @@ impl AppShell {
             action_task: None,
             update_task: None,
             store_subs: Vec::new(),
+            toasts: toast::install(cx),
             _subs: subs,
         };
         if let Some(updates) = UpdateStore::global(cx) {
@@ -299,18 +302,16 @@ impl AppShell {
         }
         // UPD-008: first launch after an update.
         if AppState::hub(cx).take_previous_version().is_some() {
-            window.defer(cx, |window, cx| {
+            window.defer(cx, |_, cx| {
                 let version = dk_hub::app_version();
                 let url = s::release_notes_url(version);
-                let note = Notification::info(s::upd_updated(version)).action(move |_, _, _| {
-                    let url = url.clone();
-                    Button::new("upd-whats-new")
-                        .small()
-                        .ghost()
-                        .label(s::UPD_WHATS_NEW)
-                        .on_click(move |_, _, cx| cx.open_url(&url))
-                });
-                window.push_notification(note, cx);
+                let note = Toast::info(s::upd_updated(version)).action(
+                    ToastAction::new("upd-whats-new", s::UPD_WHATS_NEW, move |_, cx| {
+                        cx.open_url(&url)
+                    })
+                    .ghost(),
+                );
+                toast::push(note, cx);
             });
         }
         let active = this.engines.read(cx).active_id().cloned();
@@ -1096,24 +1097,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // KBD-074: focus the newest toast (its action buttons are Tab-reachable).
-        // GPUI Kit keeps the toast stack focus handle private; it is a Tab stop rendered
-        // outside our root, so walk the Tab order until focus leaves the shell.
-        if window.notifications(cx).is_empty() {
-            return;
-        }
-        let start = window.focused(cx);
-        for _ in 0..256 {
-            window.focus_next(cx);
-            match window.focused(cx) {
-                Some(_) if !self.root_focus.contains_focused(window, cx) => return,
-                f if f == start => break,
-                _ => {}
-            }
-        }
-        if let Some(h) = start {
-            window.focus(&h, cx);
-        }
+        // KBD-074: focus the toast stack (its action buttons are Tab-reachable).
+        self.toasts
+            .update(cx, |toasts, cx| toasts.focus_newest(window, cx));
     }
 
     fn on_quit(&mut self, _: &Quit, _: &mut Window, cx: &mut Context<Self>) {
@@ -2199,35 +2185,40 @@ impl Render for AppShell {
             )
             .child(title)
             .child(
-                h_flex().flex_1().min_h_0().child(sidebar).child(
-                    div()
-                        .id("content-region")
-                        .track_focus(&self.content_focus)
-                        // A click on a page's empty chrome (header background, padding)
-                        // would focus this region, which sits above the page's action
-                        // handlers: header controls (filters, group-by, selection actions)
-                        // don't take focus, so their actions would dispatch past the page.
-                        // Focus the page instead, also when focus is already stranded here.
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                let stranded = window.focused(cx).is_none_or(|f| {
-                                    f == this.content_focus || f == this.root_focus
-                                });
-                                if window.default_prevented() && !stranded {
-                                    return;
-                                }
-                                if let Some(h) = this.page.primary_focus(cx) {
-                                    window.prevent_default();
-                                    window.focus(&h, cx);
-                                }
-                            }),
-                        )
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .child(content),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(sidebar)
+                    .child(
+                        div()
+                            .id("content-region")
+                            .track_focus(&self.content_focus)
+                            // A click on a page's empty chrome (header background, padding)
+                            // would focus this region, which sits above the page's action
+                            // handlers: header controls (filters, group-by, selection actions)
+                            // don't take focus, so their actions would dispatch past the page.
+                            // Focus the page instead, also when focus is already stranded here.
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    let stranded = window.focused(cx).is_none_or(|f| {
+                                        f == this.content_focus || f == this.root_focus
+                                    });
+                                    if window.default_prevented() && !stranded {
+                                        return;
+                                    }
+                                    if let Some(h) = this.page.primary_focus(cx) {
+                                        window.prevent_default();
+                                        window.focus(&h, cx);
+                                    }
+                                }),
+                            )
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .child(content),
+                    )
+                    .child(self.toasts.clone()),
             )
             .child(status)
             .children(overlay)

@@ -245,25 +245,34 @@ impl<D: ListDelegate> Adapter<D> {
         cx: &mut Context<TableState<Self>>,
     ) -> AnyElement {
         let table = cx.entity().downgrade();
+        let toggle = {
+            let table = table.clone();
+            let key = key.clone();
+            move |cx: &mut App| {
+                // Don't let the click open the row too.
+                cx.stop_propagation();
+                table
+                    .update(cx, |t, cx| {
+                        t.delegate_mut().model.toggle_selected(&key);
+                        cx.notify();
+                    })
+                    .ok();
+            }
+        };
+        let toggle_cell = toggle.clone();
+        // The whole cell toggles, so a click next to the box doesn't open the row.
         h_flex()
+            .id(("row-select", row_ix))
             .size_full()
             .items_center()
             .pl(CHECKBOX_INSET)
+            .on_click(move |_, _, cx| toggle_cell(cx))
             .child(
                 Checkbox::new(("row-check", row_ix))
                     .debug_selector(move || format!("row-check-{row_ix}"))
                     .checked(selected)
                     .tab_stop(false)
-                    .on_click(move |_, _, cx| {
-                        // Don't let the click open the row too.
-                        cx.stop_propagation();
-                        table
-                            .update(cx, |t, cx| {
-                                t.delegate_mut().model.toggle_selected(&key);
-                                cx.notify();
-                            })
-                            .ok();
-                    }),
+                    .on_click(move |_, _, cx| toggle(cx)),
             )
             .into_any_element()
     }

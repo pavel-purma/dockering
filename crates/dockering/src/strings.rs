@@ -288,6 +288,7 @@ pub const CMD_NEXT_REGION: &str = "Focus next region";
 pub const CMD_PREV_REGION: &str = "Focus previous region";
 pub const CMD_TOGGLE_THEME: &str = "Toggle light/dark theme";
 pub const CMD_FOCUS_NOTIFICATIONS: &str = "Focus notifications";
+pub const CMD_DISMISS_TOAST: &str = "Dismiss notification";
 pub const CMD_ZOOM_IN: &str = "Zoom in";
 pub const CMD_ZOOM_OUT: &str = "Zoom out";
 pub const CMD_ZOOM_RESET: &str = "Reset zoom";

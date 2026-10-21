@@ -65,6 +65,8 @@ pub mod ctx {
     pub const TERMINAL: &str = dk_terminal::KEY_CONTEXT;
     pub const DIALOG: &str = "Dialog";
     pub const PALETTE: &str = "Palette";
+    /// The toast stack (KBD-074).
+    pub const TOASTS: &str = "Toasts";
     /// Engine switcher popover.
     pub const SWITCHER: &str = "EngineSwitcher";
     /// The ListTable quick-find field.
@@ -405,6 +407,14 @@ pub static DEFAULT_KEYMAP: &[BindingSpec] = &[
     ),
     // ── palette / reference / notifications ─────────────────────────────────────────────
     b!("escape", palette::Dismiss, PAL, Os::ALL, s::CANCEL, Dialogs),
+    b!(
+        "escape",
+        toast::Dismiss,
+        Some(TOASTS),
+        Os::ALL,
+        s::CMD_DISMISS_TOAST,
+        Global
+    ),
     // ── lists (ListTable, table focused) ────────────────────────────────────────────────
     b!(
         "up",
