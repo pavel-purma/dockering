@@ -8,6 +8,7 @@
 //! Linux program run through `--exec` is passed through unchanged (UTF-8).
 
 use std::io;
+use std::time::Duration;
 
 use async_trait::async_trait;
 
@@ -26,10 +27,19 @@ pub(crate) trait Wsl: std::fmt::Debug + Send + Sync + 'static {
     }
     /// Runs `wsl.exe <args>` to completion (argv vector, no shell, timeout).
     async fn run(&self, args: &[&str]) -> io::Result<WslOutput>;
+    /// [`Wsl::run`] with a caller-chosen timeout (an import takes seconds to minutes).
+    async fn run_timeout(&self, args: &[&str], timeout: Duration) -> io::Result<WslOutput>;
+    /// Every registered distro name, whatever its WSL version or state.
+    async fn registered_distros(&self) -> io::Result<Vec<String>>;
+    /// The installed WSL package version (spec 20 §5.2, no COM); `None` when it isn't there.
+    async fn wsl_version(&self) -> Option<WslVersion>;
     /// Raw HTTP reply to `GET /_ping` sent through `tool` inside `distro`, the path the bridge
     /// uses (ENG-149). Empty when Docker doesn't answer.
     async fn ping(&self, distro: &str, tool: BridgeTool) -> io::Result<String>;
 }
+
+/// `(major, minor, patch, build)` of the WSL package.
+pub(crate) type WslVersion = (u32, u32, u32, u32);
 
 /// The real `wsl.exe` (Windows only; elsewhere every call is `Unsupported`).
 #[derive(Debug, Default, Clone, Copy)]
@@ -40,6 +50,21 @@ pub(crate) struct RealWsl;
 impl Wsl for RealWsl {
     async fn run(&self, args: &[&str]) -> io::Result<WslOutput> {
         platform::run(args).await
+    }
+
+    async fn run_timeout(&self, args: &[&str], timeout: Duration) -> io::Result<WslOutput> {
+        platform::run_timeout(args, timeout).await
+    }
+
+    async fn registered_distros(&self) -> io::Result<Vec<String>> {
+        platform::registered_distros().await
+    }
+
+    async fn wsl_version(&self) -> Option<WslVersion> {
+        tokio::task::spawn_blocking(crate::win32::wsl_service_version)
+            .await
+            .ok()
+            .flatten()
     }
 
     async fn ping(&self, distro: &str, tool: BridgeTool) -> io::Result<String> {
@@ -56,6 +81,18 @@ impl Wsl for RealWsl {
 
     async fn run(&self, _args: &[&str]) -> io::Result<WslOutput> {
         Err(not_windows())
+    }
+
+    async fn run_timeout(&self, _args: &[&str], _timeout: Duration) -> io::Result<WslOutput> {
+        Err(not_windows())
+    }
+
+    async fn registered_distros(&self) -> io::Result<Vec<String>> {
+        Err(not_windows())
+    }
+
+    async fn wsl_version(&self) -> Option<WslVersion> {
+        None
     }
 
     async fn ping(&self, _distro: &str, _tool: BridgeTool) -> io::Result<String> {
@@ -196,6 +233,10 @@ Connection: close
 
     /// Runs `wsl.exe <args>` to completion with the 10 s timeout.
     pub(crate) async fn run(args: &[&str]) -> io::Result<WslOutput> {
+        run_timeout(args, WSL_TIMEOUT).await
+    }
+
+    pub(crate) async fn run_timeout(args: &[&str], limit: Duration) -> io::Result<WslOutput> {
         let mut command = command();
         command
             .args(args)
@@ -203,10 +244,10 @@ Connection: close
             .stderr(Stdio::piped());
 
         // Dropping the `output()` future on timeout drops the child, which kills it (kill_on_drop).
-        let output = timeout(WSL_TIMEOUT, command.output()).await.map_err(|_| {
+        let output = timeout(limit, command.output()).await.map_err(|_| {
             io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!("wsl.exe timed out after {} s", WSL_TIMEOUT.as_secs()),
+                format!("wsl.exe timed out after {} s", limit.as_secs()),
             )
         })??;
 
@@ -215,6 +256,27 @@ Connection: close
             stdout: output.stdout,
             stderr: output.stderr,
         })
+    }
+
+    /// Registry first; `wsl.exe --list --quiet` (every distro, UTF-16LE) when it isn't readable.
+    pub(crate) async fn registered_distros() -> io::Result<Vec<String>> {
+        let registry = tokio::task::spawn_blocking(crate::win32::enumerate_distros)
+            .await
+            .map_err(io::Error::other)?;
+        match registry {
+            Ok(entries) => Ok(entries.into_iter().map(|entry| entry.name).collect()),
+            Err(error) => {
+                tracing::debug!(%error, "WSL registry enumeration failed; using wsl.exe --list --quiet");
+                let output = run(&["--list", "--quiet"]).await?;
+                let text = super::decode_utf16le(&output.stdout);
+                Ok(text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|name| crate::discovery::validate_distro_name(name))
+                    .map(str::to_owned)
+                    .collect())
+            }
+        }
     }
 
     /// One `GET /_ping` through `docker system dial-stdio` (or socat) in `distro`.
@@ -330,10 +392,11 @@ pub(crate) mod fake {
     use std::collections::VecDeque;
     use std::io;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use async_trait::async_trait;
 
-    use super::{Wsl, WslOutput};
+    use super::{Wsl, WslOutput, WslVersion};
     use crate::discovery::{BridgeTool, PROBE_SCRIPT};
 
     #[derive(Debug, Default)]
@@ -345,6 +408,14 @@ pub(crate) mod fake {
         start_exit: i32,
         calls: Vec<Vec<String>>,
         pinged: Vec<String>,
+        /// Registered distro names (`--import` adds, `--unregister` removes).
+        distros: Vec<String>,
+        version: Option<WslVersion>,
+        unsupported: bool,
+        /// Scripted reply of `--import` (code, UTF-16LE message); `None` = success.
+        import_fail: Option<(i32, String)>,
+        import_delay: Duration,
+        timeouts: Vec<Duration>,
     }
 
     #[derive(Debug, Default)]
@@ -375,8 +446,47 @@ pub(crate) mod fake {
     impl FakeWsl {
         pub(crate) fn new(running: &[&str]) -> Arc<Self> {
             let fake = Self::default();
-            fake.lock().running = running.iter().map(|name| (*name).to_owned()).collect();
+            {
+                let mut state = fake.lock();
+                state.running = running.iter().map(|name| (*name).to_owned()).collect();
+                state.version = Some((3, 0, 3, 0));
+            }
             Arc::new(fake)
+        }
+
+        pub(crate) fn distros(&self, names: &[&str]) -> &Self {
+            self.lock().distros = names.iter().map(|name| (*name).to_owned()).collect();
+            self
+        }
+
+        pub(crate) fn registered(&self) -> Vec<String> {
+            self.lock().distros.clone()
+        }
+
+        pub(crate) fn version(&self, version: Option<WslVersion>) -> &Self {
+            self.lock().version = version;
+            self
+        }
+
+        pub(crate) fn unsupported(&self) -> &Self {
+            self.lock().unsupported = true;
+            self
+        }
+
+        /// `--import` fails with `code` and `message` (printed as UTF-16LE, like `wsl.exe`).
+        pub(crate) fn import_fails(&self, code: i32, message: &str) -> &Self {
+            self.lock().import_fail = Some((code, message.to_owned()));
+            self
+        }
+
+        pub(crate) fn import_delay(&self, delay: Duration) -> &Self {
+            self.lock().import_delay = delay;
+            self
+        }
+
+        /// Timeouts passed to `run_timeout`, in call order.
+        pub(crate) fn timeouts(&self) -> Vec<Duration> {
+            self.lock().timeouts.clone()
         }
 
         fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -417,6 +527,31 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl Wsl for FakeWsl {
+        fn supported(&self) -> bool {
+            !self.lock().unsupported
+        }
+
+        async fn run_timeout(&self, args: &[&str], timeout: Duration) -> io::Result<WslOutput> {
+            self.lock().timeouts.push(timeout);
+            let delay = if args.first() == Some(&"--import") {
+                self.lock().import_delay
+            } else {
+                Duration::ZERO
+            };
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            self.run(args).await
+        }
+
+        async fn registered_distros(&self) -> io::Result<Vec<String>> {
+            Ok(self.lock().distros.clone())
+        }
+
+        async fn wsl_version(&self) -> Option<WslVersion> {
+            self.lock().version
+        }
+
         async fn run(&self, args: &[&str]) -> io::Result<WslOutput> {
             let mut state = self.lock();
             state
@@ -476,6 +611,30 @@ pub(crate) mod fake {
                     )
                 }
                 ["-d", _, "--exec", "true"] => output(0, b"", b""),
+                ["--import", name, _, _, "--version", "2"] => {
+                    if let Some((code, message)) = state.import_fail.clone() {
+                        return output(code, &utf16le(&message), b"");
+                    }
+                    state.distros.push((*name).to_owned());
+                    output(0, &utf16le("The operation completed successfully."), b"")
+                }
+                ["--unregister", name] => {
+                    let before = state.distros.len();
+                    state
+                        .distros
+                        .retain(|existing| !existing.eq_ignore_ascii_case(name));
+                    if state.distros.len() == before {
+                        output(
+                            -1,
+                            &utf16le(
+                                "There is no distribution with the supplied name. Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND",
+                            ),
+                            b"",
+                        )
+                    } else {
+                        output(0, &utf16le("The operation completed successfully."), b"")
+                    }
+                }
                 _ => Err(io::Error::other(format!(
                     "unexpected wsl.exe argv: {args:?}"
                 ))),

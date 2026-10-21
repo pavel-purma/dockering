@@ -19,6 +19,7 @@ use dk_core::{
 
 use crate::discovery::{self, BridgeTool, ProbeClassification};
 use crate::runner::{self, RealWsl, Wsl};
+use crate::setup::{self, SetupEnv};
 
 /// Hint for a stopped distro (ENG-106).
 pub(crate) const STOPPED_HINT: &str = "Distro stopped — use Start & connect";
@@ -42,6 +43,8 @@ pub struct WslDistroFactory {
     not_running: Mutex<HashSet<String>>,
     ready_poll: Duration,
     ready_timeout: Duration,
+    /// ENG-150: `None` where setup can't exist (not Windows, no `%LOCALAPPDATA%`).
+    setup: Option<Arc<SetupEnv>>,
 }
 
 impl Default for WslDistroFactory {
@@ -52,7 +55,10 @@ impl Default for WslDistroFactory {
 
 impl WslDistroFactory {
     pub fn new() -> Self {
-        Self::with_wsl(Arc::new(RealWsl))
+        let wsl: Arc<dyn Wsl> = Arc::new(RealWsl);
+        let mut factory = Self::with_wsl(wsl.clone());
+        factory.setup = SetupEnv::production(wsl).map(Arc::new);
+        factory
     }
 
     pub(crate) fn with_wsl(wsl: Arc<dyn Wsl>) -> Self {
@@ -61,7 +67,14 @@ impl WslDistroFactory {
             not_running: Mutex::new(HashSet::new()),
             ready_poll: READY_POLL,
             ready_timeout: READY_TIMEOUT,
+            setup: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_setup(mut self, env: SetupEnv) -> Self {
+        self.setup = Some(Arc::new(env));
+        self
     }
 
     fn remember(&self, distro: &str, not_running: bool) {
@@ -524,6 +537,18 @@ impl EngineFactory for WslDistroFactory {
             self.remember(distro, true);
         }
         ours
+    }
+
+    async fn setup_offers(&self) -> Vec<dk_core::SetupOffer> {
+        setup::offers(self.setup.as_deref()).await
+    }
+
+    fn setup(
+        &self,
+        offer_id: &str,
+        choice_id: &str,
+    ) -> dk_core::EngineStream<dk_core::SetupProgress> {
+        setup::start(self.setup.clone(), offer_id, choice_id)
     }
 }
 
