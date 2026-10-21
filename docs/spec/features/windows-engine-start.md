@@ -1,6 +1,6 @@
 # Feature: Start and set up engines on Windows
 
-- **Status:** in-progress (plan approved 2026-10-21)
+- **Status:** in-progress (plan approved 2026-10-21; code complete and reviewed 2026-10-22; the setup offer stays dormant until the first root-filesystem release is published, and the manual checks below are open)
 - **Requirement prefix:** ENG (ENG-142…164), REL (REL-088…089)
 - **Plan:** [windows-engine-start](../../plan/features/windows-engine-start.md) (draft)
 - **Builds on:** `StartPrompt` / `EngineFactory::start` / `HubHandle::start_engine` (ENG-106, ENG-137…141, [engines.md](engines.md)); WSL distro backend ([20 §4](../20-engine-backends.md)).
@@ -85,13 +85,51 @@ Reuses the start page of SHL-013 (title, body, primary button) for *Docker Deskt
 
 Manual, on Windows (release checklist):
 
-- [ ] Docker Desktop stopped → open Dockering → *Start Docker Desktop* → it connects without any other click (Docker Desktop 4.37+; also an older version without the `desktop` plugin).
+- [ ] Docker Desktop stopped → open Dockering → *Start Docker Desktop* → it connects without any other click (Docker Desktop 4.95 was the version available for the spike; the `desktop` plugin is present by 4.70; also an older version without the plugin).
 - [ ] An Ubuntu distro with Docker installed and stopped → *Start Docker* → connects.
 - [ ] A machine with WSL but no Docker → *Set up Docker in WSL* → choose Alpine, then repeat on a clean machine choosing Ubuntu → progress → the engine is active and `hello-world` runs from the Run dialog; cancel mid-download leaves no distro and no cache file.
 - [ ] On Linux and macOS no start or setup offer appears.
 - [ ] Docker Desktop **stopped** (not observed in the 2026-10-21 spike, which ran against a running instance): `docker desktop status` values for stopped, starting, paused and Resource Saver; the two pipes are absent when stopped (ENG-143 depends on it); what `docker desktop start --timeout 120` does while stopped (window, time until `/_ping`, exit codes, a licence or sign-in wait); the `Docker Desktop.exe` fallback; a per-user install (HKCU).
 - [ ] A setup distro: the Start Menu and Windows Terminal show no `dockering-engine` entry (ENG-164, Ubuntu image); containers stop about 15 s after Dockering closes, as the consent text says (ENG-163).
 
-## Verification
+## Verification (2026-10-22)
 
-Filled in when implemented. See the plan's test table.
+Code complete and reviewed on `feat/windows-engine-start`; workspace `cargo test` 1,130 passed, 0 failed, 28 ignored (opt-in live tests). Test names carry the requirement ID; module prefixes omitted.
+
+| ID | Tests |
+|---|---|
+| ENG-142 | `eng_142_defaults_offer_nothing`, `eng_142_non_windows_stub_offers_nothing`, `eng_142_default_factory_offers_nothing_while_no_pin_is_published`; `eng_162_ui_hardcodes_no_image_names` (source grep, UI crate) |
+| ENG-143 | `eng_143_installed_desktop_without_pipe_is_stopped`, `eng_143_no_install_lists_nothing`, `eng_143_pipe_present_keeps_current_behaviour`, `eng_143_discovery_spawns_no_process`, `eng_143_prompt_wording_has_no_process_words` |
+| ENG-144 | `eng_144_start_runs_one_fixed_argv`, `eng_144_missing_plugin_falls_back_to_exe_and_polls`, `eng_144_missing_docker_exe_falls_back_too`, `eng_144_never_started_by_connect_probe_or_retry`, `eng_144_start_refuses_other_engines` (fake `docker.exe`) |
+| ENG-145 | `eng_145_status_json_parsing`, `eng_145_status_edge_cases`, `eng_145_resource_saver_is_not_stopped`, `eng_145_probe_never_runs_status` |
+| ENG-146 | `eng_146_stopped_after_true_is_stopped_not_failed`, `eng_146_false_stays_failed` (hub); `eng_146_distro_stopped_after_only_for_not_running`, `eng_146_is_not_running_error_both_ways` (WSL); ENG-137 `eng_137_*` stay green through the hook |
+| ENG-147 | `eng_147_start_failure_is_failed_with_hint`, `eng_147_start_timeout_hint`, `eng_147_failed_start_shows_error_hint_retry_and_start` |
+| ENG-148 | `eng_148_exit_14_listed_stopped`, `eng_148_exit_11_still_hidden`, `eng_148_discovery_lists_not_running_distro_with_start_docker_prompt`, `eng_148_connect_reports_not_running_through_stopped_after`; `eng_148_probe_script_classifies_spike_states` (script text and exit mapping only); `eng_148_live_probe_reports_available_on_ubuntu` (ignored, read-only) |
+| ENG-149 | `eng_149_systemd_and_service_argv`, `eng_149_waits_for_ping_not_socket_then_errors`, `eng_149_never_edits_the_distro`, `eng_149_not_offered_without_dockerd`, `eng_149_ping_ok_needs_a_200_status_line` |
+| ENG-150 | `eng_150_offer_only_on_windows_with_wsl2_and_no_distro`, `eng_150_offer_hidden_when_distro_exists`, `eng_150_offer_hidden_when_no_pin_is_published`, `eng_150_setup_offers_collects_from_factories` (hub) |
+| ENG-151 | `eng_151_nothing_happens_before_consent`, `eng_163_consent_text_states_lifetime` |
+| ENG-152 | `eng_152_each_choice_and_arch_has_its_own_pin`, `eng_152_production_pins_are_consistent`, `eng_152_placeholder_digest_can_never_be_published`, `eng_152_unpublished_pin_refused`, `eng_152_unknown_choice_id_rejected`, `eng_152_constants_are_not_user_input`, `eng_152_digest_mismatch_deletes_and_fails`, `eng_152_size_bound_aborts_oversized_body`, `eng_152_streams_to_disk_not_memory`, `eng_152_file_changed_after_download_is_refused` |
+| ENG-153 | `eng_153_happy_path_with_fakes` (argv sequence, `Done` config equals the discovery config), `eng_153_free_space_uses_per_image_figure`, `eng_153_parent_dir_is_created_leaf_must_be_empty` |
+| ENG-154 | `eng_154_progress_phases_in_order`, `eng_154_cancel_before_import_removes_cache`, `eng_154_cancel_after_import_unregisters_own_distro`, `eng_154_cancel_during_import_still_unregisters`, `eng_154_failure_after_import_unregisters`, `eng_154_failed_unregister_is_retried`; hub `eng_154_run_setup_streams_progress_and_registers_engine`, `eng_154_dropping_the_stream_cancels`, `eng_154_second_setup_while_running_is_conflict`; UI `eng_154_cancel_drops_the_setup`, `eng_154_stale_setup_events_dropped`, `eng_154_progress_view_shows_phase_detail_and_bar`, `eng_154_done_closes_activates_and_notifies`, `eng_154_error_shows_message_and_hint_with_try_again`, `eng_154_conflict_is_an_info_message` |
+| ENG-155 | `eng_155_existing_distro_never_touched`, `eng_155_distro_appearing_during_download_is_never_imported_over`, `eng_155_failure_before_import_never_unregisters`, `eng_155_failed_import_without_our_vhdx_never_unregisters`, `eng_155_failed_import_with_our_vhdx_is_unregistered`, `eng_155_failed_import_is_unregistered_only_for_this_run`, `eng_155_panic_cleanup_holds_the_gate`, `eng_155_never_touches_other_distros` |
+| ENG-156 | `eng_156_import_error_codes_map_to_hints`, `eng_156_missing_wsl_gives_hint_no_install`, `eng_156_low_disk_message`, `eng_156_import_error_end_to_end_cleans_up_only_this_run` |
+| ENG-157 | by construction (no install code exists); no dedicated test |
+| ENG-158 | `eng_158_first_run_lists_startable_and_offers`, `eng_158_start_row_activates_and_starts` |
+| ENG-159 | `eng_159_palette_entries_and_focus`, `kbd_075_settings_engines_lists_setup_offers`, `a11y_every_action_bound_or_in_palette` (existing) |
+| ENG-160 | `eng_160_argv_only_and_registry_paths`, `eng_160_argv_only_and_https_only`, `eng_160_https_and_host_allowlist`, `eng_160_production_client_is_https_only`, `eng_160_errors_never_carry_the_url` |
+| ENG-161 | `eng_161_strings_have_no_mechanism_words`, `eng_143_prompt_wording_has_no_process_words` |
+| ENG-162 | `eng_162_dialog_opens_with_nothing_selected`, `eng_162_set_up_disabled_until_a_choice_is_made`, `eng_162_single_choice_must_still_be_picked`, `eng_162_no_choice_is_remembered_between_opens`, `eng_162_no_recommended_marker`, `eng_162_consent_sizes_follow_selection`, `eng_162_radio_keyboard_and_focus`, `eng_162_unknown_choice_id_rejected_before_factory`, `eng_162_missing_offer_rejected` |
+| ENG-163 | `eng_163_consent_text_states_lifetime`, `eng_163_dockering_engine_start_prompt_states_lifetime`, `eng_163_other_distros_keep_default_prompt` |
+| ENG-164 | the build script writes the file and `tools/engine-rootfs/smoke.ps1` asserts no Start Menu shortcut or Terminal profile; run by hand on both x86_64 images while the build was developed, not yet in CI on the `wsl` runner |
+| REL-088 | `test_rel_088_*` (16 Python tests over the workflow and the scripts, `scripts/tests/test_engine_rootfs.py`); both x86_64 images built and smoke-tested locally; the workflow itself has not run on GitHub |
+| REL-089 | `rel_089_*` in `xtask` (offline shape and Rust-table checks, the `--online` comparison against a recorded release, literal and `concat!` tables) |
+
+## Known gaps
+
+- **The setup offer is dormant.** All four image pins (Ubuntu and Alpine, x86_64 and aarch64) are `published: false` with placeholder digests, so no *Set up Docker in WSL* offer is shown by this build. It turns on when someone publishes `rootfs-<n>` with the workflow, fills in the real size and SHA-256 and flips the markers (steps in `tools/engine-rootfs/pins.toml` and [docs/engine-rootfs.md](../../engine-rootfs.md)). Until the same change removes `--allow-unpublished` from `ci.yml` and `release.yml`, REL-089 verifies nothing.
+- **Docker Desktop's stopped, starting, paused and Resource Saver states were never observed** (spike W-1 ran against a running instance); the code treats anything other than a parsed `running` as not running. The per-user (HKCU) install key and a real old Docker Desktop without the `desktop` plugin are untested. The start path is verified only against a fake `docker.exe`.
+- **ARM64:** the aarch64 images are built but not smoke-tested and stay unpublished; no setup offer on ARM64.
+- **Non-Windows compilation** of the new code is reviewed by hand; the Linux and macOS CI legs are its first real check (no Linux C compiler on the development machine).
+- `eng_148_probe_script_classifies_spike_states` checks the script text and the exit mapping, not the 19 distro states (those were verified by hand in the spike).
+- The live setup test `setup_live` and the self-hosted smoke job have not been run.
+- No screenshots of the four new UI states exist (the repo has no screenshot harness): capture them by hand from `--demo` with a faked offer.
