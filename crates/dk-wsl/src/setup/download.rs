@@ -57,8 +57,7 @@ pub(crate) struct Source {
 
 fn user_agent() -> String {
     format!(
-        "Dockering/{} ({}; {})",
-        env!("CARGO_PKG_VERSION"),
+        "Dockering ({}; {})",
         std::env::consts::OS,
         std::env::consts::ARCH
     )
