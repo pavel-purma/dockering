@@ -41,6 +41,8 @@ mod view_tests_m6;
 #[cfg(test)]
 mod view_tests_settings;
 #[cfg(test)]
+mod view_tests_setup;
+#[cfg(test)]
 mod view_tests_start;
 #[cfg(test)]
 mod view_tests_updates;

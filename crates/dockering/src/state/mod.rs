@@ -4,6 +4,7 @@
 mod engine_list;
 mod engine_store;
 mod resource;
+mod setup;
 mod terminals;
 mod ticker;
 mod updates;
@@ -13,6 +14,7 @@ pub use engine_list::{
 };
 pub use engine_store::{Collection, EngineStore, EngineStoreEvent, LiveMode};
 pub use resource::Resource;
+pub use setup::SetupStore;
 pub use terminals::{ParkedSessions, TerminalRegistry};
 pub use ticker::Ticker;
 pub use updates::{ApplyCall, ManualCheck, UpdateStore};
@@ -92,5 +94,6 @@ impl AppState {
 pub fn install(hub: HubHandle, config: Config, demo: bool, cx: &mut App) {
     cx.set_global(Hub(hub.clone()));
     UpdateStore::install(hub.clone(), cx);
+    SetupStore::install(hub.clone(), cx);
     cx.set_global(AppState { hub, config, demo });
 }

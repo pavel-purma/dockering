@@ -76,6 +76,11 @@ impl SettingsPage {
         let config = AppState::config(cx).clone();
         let mut subs = vec![
             cx.observe(&engine_list, |_, _, cx| cx.notify()),
+            // Setup offers show as buttons in Engines (KBD-075).
+            cx.observe(
+                &crate::state::SetupStore::global(cx).expect("setup store"),
+                |_, _, cx| cx.notify(),
+            ),
             // Settings change elsewhere too (title-bar theme toggle, group-by menu, zoom).
             cx.observe_global_in::<AppState>(window, |this, window, cx| {
                 this.sync_from_config(window, cx);

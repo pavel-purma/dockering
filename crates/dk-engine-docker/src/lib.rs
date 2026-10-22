@@ -4,6 +4,7 @@
 
 mod connect;
 mod containers;
+mod desktop;
 mod discovery;
 mod engine;
 mod errors;
@@ -47,5 +48,42 @@ impl std::fmt::Debug for DockerEngineOptions {
             .field("kind", &self.kind)
             .field("transport", &self.transport)
             .finish_non_exhaustive()
+    }
+}
+
+/// A fake Docker Desktop install and pipes for tests (`DockerFactory::for_desktop_tests`).
+#[cfg(feature = "test-support")]
+#[derive(Debug, Clone)]
+pub struct DesktopTestConfig {
+    /// Folder holding `Docker Desktop.exe` and `resources\bin\docker.exe`.
+    pub install_location: std::path::PathBuf,
+    pub engine_pipe: String,
+    pub linux_pipe: String,
+    pub start_timeout: std::time::Duration,
+    pub poll_timeout: std::time::Duration,
+    pub poll_interval: std::time::Duration,
+    pub status_timeout: std::time::Duration,
+}
+
+#[cfg(feature = "test-support")]
+impl DesktopTestConfig {
+    /// Short timeouts and unique, absent pipe names.
+    pub fn new(install_location: impl Into<std::path::PathBuf>) -> Self {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let tag = format!(
+            "{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        );
+        Self {
+            install_location: install_location.into(),
+            engine_pipe: format!(r"\\.\pipe\dk-test-engine-{tag}"),
+            linux_pipe: format!(r"\\.\pipe\dk-test-linux-{tag}"),
+            start_timeout: std::time::Duration::from_secs(10),
+            poll_timeout: std::time::Duration::from_secs(5),
+            poll_interval: std::time::Duration::from_millis(50),
+            status_timeout: std::time::Duration::from_secs(5),
+        }
     }
 }

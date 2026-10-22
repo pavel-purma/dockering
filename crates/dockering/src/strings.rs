@@ -92,6 +92,48 @@ pub const ADD_ENGINE: &str = "Add engine…";
 pub const NO_ACTIVE_ENGINE_TITLE: &str = "No engine connected";
 pub const NO_ACTIVE_ENGINE_BODY: &str = "Pick an engine to connect to.";
 
+// ── start and set up engines (ENG-146…162) ───────────────────────────────────────────────
+pub const START_SECTION: &str = "Available to start";
+pub const SETUP_SECTION: &str = "Set up an engine";
+pub const CMD_SET_UP_ENGINE: &str = "Set up Docker in WSL…";
+pub const SETUP_CHOOSE_TITLE: &str = "Choose an image";
+pub const SETUP_CHOOSE_HINT: &str = "Choose an image to continue";
+pub const SETUP_BUTTON: &str = "Set up";
+pub const SETUP_TRY_AGAIN: &str = "Try again";
+pub const SETUP_CLOSE: &str = "Close";
+pub const SETUP_PROGRESS: &str = "Setup progress";
+pub const SETUP_FAILED_TITLE: &str = "Setup didn't finish";
+pub const SETUP_ALREADY_RUNNING: &str = "Another setup is already running.";
+pub const SETUP_ENDED: &str = "Setup ended before it finished.";
+pub const SETUP_PHASE_CHECKING: &str = "Checking";
+pub const SETUP_PHASE_DOWNLOADING: &str = "Downloading";
+pub const SETUP_PHASE_VERIFYING: &str = "Verifying";
+pub const SETUP_PHASE_IMPORTING: &str = "Importing";
+pub const SETUP_PHASE_STARTING: &str = "Starting Docker";
+pub fn setup_download_size(size: &str) -> String {
+    format!("Download size: {size}")
+}
+pub fn setup_disk_size(size: &str) -> String {
+    format!("Disk space needed: {size}")
+}
+pub fn setup_phase(phase: dk_core::SetupPhase, fraction: Option<f32>) -> String {
+    use dk_core::SetupPhase as P;
+    let label = match phase {
+        P::Checking => SETUP_PHASE_CHECKING,
+        P::Downloading => SETUP_PHASE_DOWNLOADING,
+        P::Verifying => SETUP_PHASE_VERIFYING,
+        P::Importing => SETUP_PHASE_IMPORTING,
+        P::Starting => SETUP_PHASE_STARTING,
+    };
+    match fraction {
+        Some(f) => format!("{label} · {}%", (f.clamp(0.0, 1.0) * 100.0).round() as u32),
+        None => label.to_owned(),
+    }
+}
+pub fn setup_done(name: &str) -> String {
+    format!("{name} is ready")
+}
+
 // ── status bar ──────────────────────────────────────────────────────────────────────────
 /// What the status bar says about the active engine (ENG-108). It has no field for
 /// `transport_note`: a route note belongs in Settings and Diagnostics (ENG-110).

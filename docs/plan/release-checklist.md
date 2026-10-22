@@ -4,6 +4,21 @@ Use the exact release commit. Record run URLs and tested platforms; leave unavai
 checks unchecked. Each release has its own section, newest first. The `/release` skill copies the
 [template](../../.agents/skills/release/checklist-template.md) for the next release; ticks only what it verified.
 
+## Windows engine start and setup (not executed)
+
+[Spec](../spec/features/windows-engine-start.md), [plan](features/windows-engine-start.md), ENG-142…164 / REL-088, REL-089. Unchecked until a person runs them on the named machine.
+
+- [ ] Docker Desktop **stopped** → open Dockering → the first-run page lists *Docker Desktop isn't running* → *Start Docker Desktop* → it connects without another click. Record: the Docker Desktop version, the time to connect, and whether the Docker Desktop window opened. Not observed in the spike.
+- [ ] Docker Desktop in Resource Saver / paused: no start is offered and the engine connects on first use; record the `docker desktop status` text for stopped, starting, paused and Resource Saver (spike W-1.5) and whether both pipes are absent when stopped.
+- [ ] Docker Desktop installed per user (HKCU) and an old version without the `desktop` plugin: the same start works (exe fallback).
+- [ ] A distro with Docker installed and stopped (`sudo systemctl stop docker`) → *Start Docker* → connects. A distro that only has Docker Desktop's integration is not offered a start.
+- [ ] A machine with WSL and no Docker, once the first `rootfs-<n>` is published and the pins flipped: *Set up Docker in WSL* → the dialog opens with nothing selected and *Set up* disabled → pick Ubuntu → progress → the engine is active and `hello-world` runs; repeat on a clean machine with Alpine. Cancel during the download leaves no distro and no cache file (`%LOCALAPPDATA%\Dockering\cache`); cancel during the import leaves no `dockering-engine`.
+- [ ] After a setup, the Start Menu and Windows Terminal show no `dockering-engine` entry on either image (ENG-164); close Dockering and see the containers stop about 15 s later, matching the consent text; reopen and the page of the stopped engine states the same (ENG-163).
+- [ ] An existing distro named `dockering-engine` (made by hand) is never overwritten or unregistered, and no setup is offered.
+- [ ] Linux and macOS: no start or setup offer appears.
+- [ ] Keyboard only: reach *Start*, *Set up Docker in WSL…* (palette), pick an image with the arrow keys, run and cancel; focus returns to the page. Screenshots of the first-run page with a start row and an offer, the empty dialog, the dialog after a pick and the progress view, in light and dark.
+- [ ] CI: `engine-rootfs.yml` runs once from `main` without `publish` (4 builds, 2 smoke jobs on the `wsl` runner), then with `publish`; remove `--allow-unpublished` from `ci.yml` and `release.yml` in the same PR that flips the pins.
+
 ## Planned updater gates (not executed)
 
 Draft [plan](features/linux-appimage-updates.md), REL-083…087 / UPD-013…017.

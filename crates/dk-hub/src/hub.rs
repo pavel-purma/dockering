@@ -70,6 +70,8 @@ pub struct HubInner {
     pub(crate) shutdown: CancellationToken,
     /// Generation counter for shared upstream entries.
     pub(crate) generation: AtomicU64,
+    /// Set while a `run_setup` stream is alive (one setup at a time, ENG-154).
+    pub(crate) setup_running: AtomicBool,
     #[cfg_attr(not(feature = "updater"), allow(dead_code))]
     pub(crate) demo: bool,
     /// `None` without the `updater` feature or when the HTTP client can't start.
@@ -167,6 +169,7 @@ impl HubInner {
             terminals: terminal::Registry::default(),
             shutdown: CancellationToken::new(),
             generation: AtomicU64::new(1),
+            setup_running: AtomicBool::new(false),
             demo: opts.demo,
             #[cfg(feature = "updater")]
             updates: match (opts.demo, updater) {
@@ -362,7 +365,7 @@ impl HubInner {
     }
 
     /// Inserts or replaces the stored entry for `cfg.id` (manual engine or override).
-    fn store_entry(&self, cfg: EngineConfig) {
+    pub(crate) fn store_entry(&self, cfg: EngineConfig) {
         self.update_config(
             |c| match c.engines.entries.iter_mut().find(|e| e.id == cfg.id) {
                 Some(e) => *e = cfg,

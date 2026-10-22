@@ -499,6 +499,14 @@ jobs:
           done
       - name: Build xtask (no secrets in this step)
         run: cargo build --locked -p xtask
+      # REL-089: refuse to build a release whose pinned engine root filesystem is not exactly what the rootfs-<n> release
+      # published (URL, size and SHA-256 of every asset, compared with the app's Rust pin table). Read-only GitHub API call.
+      # --allow-unpublished only while no rootfs release exists: remove it with the flip described in
+      # tools/engine-rootfs/pins.toml, after which a cell that is not published fails this step.
+      - name: Pinned engine root filesystems are published and match (REL-089)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: target/debug/xtask engine-rootfs-pin-check --online --allow-unpublished
       - name: Verify all twelve distribution assets (REL-017)
         run: target/debug/xtask verify-assets --assets dist
       - name: Update manifest (UPD-002)

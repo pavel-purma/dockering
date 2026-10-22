@@ -25,6 +25,7 @@ pub mod notify;
 pub mod page;
 pub mod scroll;
 pub mod segmented;
+pub mod setup_dialog;
 pub mod states;
 pub mod status_chip;
 pub mod toast;

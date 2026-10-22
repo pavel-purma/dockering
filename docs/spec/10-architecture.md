@@ -149,6 +149,8 @@ impl HubHandle {
     pub fn test_engine(&self, cfg: EngineConfig) -> HubCall<EngineInfo>;
     pub fn rescan(&self) -> HubCall<()>;
     pub fn start_engine(&self, id: &EngineId) -> HubCall<()>; // ENG-106/138 explicit user action only (renamed `start_engine`; rejects engines that are not Stopped/Failed/Disconnected)
+    pub fn setup_offers(&self) -> HubCall<Vec<SetupOffer>>;   // ENG-150: offers of every factory
+    pub fn run_setup(&self, offer_id: &str, choice_id: &str) -> HubStream<Feed<SetupProgress>>; // ENG-154/162: unknown offer/choice rejected before the factory runs; one at a time (second = Conflict); drop = cancel; `Done` = registered (stored, ENG-115) and activated
 
     // ── services owned by the hub ─────────────────────────────────────────────────────────
     pub fn events(&self, engine: &EngineId) -> HubStream<Feed<EngineEvent>>;   // shared, deduped per engine

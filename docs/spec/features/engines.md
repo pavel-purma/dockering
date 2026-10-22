@@ -34,7 +34,7 @@
 
 ### Starting and setting up engines on Windows (planned 2026-10-21)
 
-Docker Desktop, and Docker inside a WSL distro, can be installed but not running. ENG-106 and the `StartPrompt` mechanism (ENG-139) already cover a stopped WSL distro and a missing WSLC session. [ENG-142…162](windows-engine-start.md) extend them to a stopped Docker Desktop and a stopped `dockerd` in a running distro, and add an explicit *Set up Docker in WSL* flow for machines that have no engine. ENG-137 becomes the WSLC case of the generic `stopped_after` hook (ENG-146).
+Docker Desktop, and Docker inside a WSL distro, can be installed but not running. ENG-106 and the `StartPrompt` mechanism (ENG-139) already cover a stopped WSL distro and a missing WSLC session. [ENG-142…164](windows-engine-start.md) extend them to a stopped Docker Desktop and a stopped `dockerd` in a running distro, and add an explicit *Set up Docker in WSL* flow for machines that have no engine. ENG-137 becomes the WSLC case of the generic `stopped_after` hook (ENG-146).
 
 ### WSLC no-session state (planned 2026-10-11)
 

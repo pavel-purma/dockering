@@ -321,11 +321,9 @@ mod platform {
 
     fn child_command(distro: &str, tool: BridgeTool) -> tokio::process::Command {
         let mut command = crate::runner::command();
-        command.args(["-d", distro, "--exec"]);
-        match tool {
-            BridgeTool::Docker => command.args(["docker", "system", "dial-stdio"]),
-            BridgeTool::Socat => command.args(["socat", "-", "UNIX-CONNECT:/var/run/docker.sock"]),
-        };
+        command
+            .args(["-d", distro, "--exec"])
+            .args(tool.dial_argv());
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -427,6 +425,7 @@ mod platform {
 
         use super::PipeBridge;
         use crate::discovery::BridgeTool;
+        use crate::runner::{RealWsl, Wsl};
 
         const LIVE_DISTRO: &str = "Ubuntu-22.04";
 
@@ -491,7 +490,8 @@ mod platform {
 
         async fn distro_has(program: &str) -> bool {
             let script = "command -v \"$0\"";
-            crate::runner::run(["-d", LIVE_DISTRO, "--exec", "sh", "-c", script, program])
+            RealWsl
+                .run(&["-d", LIVE_DISTRO, "--exec", "sh", "-c", script, program])
                 .await
                 .is_ok_and(|output| output.success())
         }

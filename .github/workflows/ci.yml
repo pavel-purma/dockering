@@ -38,7 +38,7 @@ jobs:
           ./actionlint -color
       - name: Smoke test, update test and release evidence scripts, shellcheck and Python syntax (REL-070, REL-078, REL-084, REL-085)
         run: |
-          shellcheck scripts/linux-smoke/*.sh scripts/macos-smoke/*.sh scripts/linux-update/*.sh scripts/release-evidence.sh
+          shellcheck scripts/linux-smoke/*.sh scripts/macos-smoke/*.sh scripts/linux-update/*.sh scripts/release-evidence.sh tools/engine-rootfs/build.sh tools/engine-rootfs/guest/*.sh
           python3 -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"), sys.argv[1])' scripts/linux-smoke/atspi.py
       - name: Script tests (macOS packaging recovery REL-017, release verify step REL-031…034, Linux smoke scripts REL-071)
         run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -48,6 +48,12 @@ jobs:
           $errors = $null
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/verify-release.ps1), [ref]$null, [ref]$errors)
           if ($errors) { $errors | ForEach-Object { Write-Host "::error file=scripts/verify-release.ps1,line=$($_.Extent.StartLineNumber)::$($_.Message)" }; exit 1 }
+      - name: Engine rootfs smoke script parses (REL-088)
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path tools/engine-rootfs/smoke.ps1), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Host "::error file=tools/engine-rootfs/smoke.ps1,line=$($_.Extent.StartLineNumber)::$($_.Message)" }; exit 1 }
       - name: Linux prerequisites (GPUI Kit)
         run: bash scripts/bootstrap.sh
       - uses: dtolnay/rust-toolchain@master
@@ -61,6 +67,10 @@ jobs:
         run: cargo fmt --all --check
       - name: NFR-001 blocking-call check
         run: cargo xtask check-blocking
+      # REL-089, offline: pins.toml is well formed and agrees with the Rust pin table (skipped until that table exists).
+      # --allow-unpublished until the first rootfs-<n> release is published; the flip is described in pins.toml.
+      - name: Engine rootfs pins are consistent (REL-089)
+        run: cargo xtask engine-rootfs-pin-check --allow-unpublished
       - name: Generated icons are up to date (REL-050)
         run: cargo xtask icons --check
       - name: cargo clippy

@@ -11,6 +11,7 @@ mod hub;
 pub mod logging;
 pub mod paths;
 mod registry;
+mod setup;
 pub mod single_instance;
 mod stats_service;
 mod supervisor;

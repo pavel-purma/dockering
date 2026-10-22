@@ -74,6 +74,20 @@ pub struct SwitchEngine {
     pub id: SharedString,
 }
 
+/// Activate a listed `Stopped` engine and start it (first-run / no-engine rows, ENG-158).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = dk, no_json)]
+pub struct StartListedEngine {
+    pub id: SharedString,
+}
+
+/// Open the set-up dialog for an offer; an empty `offer` means the first one (ENG-159).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = dk, no_json)]
+pub struct SetUpEngine {
+    pub offer: SharedString,
+}
+
 /// Copy text to the clipboard (Copy id, Copy details). Handled app-wide.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = dk, no_json)]
@@ -307,6 +321,18 @@ pub mod form {
     gpui_kit::actions!(form, [AddRow, RemoveRow]);
 }
 
+pub mod choice {
+    gpui_kit::actions!(
+        choice,
+        [
+            /// `↑` / `↓` move and select, `Space` selects, in a radio group (ENG-162).
+            Prev,
+            Next,
+            Select,
+        ]
+    );
+}
+
 pub mod switcher {
     gpui_kit::actions!(
         switcher,
@@ -428,6 +454,7 @@ pub const NAMESPACES: &[&str] = &[
     "dialog::",
     "form::",
     "switcher::",
+    "choice::",
     "palette::",
     "res::",
     "settings::",

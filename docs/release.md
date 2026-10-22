@@ -428,6 +428,14 @@ version, have a changelog section, and be contained in `main` or a `release/*` b
 Minimum systems: Windows 10 22H2, macOS 15, and Linux with glibc 2.39 or newer and Vulkan. Updates for this
 unsigned release are manual downloads from GitHub Releases.
 
+## Engine root filesystems
+
+The images behind *Set up Docker in WSL* are built and published by their own workflow, `engine-rootfs.yml`, under the tags
+`rootfs-<n>`; they are separate from the `v*` app releases and never become the repository's Latest release. A `/release`
+run does not build or publish them. What it does is refuse an app whose pinned image is missing or different: the `assemble`
+job of `release.yml` runs `cargo xtask engine-rootfs-pin-check --online` (REL-089). How to build, test, publish and pin an
+image is in [engine-rootfs.md](engine-rootfs.md).
+
 ## release-plz (dormant)
 
 `release-plz.yml` and `release-plz.toml` are kept but do nothing: without the repository secrets
