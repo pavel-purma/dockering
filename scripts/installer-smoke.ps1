@@ -104,8 +104,9 @@ function Test-Sha256Sums([string] $File, [string] $SumsFile) {
 function Select-ProcessInDirectory([object[]] $Candidate, [string] $Directory) {
     $want = [IO.Path]::GetFullPath($Directory).TrimEnd('\', '/')
     foreach ($process in $Candidate) {
-        if (-not $process.Path) { continue }
-        $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($process.Path))
+        $path = $process.Path
+        if (-not $path) { continue }
+        $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($path))
         if ([string]::Equals($parent, $want, [StringComparison]::OrdinalIgnoreCase)) { $process }
     }
 }

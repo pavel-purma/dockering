@@ -441,6 +441,24 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(sorted(found["ids"]), [1, 2, 7])
         self.assertEqual(found["none"], 0)
 
+    def test_rel_087_process_filter_reads_path_once(self):
+        # A relaunched app that exits while the filter runs: Get-Process then reports no path on the next read.
+        with tempfile.TemporaryDirectory() as tmp:
+            install = str(Path(tmp) / "Programs" / "Dockering")
+            done = pwsh(
+                "-Command",
+                ". $env:SMOKE -Setup x -Version 0; "
+                "$script:reads = 0; "
+                "$gone = [pscustomobject]@{ Id = 1 }; "
+                "$gone | Add-Member -MemberType ScriptProperty -Name Path -Value { "
+                "if ($script:reads++ -eq 0) { Join-Path $env:INSTALL 'dockering.exe' } else { '' } }; "
+                "$hit = @(Select-ProcessInDirectory @($gone) $env:INSTALL); "
+                "ConvertTo-Json -Compress -InputObject ([ordered]@{ ids = @($hit | ForEach-Object { $_.Id }) })",
+                env={"SMOKE": str(SMOKE), "INSTALL": install},
+            )
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(json.loads(done.stdout)["ids"], [1])
+
 
 # ---- the CI step -------------------------------------------------------------------------------
 
