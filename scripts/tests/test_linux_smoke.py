@@ -1270,6 +1270,25 @@ class ScriptContractTests(ContractCase):
         self.assertFound(r"blocked_until_approved", macos, "macos-smoke/run.sh")
         self.assertFound(r"The app never starts here[^\n]*\n[^\n]*no update check to disable", macos, "macos-smoke/run.sh")
 
+    def test_rel_075_macos_log_allowlist_accepts_both_text_system_module_names(self):
+        """The two duplicate-font warnings are macOS noise under either GPUI module name, and nothing else is."""
+        macos = read(ROOT / "scripts/macos-smoke/run.sh")
+        start = macos.index("bad=$(grep -E ' (ERROR|WARN) '")
+        line = macos[start : macos.index("\n", start)]
+        pattern = re.search(r"grep -v -E '([^']+)'", line)
+        self.assertIsNotNone(pattern, "the allowlist grep -v")
+        allowed = re.compile(pattern.group(1))
+        for module in ("gpui_macos", "gpui_apple"):
+            for font in ("System Font Bold", "System Font Regular Italic Bold Italic"):
+                record = f'2026-10-22T22:18:33.279356Z  WARN {module}::text_system: skipping duplicate font "{font}" with PostScript name ".SFNS" in family ".AppleSystemUIFont"'
+                self.assertRegex(record, allowed, record)
+        for record in (
+            '2026-10-22T22:18:33Z  WARN gpui_apple::text_system: skipping duplicate font "Menlo Regular" with PostScript name "Menlo" in family "Menlo"',
+            '2026-10-22T22:18:33Z  ERROR gpui_apple::text_system: skipping duplicate font "System Font Bold" with PostScript name ".SFNS-Bold" in family ".AppleSystemUIFont"',
+            '2026-10-22T22:18:33Z  WARN gpui_apple::window: skipping duplicate font "System Font Bold"',
+        ):
+            self.assertNotRegex(record, allowed, record)
+
     def test_rel_075_the_upgrade_scenario_launches_the_real_mode_on_an_older_profile(self):
         start = self.run_sh.index("upgrade)")
         upgrade = self.run_sh[start : self.run_sh.index(";;", start)]

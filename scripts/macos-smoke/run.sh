@@ -522,8 +522,9 @@ if grep -q 'starting version="[^"]*"' "$OUT/dockering.log"; then check log_start
 if [ "$SCENARIO" = demo ]; then
   if grep -q 'engine connected engine=demo' "$OUT/dockering.log"; then check demo_engine PASS "engine connected engine=demo"; else check demo_engine FAIL "the demo engine never connected"; fi
 fi
-# known macOS noise: two duplicate system fonts that the text system skips
-bad=$(grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" | grep -v -E ' WARN gpui_macos::text_system: skipping duplicate font "System Font (Bold|Regular Italic Bold Italic)"' | head -n 5)
+# known macOS noise: two duplicate system fonts that the text system skips (the module is gpui_macos
+# before gpui-kit 0.7.3 and gpui_apple after it)
+bad=$(grep -E ' (ERROR|WARN) ' "$OUT/dockering.log" | grep -v -E ' WARN gpui_(macos|apple)::text_system: skipping duplicate font "System Font (Bold|Regular Italic Bold Italic)"' | head -n 5)
 if [ -z "$bad" ]; then check log_clean PASS; else
   check log_clean FAIL "$(printf '%s\n' "$bad" | head -n 1 | cut -c1-160)"
   printf '%s\n' "$bad" | cut -c1-200
