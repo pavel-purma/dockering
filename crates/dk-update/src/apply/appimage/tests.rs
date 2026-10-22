@@ -428,7 +428,7 @@ impl Spawner for TestSpawner {
             Purpose::SelfTest => {
                 if self
                     .etxtbsy_failures
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
                     .is_ok()
                 {
                     return Err(io::Error::from_raw_os_error(ETXTBSY));
