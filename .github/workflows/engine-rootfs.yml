@@ -226,7 +226,7 @@ jobs:
           python3 -B -I "$PINS" verify all "$TAG"
           # What the release carries: the images, their package manifests and licence notices, one checksum file.
           cp -- all/dockering-engine-*.tar.xz all/dockering-engine-*.manifest.txt all/LICENSES-*.txt dist/
-          [[ "$(ls dist | wc -l)" -eq 12 ]] || { echo "::error::expected 12 release files"; ls dist; exit 1; }
+          [[ "$(find dist -type f | wc -l)" -eq 12 ]] || { echo "::error::expected 12 release files"; ls dist; exit 1; }
           (cd dist && LC_ALL=C sha256sum -- * > ../SHA256SUMS) && mv SHA256SUMS dist/SHA256SUMS
           python3 -B -I "$PINS" notes all "$TAG" > notes.md
           ls -l dist
