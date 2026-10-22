@@ -11,6 +11,10 @@
     "release": {
       "description": "Cut a release, report release status, or guide the Windows signing setup using the shared Dockering release skill.",
       "template": "Load the release skill and follow it for this request: $ARGUMENTS. Use OpenCode's question tool when the skill calls for AskUserQuestion."
+    },
+    "winget": {
+      "description": "Publish a released version to winget, report winget status, or follow a winget-pkgs pull request using the shared Dockering winget skill.",
+      "template": "Load the winget skill and follow it for this request: $ARGUMENTS. Use OpenCode's question tool when the skill calls for AskUserQuestion."
     }
   },
   "agent": {

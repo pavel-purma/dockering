@@ -2,12 +2,19 @@
 # Template (REL-040). Placeholders: {{VERSION}} (no leading "v"), {{X64_SHA256}}, {{ARM64_SHA256}}
 # (uppercase hex SHA-256 of the signed Dockering-Setup-*.exe; see SHA256SUMS in the release).
 # Inno Setup installer (REL-020/021): per-user by default (/CURRENTUSER), all users with /ALLUSERS.
+# ProductCode is the Inno uninstall key: AppId in packaging/windows/dockering.iss plus "_is1". winget matches the installed
+# Add/Remove Programs entry to this package by it, so `winget upgrade` and `winget list` see Dockering installs made by hand.
 # RequireExplicitUpgrade is deliberately not set (REL-042).
 
-PackageIdentifier: PavelPurma.Dockering
+PackageIdentifier: Dockering.Dockering
 PackageVersion: "{{VERSION}}"
 InstallerType: inno
 UpgradeBehavior: install
+ProductCode: "{8C3F4E2A-6B1D-4E7A-9F2C-5D8B1A3E7C64}_is1"
+AppsAndFeaturesEntries:
+  - DisplayName: Dockering
+    Publisher: Dockering contributors
+    ProductCode: "{8C3F4E2A-6B1D-4E7A-9F2C-5D8B1A3E7C64}_is1"
 Installers:
   - Architecture: x64
     Scope: user
