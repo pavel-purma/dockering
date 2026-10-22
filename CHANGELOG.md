@@ -9,6 +9,34 @@ Both changelogs are written only at release time, by the `/release` skill in the
 (REL-011, REL-019): feature pull requests don't edit them. Edit the wording in the release PR
 before merging it.
 
+## [0.4.0] - 2026-10-22
+
+Downloads are unsigned, as in 0.3.0. Automatic updates and winget remain deferred.
+
+### Added
+
+- Notifications stack in the bottom-right corner of the content area, above the status bar and clear
+  of the selection actions at the top. A notification that hides by itself shows a bar along its
+  bottom edge that drains until it hides, and hovering or focusing the stack pauses it. Errors and
+  notifications with a button stay until dismissed. `Esc` in the focused stack dismisses the newest
+  notification and returns focus to where it was. Image pull progress and the *Updated to X.Y.Z*
+  notice appear in the same stack.
+- Windows: Docker Desktop that is installed but not running is listed as a stopped engine with a
+  **Start Docker Desktop** button, instead of being left out and showing the first-run page. Docker
+  installed in a WSL distro but not running is listed too, with a **Start Docker** button that
+  starts the Docker service in that distro, instead of being hidden. The first-run page lists every
+  stopped engine that can be started.
+
+### Changed
+
+- The whole checkbox cell of a row in Containers, Images, Volumes and Networks toggles its
+  selection, not only the box. A click next to the box no longer opens the row.
+
+### Security
+
+- The TLS libraries used for remote Docker connections (rustls and rustls-webpki) are updated to
+  versions that fix security advisories published after 0.3.0.
+
 ## [0.3.0] - 2026-10-11
 
 Downloads are unsigned, as in 0.2.0. Automatic updates and winget remain deferred.
