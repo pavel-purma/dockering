@@ -42,7 +42,7 @@ concurrency:
 
 env:
   # Keep in sync with rust-toolchain.toml (ci.yml checks it) and with release.yml.
-  RUST_TOOLCHAIN: "1.98"
+  RUST_TOOLCHAIN: "1.99"
   PACKAGER_VERSION: "0.11.8"
   # The image the app runs in. A registry mirror, like the smoke test: an anonymous Docker Hub pull can be rate limited.
   # The AppImages are built on the runner (Ubuntu 24.04, glibc 2.39), so this image's glibc is enough for them.

@@ -2,7 +2,7 @@
 
 ## Toolchain
 
-- Rust **stable**, pinned in `rust-toolchain.toml` (initially `1.98`). GPUI Kit needs ≥ 1.92. Components: `rustfmt` and `clippy`.
+- Rust **stable**, pinned in `rust-toolchain.toml` (currently `1.99`; `rust-version` in the workspace manifest matches it). GPUI Kit needs ≥ 1.92. Components: `rustfmt` and `clippy`.
 - Edition 2024. Workspace-wide `[lints]`: `unsafe_code = "deny"` except in `dk-wsl` (named-pipe ACLs) and `dk-engine-wslc/src/com/` (WSLC COM FFI), where each use is documented with `// SAFETY:`; also `clippy::dbg_macro`, `todo`, and `unwrap_used` (warn).
 - `gpui-kit = "0.7"` is pinned exactly in `Cargo.lock`. GPUI Kit pins its own `gpui` (`gpui-pre =0.3.7`). Upgrades are deliberate PRs, guided by the `gpui-kit` changelog.
 

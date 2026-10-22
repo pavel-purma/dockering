@@ -16,7 +16,7 @@ concurrency:
 
 env:
   # Keep in sync with rust-toolchain.toml (checked in the lint job).
-  RUST_TOOLCHAIN: "1.98"
+  RUST_TOOLCHAIN: "1.99"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   # No debuginfo in dev/test builds: linking the ~20 GPUI test binaries with full debuginfo is slow

@@ -531,7 +531,11 @@ impl Engine for WslcEngine {
     fn events(&self, f: EventFilter) -> EngineStream<EngineEvent> {
         self.stream("events", false, true, move |e| e.events(f.clone()))
     }
-    routed!(list_containers(q: ContainerQuery) -> Vec<ContainerSummary>, false, true);
+    routed!(
+        list_containers(q: ContainerQuery) -> Vec<ContainerSummary>,
+        false,
+        true
+    );
     by_id!(inspect_container -> ContainerDetails, false,);
     async fn container_action(&self, id: &str, action: ContainerAction) -> EngineResult<()> {
         // Resolve names/prefixes before mutation; reconciliation only accepts the same full ID.
