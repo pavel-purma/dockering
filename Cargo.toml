@@ -2,16 +2,11 @@
 resolver = "3"
 members = ["crates/*", "xtask"]
 default-members = ["crates/*"]
-exclude = ["vendor/gpui-pre-windows"]
-
-[patch.crates-io]
-# Keep the optional DirectX debug-layer probe at warning severity (see vendor/README.md).
-gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/pavel-purma/dockering"
 publish = false
@@ -57,6 +52,7 @@ time = { version = "0.3.47", features = ["serde", "serde-well-known", "formattin
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
+tracing-log = "0.2"
 directories = "6"
 libc = "0.2"
 rand = "0.10"

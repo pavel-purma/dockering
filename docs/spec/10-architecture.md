@@ -296,7 +296,7 @@ file and rename. The schema is versioned (`version = 1`) with forward-compatible
 ## 8. Logging & diagnostics
 
 - `tracing` spans per engine call: `engine.call{engine=…, op=list_containers}` with duration.
-- On Windows, an unavailable optional DirectX debug layer produces one warning with the cause and continues with normal rendering. Failures to create the graphics factory or device still propagate as errors.
+- On Windows, GPUI's backend logs a few harmless `ERROR` records through the `log` crate: the optional DirectX debug layer being absent (debug builds, `0x887A002D`) and window handles already gone while the last window closes (`window not found`, `0x80040102`, `0x80070578`). The logging setup drops exactly those records (`KnownNoise` in `dk-hub::logging`), and nothing else from GPUI. Real graphics failures still log and propagate.
 - The level is set by `RUST_LOG` or by a Settings → Diagnostics toggle (info/debug).
 - Debug builds also log to stderr. Release builds on Windows are GUI-subsystem executables with no console (REL-028), so the log file is their only output, and a crash leaves `crash-<timestamp>.txt` next to `state.json`.
 - Settings → Diagnostics → "Open logs folder" and "Copy diagnostics". The second copies version, OS, engines, and capability matrix to the clipboard.

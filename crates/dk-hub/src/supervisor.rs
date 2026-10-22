@@ -124,8 +124,8 @@ pub(crate) fn startup_engine(inner: &HubInner) -> Option<EngineId> {
     };
     inner
         .default_engine()
-        .filter(&usable)
-        .or_else(|| inner.ui_state().last_engine.filter(&usable))
+        .filter(usable)
+        .or_else(|| inner.ui_state().last_engine.filter(usable))
 }
 
 /// Runs every factory's discovery in parallel (3 s each) and merges the result (ENG-009).
