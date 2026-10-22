@@ -61,19 +61,37 @@ pub(crate) async fn connect_info(
     Ok((engine, info))
 }
 
-/// ENG-137: a missing session of a backend that offers a start action is `Stopped`, not a failure.
-fn is_startable_stop(
+/// Bound on `EngineFactory::stopped_after` (it may run a status command).
+pub(crate) const STOPPED_AFTER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// ENG-137/146: a failed connect of a backend that offers a start action is `Stopped`, not a
+/// failure, when it is a missing session or the factory's `stopped_after` says so.
+async fn is_startable_stop(
     factory: &Arc<dyn EngineFactory>,
     cfg: &EngineConfig,
     e: &EngineError,
 ) -> bool {
-    matches!(
+    if factory.start_prompt(cfg).is_none() {
+        return false;
+    }
+    if matches!(
         e,
         EngineError::NotFound {
             kind: ResourceKind::Session,
             ..
         }
-    ) && factory.start_prompt(cfg).is_some()
+    ) {
+        return true;
+    }
+    let fut = AssertUnwindSafe(factory.stopped_after(cfg, e)).catch_unwind();
+    match tokio::time::timeout(STOPPED_AFTER_TIMEOUT, fut).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(p)) => {
+            let _ = panic_error(&*p);
+            false
+        }
+        Err(_) => false,
+    }
 }
 
 async fn connect_with_timeout(
@@ -186,14 +204,19 @@ pub(crate) async fn autoselect(inner: &Arc<HubInner>) {
             return;
         }
         inner.set_state(&id, EngineState::Connecting);
-        match connect_with_timeout(&factory, &cfg, AUTOSELECT_TIMEOUT).await {
+        let res = connect_with_timeout(&factory, &cfg, AUTOSELECT_TIMEOUT).await;
+        let stopped = match &res {
+            Err(e) => is_startable_stop(&factory, &cfg, e).await,
+            Ok(_) => false,
+        };
+        match res {
             Ok(pre) => {
                 if inner.activate(&id, Some(pre), true).is_ok() && inner.is_active(&id) {
                     return;
                 }
                 inner.set_state(&id, EngineState::Disconnected);
             }
-            Err(e) if is_startable_stop(&factory, &cfg, &e) => {
+            Err(_) if stopped => {
                 tracing::debug!(engine = %id, "auto-select candidate has no session; stopped");
                 if !inner.is_active(&id) {
                     inner.set_state(&id, EngineState::Stopped);
@@ -324,9 +347,13 @@ pub(crate) async fn supervise(
                 r = connect_with_timeout(&factory, &cfg, CONNECT_TIMEOUT) => r,
             },
         };
+        let stopped = match &res {
+            Err(e) => is_startable_stop(&factory, &cfg, e).await,
+            Ok(_) => false,
+        };
         match res {
-            Err(e) if is_startable_stop(&factory, &cfg, &e) => {
-                tracing::debug!(engine = %id, "engine has no session; stopped");
+            Err(_) if stopped => {
+                tracing::debug!(engine = %id, "engine is not started; stopped");
                 let mut reg = lock(&inner.reg);
                 if token.is_cancelled() || !reg.is_active(&id) {
                     return;

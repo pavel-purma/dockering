@@ -1,28 +1,27 @@
 //! WSL distribution enumeration and non-booting Docker probes (spec 20 §4.2, ENG-007/106).
 
 use std::collections::BTreeSet;
-#[cfg(not(windows))]
 use std::io;
 
-/// The spec 20 §4.2 probe — `test -S /var/run/docker.sock && (command -v docker || command -v socat)`
-/// — expanded with distinct exit codes so that one `wsl.exe` spawn classifies the distro:
+use crate::runner::{self, Wsl};
+
+/// The spec 20 §4.2 probe (spike W-2.3, verified in 19 states), one `wsl.exe` spawn per distro:
 ///
 /// | exit | meaning |
 /// |---|---|
-/// | 0  | socket present, prints the bridge tool path, current user can open the socket |
-/// | 11 | no socket (`no-docker`) |
+/// | 0  | socket owned by a live `dockerd` (or another engine), prints the bridge tool path, the user can open it |
+/// | 11 | no `dockerd`/init script/unit and no socket (`no-docker`); also a bare `docker` client |
 /// | 12 | socket, but neither `docker` nor `socat` (`socket-no-client`) |
 /// | 13 | tool found, but the socket isn't readable/writable (not in the `docker` group) |
+/// | 14 | Docker is installed but no live `dockerd` (and no socket activation): `installed-not-running` |
 ///
 /// The script is a constant; the distro name is a separate, validated argv item (NFR-022).
-pub(crate) const PROBE_SCRIPT: &str = "test -S /var/run/docker.sock || exit 11; \
-     t=$(command -v docker || command -v socat) || exit 12; \
-     echo \"$t\"; \
-     test -r /var/run/docker.sock && test -w /var/run/docker.sock || exit 13";
+pub(crate) const PROBE_SCRIPT: &str = include_str!("probe.sh");
 
 const EXIT_NO_SOCKET: i32 = 11;
 const EXIT_NO_CLIENT: i32 = 12;
 const EXIT_PERMISSION: i32 = 13;
+const EXIT_NOT_RUNNING: i32 = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Distro {
@@ -39,6 +38,16 @@ pub enum BridgeTool {
     Socat,
 }
 
+impl BridgeTool {
+    /// The `--exec` argv that connects stdio to the Docker socket.
+    pub(crate) fn dial_argv(self) -> &'static [&'static str] {
+        match self {
+            Self::Docker => &["docker", "system", "dial-stdio"],
+            Self::Socat => &["socat", "-", "UNIX-CONNECT:/var/run/docker.sock"],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProbeClassification {
     /// `available`
@@ -49,6 +58,8 @@ pub(crate) enum ProbeClassification {
     SocketNoClient,
     /// The user isn't in the in-distro `docker` group.
     PermissionDenied,
+    /// `installed-not-running` (ENG-148): listed as stopped, startable.
+    InstalledNotRunning,
 }
 
 /// WSL distro names as accepted on an argv: `[A-Za-z0-9._-]+`, not starting with `-` (NFR-022).
@@ -92,6 +103,7 @@ pub(crate) fn classify_probe(
         Some(EXIT_NO_SOCKET) => Ok(ProbeClassification::NoDocker),
         Some(EXIT_NO_CLIENT) => Ok(ProbeClassification::SocketNoClient),
         Some(EXIT_PERMISSION) => Ok(ProbeClassification::PermissionDenied),
+        Some(EXIT_NOT_RUNNING) => Ok(ProbeClassification::InstalledNotRunning),
         _ => {
             let text = format!("{stdout}\n{stderr}");
             if text.to_ascii_lowercase().contains("permission denied") {
@@ -153,13 +165,60 @@ pub(crate) fn select_distros(names: Vec<String>, running: &BTreeSet<String>) -> 
     result
 }
 
+/// Probes a **running** distro. Callers check [`is_running`] first: `wsl.exe -d` boots a
+/// stopped distro (ENG-106).
+pub(crate) async fn probe(wsl: &dyn Wsl, distro: &str) -> io::Result<ProbeClassification> {
+    if !validate_distro_name(distro) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid WSL distro name",
+        ));
+    }
+    let output = wsl
+        .run(&["-d", distro, "--exec", "sh", "-c", PROBE_SCRIPT])
+        .await?;
+    classify_probe(
+        output.code,
+        &output.stdout_utf8(),
+        &runner::decode_message(&output.stderr),
+    )
+    .map_err(|message| {
+        // `wsl.exe` prints its own errors (WSL_E_DISTRO_NOT_FOUND, …) as UTF-16LE on stdout.
+        let wsl = output.error_message();
+        io::Error::other(if wsl.is_empty() { message } else { wsl })
+    })
+}
+
+pub(crate) async fn running_names(wsl: &dyn Wsl) -> io::Result<BTreeSet<String>> {
+    let output = wsl.run(&["--list", "--running", "--quiet"]).await?;
+    let text = runner::decode_utf16le(&output.stdout);
+    if !output.success() {
+        // `wsl.exe --list --running` exits non-zero when nothing is running ("There are no
+        // running distributions."); that's an empty set, not an error.
+        if parse_running_list(&text).is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        return Err(io::Error::other(format!(
+            "wsl.exe --list --running --quiet failed: {}",
+            output.error_message()
+        )));
+    }
+    Ok(parse_running_list(&text))
+}
+
+pub(crate) async fn is_running(wsl: &dyn Wsl, distro: &str) -> io::Result<bool> {
+    Ok(running_names(wsl)
+        .await?
+        .contains(&distro.to_ascii_lowercase()))
+}
+
 #[cfg(windows)]
 mod platform {
     use std::collections::BTreeSet;
     use std::io;
 
-    use super::{Distro, PROBE_SCRIPT, ProbeClassification, validate_distro_name};
-    use crate::runner;
+    use super::Distro;
+    use crate::runner::{self, RealWsl, Wsl};
 
     /// Registry `State` value of a fully installed distro (others: installing, uninstalling…).
     const STATE_INSTALLED: u32 = 1;
@@ -174,7 +233,7 @@ mod platform {
                 .collect()),
             Err(registry_error) => {
                 tracing::debug!(error = %registry_error, "WSL registry enumeration failed; using wsl.exe --list --verbose");
-                let output = runner::run(["--list", "--verbose"]).await?;
+                let output = RealWsl.run(&["--list", "--verbose"]).await?;
                 if !output.success() {
                     return Err(io::Error::other(format!(
                         "wsl.exe --list --verbose failed: {}",
@@ -197,78 +256,22 @@ mod platform {
             return Ok(Vec::new());
         }
         // Without a running list, report every distro as stopped: never probe (= boot) blindly.
-        let running = running_names().await.unwrap_or_else(|error| {
-            tracing::debug!(%error, "wsl.exe --list --running failed; treating distros as stopped");
-            BTreeSet::new()
-        });
+        let running = super::running_names(&RealWsl)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::debug!(%error, "wsl.exe --list --running failed; treating distros as stopped");
+                BTreeSet::new()
+            });
         Ok(super::select_distros(names, &running))
-    }
-
-    pub(crate) async fn running_names() -> io::Result<BTreeSet<String>> {
-        let output = runner::run(["--list", "--running", "--quiet"]).await?;
-        let text = runner::decode_utf16le(&output.stdout);
-        if !output.success() {
-            // `wsl.exe --list --running` exits non-zero when nothing is running ("There are no
-            // running distributions."); that's an empty set, not an error.
-            if super::parse_running_list(&text).is_empty() {
-                return Ok(BTreeSet::new());
-            }
-            return Err(io::Error::other(format!(
-                "wsl.exe --list --running --quiet failed: {}",
-                output.error_message()
-            )));
-        }
-        Ok(super::parse_running_list(&text))
-    }
-
-    pub(crate) async fn is_running(distro: &str) -> io::Result<bool> {
-        Ok(running_names()
-            .await?
-            .contains(&distro.to_ascii_lowercase()))
-    }
-
-    /// Probes a **running** distro. Callers check [`is_running`] first: `wsl.exe -d` boots a
-    /// stopped distro (ENG-106).
-    pub(crate) async fn probe(distro: &str) -> io::Result<ProbeClassification> {
-        if !validate_distro_name(distro) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid WSL distro name",
-            ));
-        }
-        let output = runner::run(["-d", distro, "--exec", "sh", "-c", PROBE_SCRIPT]).await?;
-        super::classify_probe(
-            output.code,
-            &output.stdout_utf8(),
-            &runner::decode_message(&output.stderr),
-        )
-        .map_err(|message| {
-            // `wsl.exe` prints its own errors (WSL_E_DISTRO_NOT_FOUND, …) as UTF-16LE on stdout.
-            let wsl = output.error_message();
-            io::Error::other(if wsl.is_empty() { message } else { wsl })
-        })
     }
 }
 
 #[cfg(windows)]
-pub(crate) use platform::{enumerate, is_running, probe};
+pub(crate) use platform::enumerate;
 
 #[cfg(not(windows))]
 pub(crate) async fn enumerate() -> io::Result<Vec<Distro>> {
     Ok(Vec::new())
-}
-
-#[cfg(not(windows))]
-pub(crate) async fn is_running(_distro: &str) -> io::Result<bool> {
-    Ok(false)
-}
-
-#[cfg(not(windows))]
-pub(crate) async fn probe(_distro: &str) -> io::Result<ProbeClassification> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "WSL is only available on Windows",
-    ))
 }
 
 #[cfg(test)]
@@ -381,8 +384,60 @@ mod tests {
 
     #[test]
     fn eng_007_probe_script_contains_the_spec_probe_semantics() {
-        assert!(PROBE_SCRIPT.contains("test -S /var/run/docker.sock"));
+        assert!(PROBE_SCRIPT.contains("test -S $d"));
         assert!(PROBE_SCRIPT.contains("command -v docker || command -v socat"));
+    }
+
+    #[test]
+    fn eng_148_probe_script_classifies_spike_states() {
+        // The script is the spike W-2.3 text, verified in 19 states, with only the `read`
+        // hardening added; the exits are the contract `classify_probe` relies on.
+        for exit in ["exit 11", "exit 12", "exit 13", "exit 14"] {
+            assert!(PROBE_SCRIPT.contains(exit), "{exit}");
+        }
+        assert!(PROBE_SCRIPT.contains("{ read -r n < \"$c\"; } 2>/dev/null"));
+        assert!(PROBE_SCRIPT.contains("systemctl is-active --quiet docker.socket"));
+        assert!(PROBE_SCRIPT.contains("/etc/init.d/docker"));
+        assert!(PROBE_SCRIPT.contains("/lib/systemd/system/docker.service"));
+        assert!(!PROBE_SCRIPT.contains("pgrep"));
+
+        let docker = Ok(ProbeClassification::Available(BridgeTool::Docker));
+        assert_eq!(
+            classify_probe(
+                Some(0),
+                "/usr/bin/docker
+",
+                ""
+            ),
+            docker
+        );
+        assert_eq!(
+            classify_probe(Some(11), "", ""),
+            Ok(ProbeClassification::NoDocker)
+        );
+        assert_eq!(
+            classify_probe(Some(12), "", ""),
+            Ok(ProbeClassification::SocketNoClient)
+        );
+        assert_eq!(
+            classify_probe(
+                Some(13),
+                "/usr/bin/docker
+",
+                ""
+            ),
+            Ok(ProbeClassification::PermissionDenied)
+        );
+        assert_eq!(
+            classify_probe(Some(14), "", ""),
+            Ok(ProbeClassification::InstalledNotRunning)
+        );
+        // stdout is ignored for 11-14, and a stray shell error doesn't change an exit code.
+        assert_eq!(
+            classify_probe(Some(14), "x", "sh: 1: cannot open /proc/1/comm"),
+            Ok(ProbeClassification::InstalledNotRunning)
+        );
+        assert!(classify_probe(Some(15), "", "").is_err());
     }
 
     #[test]

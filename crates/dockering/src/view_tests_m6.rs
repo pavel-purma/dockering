@@ -864,10 +864,7 @@ fn vol_005_in_use_delete_fails_with_containers(cx: &mut TestAppContext) {
     h.wait_until(cx, "remove attempted", |_, _| {
         !h.engine.calls_to("remove_volume").is_empty()
     });
-    h.wait_until(cx, "error toast", |window, cx| {
-        use gpui_kit::component::WindowExt;
-        !window.notifications(cx).is_empty()
-    });
+    h.wait_until(cx, "error toast", |_, cx| crate::ui::toast::count(cx) > 0);
     // The volume is still there.
     let still = cx.read(|cx| {
         page.read(cx)

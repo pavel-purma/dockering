@@ -19,28 +19,31 @@ use crate::testing::{Harness, Setup, start_with_factories};
 
 type Boxed<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-const ID: &str = "stopped-one";
+pub(crate) const ID: &str = "stopped-one";
 const HOST: &str = "stopped.test";
 
-struct StoppedFactory {
+pub(crate) struct StoppedFactory {
     engine: Arc<FakeEngine>,
     prompt: Option<StartPrompt>,
     started: Mutex<bool>,
     starts: Mutex<u32>,
     gate: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+    /// Makes the next starts fail with this error.
+    pub(crate) start_error: Mutex<Option<EngineError>>,
 }
 
 impl StoppedFactory {
-    fn new(prompt: Option<StartPrompt>) -> Arc<Self> {
+    pub(crate) fn new(prompt: Option<StartPrompt>) -> Arc<Self> {
         Arc::new(Self {
             engine: FakeEngine::new(ID),
             prompt,
             started: Mutex::new(false),
             starts: Mutex::new(0),
             gate: Mutex::new(None),
+            start_error: Mutex::new(None),
         })
     }
-    fn starts(&self) -> u32 {
+    pub(crate) fn starts(&self) -> u32 {
         *self.starts.lock().unwrap()
     }
 }
@@ -60,7 +63,7 @@ fn config() -> EngineConfig {
     }
 }
 
-fn prompt() -> StartPrompt {
+pub(crate) fn prompt() -> StartPrompt {
     StartPrompt {
         title: "Sleepy is not running".into(),
         body: "Nothing is running here yet. Start it to continue.".into(),
@@ -117,6 +120,9 @@ impl EngineFactory for StoppedFactory {
     {
         Box::pin(async move {
             *self.starts.lock().unwrap() += 1;
+            if let Some(e) = self.start_error.lock().unwrap().clone() {
+                return Err(e);
+            }
             let gate = self.gate.lock().unwrap().take();
             if let Some(rx) = gate {
                 let _ = rx.await;

@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::ptr::{null, null_mut};
 
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -21,6 +22,10 @@ use windows_sys::Win32::Security::Authorization::{
 use windows_sys::Win32::Security::{
     GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     TokenUser,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    GetDiskFreeSpaceExW, GetFileVersionInfoSizeW, GetFileVersionInfoW, VS_FIXEDFILEINFO,
+    VerQueryValueW,
 };
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_READ, REG_DWORD, REG_SZ, RegCloseKey, RegEnumKeyExW,
@@ -359,6 +364,60 @@ fn query_dword(key: &OwnedRegKey, name: &str) -> Option<u32> {
     };
     (status == ERROR_SUCCESS && kind == REG_DWORD && bytes == size_of::<u32>() as u32)
         .then_some(value)
+}
+
+/// Bytes available to the current user on the volume holding `path` (which must exist).
+pub(crate) fn free_space(path: &Path) -> io::Result<u64> {
+    let wide = wide_nul(path);
+    let mut available = 0u64;
+    // SAFETY: `wide` is NUL-terminated and outlives the call; `available` is a valid out
+    // pointer; the two optional outputs are null.
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, null_mut(), null_mut()) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(available)
+}
+
+/// File version of `%ProgramFiles%\WSL\wslservice.exe` (spec 20 §5.2, no COM).
+pub(crate) fn wsl_service_version() -> Option<(u32, u32, u32, u32)> {
+    let program_files =
+        std::env::var_os("ProgramW6432").or_else(|| std::env::var_os("ProgramFiles"))?;
+    let path = Path::new(&program_files).join("WSL").join("wslservice.exe");
+    let version = file_version(&path)?;
+    (version != (0, 0, 0, 0)).then_some(version)
+}
+
+fn file_version(path: &Path) -> Option<(u32, u32, u32, u32)> {
+    let name = wide_nul(path);
+    // SAFETY: `name` is NUL-terminated and outlives the call; the handle output may be null.
+    let size = unsafe { GetFileVersionInfoSizeW(name.as_ptr(), null_mut()) };
+    if size == 0 {
+        return None;
+    }
+    let mut data = vec![0u8; size as usize];
+    // SAFETY: `data` has exactly `size` writable bytes, as the API requires.
+    if unsafe { GetFileVersionInfoW(name.as_ptr(), 0, size, data.as_mut_ptr().cast()) } == 0 {
+        return None;
+    }
+    let mut info: *mut core::ffi::c_void = null_mut();
+    let mut len = 0u32;
+    let root = wide_nul("\\");
+    // SAFETY: `data` holds the version resource filled above; the root block is a
+    // VS_FIXEDFILEINFO and `info` then points inside `data`.
+    let ok = unsafe { VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut info, &mut len) };
+    if ok == 0 || info.is_null() || (len as usize) < size_of::<VS_FIXEDFILEINFO>() {
+        return None;
+    }
+    // SAFETY: `info` points to at least one VS_FIXEDFILEINFO inside the live `data`;
+    // `read_unaligned` makes no alignment assumption about the resource blob.
+    let fixed = unsafe { std::ptr::read_unaligned(info.cast::<VS_FIXEDFILEINFO>()) };
+    (fixed.dwSignature == 0xFEEF_04BD).then_some((
+        fixed.dwFileVersionMS >> 16,
+        fixed.dwFileVersionMS & 0xFFFF,
+        fixed.dwFileVersionLS >> 16,
+        fixed.dwFileVersionLS & 0xFFFF,
+    ))
 }
 
 /// Test-only DACL inspection (NFR-021 ACL test).

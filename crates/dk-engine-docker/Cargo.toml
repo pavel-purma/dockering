@@ -10,6 +10,8 @@ publish.workspace = true
 [features]
 # Integration tests against a real dockerd (CI `integration-docker`).
 it = []
+# `DockerFactory::for_desktop_tests` (Docker Desktop against a fake install tree).
+test-support = []
 
 [dependencies]
 dk-core.workspace = true
@@ -25,7 +27,12 @@ time.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry"] }
+
 [dev-dependencies]
+dk-engine-docker = { path = ".", features = ["test-support"] }
+tempfile.workspace = true
 dk-core = { workspace = true, features = ["test-support"] }
 insta.workspace = true
 futures = { workspace = true, features = ["executor"] }
@@ -34,3 +41,11 @@ tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
+
+# Fake `docker.exe` / `Docker Desktop.exe` for the Docker Desktop start tests (ENG-144).
+[[bin]]
+name = "fake-docker"
+path = "src/bin/fake_docker.rs"
+required-features = ["test-support"]
+test = false
+doc = false

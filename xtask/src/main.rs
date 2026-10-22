@@ -5,6 +5,7 @@
 //! add a single arm to the `match` in `main`.
 
 mod check_blocking;
+mod engine_rootfs;
 mod fixtures;
 mod icons;
 mod package;
@@ -51,7 +52,10 @@ commands:
   release-plan [--since <tag>] [--to <rev>] [--bump <patch|minor|major|X.Y.Z>] [--bodies]
                                       commits since the last release, the bump and next version as JSON (REL-011)
   release-verify --version <semver> [--remote] [--allow-existing-tag]
-                                      the release.yml verify checks, run locally (REL-018)";
+                                      the release.yml verify checks, run locally (REL-018)
+  engine-rootfs-pin-check [--online] [--allow-unpublished] [--pins <file>] [--rust-table <file>] [--release-json <file>]
+                                      tools/engine-rootfs/pins.toml: shape, the Rust pin table and (--online) the
+                                      published rootfs-<n> release assets (REL-089)";
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -77,6 +81,7 @@ fn main() -> anyhow::Result<()> {
         "checksums" => release::run_checksums(rest),
         "release-plan" => release_plan::run_release_plan(rest),
         "release-verify" => release_plan::run_release_verify(rest),
+        "engine-rootfs-pin-check" => engine_rootfs::run(rest),
         "help" | "-h" | "--help" => {
             println!("{USAGE}");
             Ok(())

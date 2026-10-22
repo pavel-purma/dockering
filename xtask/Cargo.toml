@@ -19,6 +19,8 @@ hex.workspace = true
 time.workspace = true
 # release planning (SemVer precedence of v* tags)
 semver.workspace = true
+# engine rootfs pin check (REL-089)
+toml.workspace = true
 
 [lints]
 workspace = true

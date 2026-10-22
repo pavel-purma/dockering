@@ -396,6 +396,50 @@ pub struct StartPrompt {
     pub action_label: String,
 }
 
+/// An action that creates an engine from nothing (ENG-150). `body` is the consent text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupOffer {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub action_label: String,
+    pub choices: Vec<SetupChoice>,
+}
+
+/// One option of a `SetupOffer` (ENG-162). No default: the user always chooses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupChoice {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub download_bytes: u64,
+    pub disk_bytes: u64,
+}
+
+/// Step of a running setup (ENG-154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupPhase {
+    Checking,
+    Downloading,
+    Verifying,
+    Importing,
+    Starting,
+}
+
+/// Progress of a running setup; `Done` carries the engine for the hub to register (ENG-153).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SetupProgress {
+    Phase {
+        phase: SetupPhase,
+        /// `None` = indeterminate.
+        fraction: Option<f32>,
+        detail: String,
+    },
+    Done(EngineConfig),
+}
+
 /// Broadcast on `hub_events()` (ENG-023).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EngineStatus {

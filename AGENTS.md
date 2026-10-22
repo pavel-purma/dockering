@@ -66,6 +66,8 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
   does not discover that directory. Resolve supporting files relative to its directory.
 - For release, version, changelog or code-signing requests, load `release` the same way
   (`.agents/skills/release/SKILL.md`).
+- For publishing a released version to winget (the `microsoft/winget-pkgs` pull request) or checking one, load
+  `winget` the same way (`.agents/skills/winget/SKILL.md`).
 - Use the host's equivalent tools: `AskUserQuestion` in Claude Code is `question` in
   OpenCode; `Task` delegation is `task`; `Read`/`Grep`/`Glob` are `read`/`grep`/`glob`.
 - See `docs/agent-setup.md` for usage, maintenance, and validation commands.
@@ -73,5 +75,7 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
 ## Commit style
 
 Conventional commits: `feat(containers): group rows by compose project [CON-010]`.
-Scopes: `core`, `hub`, `docker`, `wsl`, `wslc`, `terminal`, `ui`, `containers`, `images`,
-`volumes`, `networks`, `settings`, `keyboard`, `ci`, `docs`, `spec`.
+Scopes: `core`, `hub`, `docker`, `wsl`, `wslc`, `windows`, `terminal`, `ui`, `containers`,
+`images`, `volumes`, `networks`, `settings`, `keyboard`, `ci`, `docs`, `spec`, `release`,
+`update`, `installer`, `deps`, `repo`. The `PR title` check rejects any other scope;
+`test` is a type, not a scope (`test(ui): …`, not `fix(test): …`).

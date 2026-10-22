@@ -66,7 +66,7 @@ pipeline keeps the hooks for it: [plan](../../plan/features/release-skill-and-si
 
 | ID | Requirement |
 |---|---|
-| REL-040 | winget package **`PavelPurma.Dockering`** (⚠ confirm before the first submission) in `microsoft/winget-pkgs`: `InstallerType: inno`, x64 + arm64, `Scope: user` (default) and `machine`, `UpgradeBehavior: install`, `ReleaseNotesUrl` = the GitHub release, `Moniker: dockering`, `License: MIT`. The template lives in `packaging/winget/`. |
+| REL-040 | winget package **`Dockering.Dockering`** (⚠ confirm before the first submission) in `microsoft/winget-pkgs`: `InstallerType: inno`, x64 + arm64, `Scope: user` (default) and `machine`, `UpgradeBehavior: install`, `ProductCode` = the Inno uninstall key (`AppId` + `_is1`) with a matching `AppsAndFeaturesEntries` item, so winget recognises an installed Dockering, `ReleaseNotesUrl` = the GitHub release, `Moniker: dockering`, `License: MIT`. The template lives in `packaging/winget/`. |
 | REL-041 | The first winget version is submitted manually after the first public **signed** release. Later stable releases use `.github/workflows/winget.yml`, gated by both `WINGET_ENABLED=true` and `PUBLIC_RELEASES=true`, and by published signed-release metadata. Unsigned first releases MUST NOT be automatically submitted. The classic PAT `WINGET_TOKEN` and a maintainer fork of `winget-pkgs` remain prerequisites. |
 | REL-042 | The self-updater (UPD-007) updates the same *Installed apps* entry that winget reads, so `winget upgrade` shows the right version after a self-update. The manifest does **not** set `RequireExplicitUpgrade`. |
 

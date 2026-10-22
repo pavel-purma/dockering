@@ -124,6 +124,25 @@ pub trait EngineFactory: Send + Sync + 'static {
             message: "this engine can't be started from Dockering".into(),
         })
     }
+    /// ENG-146: true when a failed `connect` really means "not started yet", so the hub sets
+    /// `Stopped` (given a `start_prompt`) instead of `Failed`.
+    async fn stopped_after(&self, cfg: &EngineConfig, error: &EngineError) -> bool {
+        let _ = (cfg, error);
+        false
+    }
+    /// ENG-150: offers that create an engine from nothing. Default: none.
+    async fn setup_offers(&self) -> Vec<SetupOffer> {
+        Vec::new()
+    }
+    /// ENG-153/154/162: runs one offer after the user consented and picked `choice_id`; ends
+    /// with `SetupProgress::Done`. Dropping the stream cancels the setup.
+    fn setup(&self, offer_id: &str, choice_id: &str) -> EngineStream<SetupProgress> {
+        let _ = (offer_id, choice_id);
+        error_stream(EngineError::Api {
+            status: 0,
+            message: "this engine can't be set up from Dockering".into(),
+        })
+    }
 }
 
 /// Result of a discovery probe.
@@ -168,4 +187,64 @@ pub enum ProbeResult {
     Stopped,
     /// Factory has no cheap probe; the hub decides (connect + ping).
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt;
+    use futures::executor::block_on;
+
+    struct Bare;
+
+    #[async_trait]
+    impl EngineFactory for Bare {
+        fn kind(&self) -> EngineKind {
+            EngineKind::Docker
+        }
+        fn handles(&self, _endpoint: &EngineEndpoint) -> bool {
+            true
+        }
+        async fn discover(&self) -> Vec<DiscoveredEngine> {
+            Vec::new()
+        }
+        async fn connect(&self, _cfg: &EngineConfig) -> EngineResult<Arc<dyn Engine>> {
+            Err(EngineError::unreachable("none"))
+        }
+        fn config_schema(&self) -> Vec<EngineConfigSchema> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn eng_142_defaults_offer_nothing() {
+        let cfg = EngineConfig {
+            id: EngineId::new("x"),
+            name: "x".into(),
+            endpoint: EngineEndpoint::Unknown,
+            origin: EngineOrigin::Discovered,
+            enabled: true,
+            hidden: false,
+        };
+        let f = Bare;
+        assert!(f.start_prompt(&cfg).is_none());
+        assert!(!block_on(
+            f.stopped_after(&cfg, &EngineError::unreachable("x"))
+        ));
+        assert!(block_on(f.setup_offers()).is_empty());
+        let items: Vec<_> = block_on(f.setup("any", "any").collect::<Vec<_>>());
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0], Err(EngineError::Api { .. })));
+    }
+
+    #[test]
+    fn eng_154_setup_progress_round_trips_through_serde() {
+        let p = SetupProgress::Phase {
+            phase: SetupPhase::Downloading,
+            fraction: Some(0.25),
+            detail: "12 MB".into(),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(serde_json::from_str::<SetupProgress>(&json).unwrap(), p);
+    }
 }

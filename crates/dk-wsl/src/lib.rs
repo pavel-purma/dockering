@@ -13,6 +13,7 @@ mod bridge;
 mod discovery;
 mod factory;
 mod runner;
+mod setup;
 #[cfg(windows)]
 mod win32;
 

@@ -2,7 +2,7 @@
 #
 # Runs when a GitHub Release is published (pre-releases are skipped) or by hand for a given tag.
 # The first version is submitted manually (packaging/winget/README.md); this workflow only updates
-# the existing `PavelPurma.Dockering` package.
+# the existing `Dockering.Dockering` package.
 # Setup: fork microsoft/winget-pkgs under the maintainer's account, store a classic PAT with the
 # `public_repo` scope as the secret WINGET_TOKEN, and set PUBLIC_RELEASES=true (signed channel) and WINGET_ENABLED=true.
 name: winget
@@ -56,7 +56,7 @@ jobs:
       - uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54 # v2
         if: steps.eligibility.outputs.eligible == 'true'
         with:
-          identifier: PavelPurma.Dockering
+          identifier: Dockering.Dockering
           installers-regex: 'Dockering-Setup-(x64|arm64)\.exe$'
           release-tag: ${{ inputs.tag || github.event.release.tag_name }}
           token: ${{ secrets.WINGET_TOKEN }}

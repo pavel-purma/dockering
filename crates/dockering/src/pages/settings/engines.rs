@@ -26,10 +26,12 @@ use gpui_kit::{
 
 use super::SettingsPage;
 use super::controls::BoolKey;
-use crate::actions::Rescan;
 use crate::actions::settings::{AddEngine, EngineOp, EngineOpKind};
+use crate::actions::{Rescan, SetUpEngine};
 use crate::shell::switcher::kind_icon;
-use crate::state::{AppState, DefaultMark, EngineListStore, can_be_default, default_mark};
+use crate::state::{
+    AppState, DefaultMark, EngineListStore, SetupStore, can_be_default, default_mark,
+};
 use crate::strings as s;
 use crate::ui::confirm::{ConfirmSpec, confirm_destructive};
 use crate::ui::notify;
@@ -381,6 +383,9 @@ pub(super) fn on_rescan(
         let r = call.await;
         this.update_in(cx, |this, window, cx| {
             this.engines.rescanning = false;
+            if let Some(setup) = SetupStore::global(cx) {
+                setup.update(cx, |st, cx| st.refresh(cx));
+            }
             if let Err(e) = r {
                 notify::engine_error(window, cx, s::RESCAN, &e);
             }
@@ -639,6 +644,12 @@ fn engine_row(this: &SettingsPage, e: &EngineStatus, mark: DefaultMark, cx: &App
 /// The section's content blocks (one per engine, so the focused one scrolls into view).
 pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) -> Vec<AnyElement> {
     let rescanning = this.engines.rescanning;
+    let offers = SetupStore::global(cx)
+        .map(|st| {
+            st.update(cx, |st, cx| st.ensure(cx));
+            st.read(cx).offers().to_vec()
+        })
+        .unwrap_or_default();
     let discovery = crate::ui::section(
         s::ENGINES_DISCOVERY,
         v_flex()
@@ -668,6 +679,16 @@ pub(super) fn blocks(this: &mut SettingsPage, cx: &mut Context<SettingsPage>) ->
                             .tooltip_with_action(s::RESCAN, &Rescan, None)
                             .on_click(super::dispatch_here(&this.focus, Rescan)),
                     )
+                    .children(offers.into_iter().map(|o| {
+                        let offer: SharedString = o.id.clone().into();
+                        Button::new(SharedString::from(format!("eng-setup-{}", o.id)))
+                            .small()
+                            .outline()
+                            .icon(IconName::Plus)
+                            .label(o.action_label.clone())
+                            .debug_selector(|| "settings-setup-button".into())
+                            .on_click(super::dispatch_here(&this.focus, SetUpEngine { offer }))
+                    }))
                     .child(crate::ui::widgets::focus_wrap(
                         "eng-add-wrap",
                         &this.engines.add_focus,
