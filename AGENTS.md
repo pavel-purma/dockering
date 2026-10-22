@@ -75,5 +75,7 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
 ## Commit style
 
 Conventional commits: `feat(containers): group rows by compose project [CON-010]`.
-Scopes: `core`, `hub`, `docker`, `wsl`, `wslc`, `terminal`, `ui`, `containers`, `images`,
-`volumes`, `networks`, `settings`, `keyboard`, `ci`, `docs`, `spec`.
+Scopes: `core`, `hub`, `docker`, `wsl`, `wslc`, `windows`, `terminal`, `ui`, `containers`,
+`images`, `volumes`, `networks`, `settings`, `keyboard`, `ci`, `docs`, `spec`, `release`,
+`update`, `installer`, `deps`, `repo`. The `PR title` check rejects any other scope;
+`test` is a type, not a scope (`test(ui): …`, not `fix(test): …`).
