@@ -14,6 +14,7 @@ copies, symlinks, or additional packages are needed, including on Windows and in
 | Skills and supporting files | `.agents/skills/<name>/` | Read through command adapters and shared repository guidance | Discovered natively and explicitly included through `skills.paths` |
 | Feature-planning command | Shared `feature-planning` skill | `.claude/commands/feature-planning.md` reads the shared skill | `command.feature-planning` adapter in `opencode.json` loads that skill |
 | Release command | Shared `release` skill | `.claude/commands/release.md` reads the shared skill | `command.release` adapter in `opencode.json` loads that skill |
+| winget command | Shared `winget` skill | `.claude/commands/winget.md` reads the shared skill | `command.winget` adapter in `opencode.json` loads that skill |
 
 OpenCode reads each complete Claude agent file as prompt text, including its frontmatter.
 That frontmatter is context, **not OpenCode configuration**. The OpenCode registration sets
@@ -55,6 +56,18 @@ and the release workflow:
 
 `/release` pauses before the release PR is created and before the draft is published
 ([skill](../.agents/skills/release/SKILL.md), [signing](signing.md), [runbook](release.md)).
+
+and the winget workflow, after a release is published:
+
+```text
+/winget                       # latest release: render the manifests, open the winget-pkgs pull request
+/winget v0.3.0                # a given release
+/winget status                # what winget-pkgs holds, open pull requests, gh access
+/winget pr 123456             # follow a winget-pkgs pull request
+```
+
+`/winget` pauses before the pull request is opened ([skill](../.agents/skills/winget/SKILL.md),
+[scripts](../scripts/winget/), [templates](../packaging/winget/README.md)).
 
 In Claude Code, ask the main agent to delegate to a specialist, or select one with `/agents`.
 In OpenCode, mention the specialist directly, for example:

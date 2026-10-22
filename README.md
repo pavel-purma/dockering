@@ -9,7 +9,7 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
   <a href="https://github.com/pavel-purma/dockering/releases/latest"><img src="https://img.shields.io/github/v/release/pavel-purma/dockering" alt="Latest release"></a>
   <a href="https://github.com/pavel-purma/dockering/releases"><img src="https://img.shields.io/github/downloads/pavel-purma/dockering/total" alt="Downloads"></a>
   <!-- winget is deferred until the first signed submission:
-  <a href="https://winstall.app/apps/PavelPurma.Dockering"><img src="https://img.shields.io/winget/v/PavelPurma.Dockering" alt="winget"></a>
+  <a href="https://winstall.app/apps/Dockering.Dockering"><img src="https://img.shields.io/winget/v/Dockering.Dockering" alt="winget"></a>
   -->
 </p>
 

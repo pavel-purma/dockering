@@ -66,6 +66,8 @@ pwsh -NoProfile scripts/dev.ps1 <cargo args> # Windows: runs cargo inside the VS
   does not discover that directory. Resolve supporting files relative to its directory.
 - For release, version, changelog or code-signing requests, load `release` the same way
   (`.agents/skills/release/SKILL.md`).
+- For publishing a released version to winget (the `microsoft/winget-pkgs` pull request) or checking one, load
+  `winget` the same way (`.agents/skills/winget/SKILL.md`).
 - Use the host's equivalent tools: `AskUserQuestion` in Claude Code is `question` in
   OpenCode; `Task` delegation is `task`; `Read`/`Grep`/`Glob` are `read`/`grep`/`glob`.
 - See `docs/agent-setup.md` for usage, maintenance, and validation commands.
