@@ -18,7 +18,7 @@ Docker · Docker inside WSL distros · WSL containers (WSLC). One lightweight wi
 
 ## Download
 
-**[Dockering 0.3.0](https://github.com/pavel-purma/dockering/releases/tag/v0.3.0)** is available
+**[Dockering 0.4.0](https://github.com/pavel-purma/dockering/releases/tag/v0.4.0)** is available
 for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 
 | Windows | macOS | Linux |
@@ -27,7 +27,7 @@ for Windows, macOS, and Linux on x64 and ARM64. Downloads are unsigned.
 | winget: planned after signing | | ARM64: [AppImage](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.AppImage) · [.deb](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.deb) · [.tar.gz](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-aarch64.tar.gz) |
 | Portable: [x64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-x64.zip) · [ARM64 zip](https://github.com/pavel-purma/dockering/releases/latest/download/Dockering-arm64.zip) | | |
 
-Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.3.0/SHA256SUMS).
+Check downloads against [SHA256SUMS](https://github.com/pavel-purma/dockering/releases/download/v0.4.0/SHA256SUMS).
 See [all releases](https://github.com/pavel-purma/dockering/releases) and the
 [verification record](docs/plan/release-checklist.md#evidence-for-v020).
 Public GitHub release builds generate build-provenance attestations: `gh attestation verify <file> -R pavel-purma/dockering`.

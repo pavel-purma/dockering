@@ -220,6 +220,6 @@ entries without default chords. The title-bar update button is reachable with `F
   and a second launch starts another such process (plan finding F2). Follow-up in its own plan.
 - `PUBLIC_KEYS` in `dk-update/src/keys.rs` is empty until the release keys are generated, so updates fail closed until then (REL-060 checklist).
 
-- The shared updater is implemented but no published build contains it: v0.1.0 to v0.3.0 have no updater, so the first updater build is installed by hand, and a live proof needs a second release after it. In-app installation on macOS is deferred (UPD-016); macOS offers *Download*. Windows installs update without OS signing (UPD-003); an unsigned installer's UAC prompt is expected to say *Unknown publisher* (⚠ verify, spike W1).
+- The shared updater is implemented but no published build contains it: v0.1.0 to v0.4.0 have no updater, so the first updater build is installed by hand, and a live proof needs a second release after it. In-app installation on macOS is deferred (UPD-016); macOS offers *Download*. Windows installs update without OS signing (UPD-003); an unsigned installer's UAC prompt is expected to say *Unknown publisher* (⚠ verify, spike W1).
 - No *Preview* update channel yet (UPD-001 MAY).
 - No delta updates. A full installer is about 20–30 MB.

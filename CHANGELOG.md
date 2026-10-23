@@ -9,7 +9,7 @@ Both changelogs are written only at release time, by the `/release` skill in the
 (REL-011, REL-019): feature pull requests don't edit them. Edit the wording in the release PR
 before merging it.
 
-## [0.4.0] - 2026-10-22
+## [0.4.0] - 2026-10-23
 
 Downloads are unsigned, as in 0.3.0. Automatic updates and winget remain deferred.
 
