@@ -93,6 +93,61 @@ These unchecked gates do not alter any historical release result below.
 - [ ] Attach exact commit, artifact, OS and architecture to each result. Linux runs and mocks do not complete the Windows items.
 - [ ] First updater release installed by hand, then a second release updates it by itself.
 
+## v0.4.0 (unsigned)
+
+Released from `main` at `6569447` as workspace version `0.4.0`: `feat` commits since `v0.3.0` (the bottom-right notification stack, starting stopped Windows Docker engines from the app) make this a minor bump under REL-011.
+
+### Before execution
+
+- [x] The maintainer approved the release at Gate 1 ("Open the release PR", 2026-10-22) and publication at Gate 2 ("Publish", 2026-10-23).
+- [x] Preparation [PR #62](https://github.com/pavel-purma/dockering/pull/62) merged as `6569447`; all checks passed ([CI run](https://github.com/pavel-purma/dockering/actions/runs/39846514508), second attempt; see the evidence notes).
+- [x] Workspace version and `CHANGELOG.md` match `v0.4.0`; the changelog date is the UTC publication date (the heading said 2026-10-22 and is corrected to 2026-10-23 in the record PR).
+- [x] Before the tag: `main` was `6569447`, no tag or release for `v0.4.0` existed, no release run was active.
+- [x] Channel: no repository variables are set (`PUBLIC_RELEASES`, `UPDATER`, `WINDOWS_SIGNING`, `MACOS_SIGNING`, `WINDOWS_SIGNER_SUBJECT` unset); so OS-unsigned, updater none, manifest unsigned.
+- [x] Third-party notices are current (CI checks this).
+
+### Draft verification
+
+- [x] The release matrix passed on all six targets ([run](https://github.com/pavel-purma/dockering/actions/runs/39860243215)).
+- [x] `scripts/verify-release.ps1 -Expect Unsigned -Updater none`: `RESULT 57 checks: 56 passed, 0 failed, 1 skipped` (the skip is `windows.arm64.exe.run` on an x64 host).
+- [x] Update channel (REL-084): the `updater-evidence-0.4.0` artifact of the release run has six files, every one `updater=false` and `seam=false`; `cargo xtask verify-update-artifacts --assets <dir> --version 0.4.0 --updater none`: no `.minisig` with `--updater none`; version 0.4.0; six entries matching their assets.
+- [x] Exactly 15 files; all `SHA256SUMS` entries and the six-platform manifest match.
+- [x] All 15 attestations pass `gh attestation verify` with source digest `6569447`, ref `refs/tags/v0.4.0`, the `release.yml` signer, self-hosted runners denied.
+- [x] Notes identify unsigned downloads and carry the sentence for the update channel (*Automatic updates and winget remain deferred.*, and the manifest has no signature).
+- [x] Windows CI installer tests passed for x64 and ARM64 on the exact commit ([run](https://github.com/pavel-purma/dockering/actions/runs/39860150646)); they do not start the application.
+- [x] Launch check on this machine (`-LaunchSmoke`, profile written by 0.3.0, then `--demo`): ran and passed.
+- [ ] Windows machine: install over the previous release, launch from the Start Menu, Docker connection, uninstall.
+- [ ] macOS machine (a physical Mac): mount the DMG, copy and launch the app, Docker-compatible connection. Install, launch, the page walk, quit and Gatekeeper's dialog on a quarantined copy are covered by the macOS smoke runs, which use `--demo` and a hosted runner.
+- [x] **Draft gate** (before publication, on the draft's own files): `Linux smoke` ([run](https://github.com/pavel-purma/dockering/actions/runs/39863813873)): all four legs passed. `macOS smoke`: the first run ([run](https://github.com/pavel-purma/dockering/actions/runs/39863817949)) failed `log_clean` on all three legs (cause under Open items, not an application defect); after the harness fix (#64) it was dispatched again on the unchanged draft ([run](https://github.com/pavel-purma/dockering/actions/runs/39917979101)) and passed on all three legs (macos-15, macos-15-intel, macos-26). Screenshots reviewed for the macOS 26 leg (demo first frame, update notice, Gatekeeper dialog); the other legs' screenshots are not recorded as reviewed.
+- [ ] Real Linux machine (not a container): launch the app with the machine's GPU driver and connect to Docker. Install and launch in clean containers are covered by the Linux smoke runs, which use `--demo` and software rendering.
+- [ ] Application sanity: containers, detail and logs, terminal, one lifecycle operation, images, volumes, networks, engine switching, Settings, keyboard navigation (new: the notification stack, the larger checkbox click area, starting stopped Windows engines).
+- [ ] WSL and WSLC recorded separately, including the new Windows engine start and first-run setup. Hosted CI does not verify these.
+
+### Publication
+
+- [x] Draft and notes reviewed; the maintainer's approval covers publication.
+- [x] The existing draft was published; no assets were replaced.
+- [x] Published as `v0.4.0`, stable/latest, `draft=false`, at `2026-10-23T07:37:54Z`.
+- [x] `verify-release.ps1 -Updater none -Published`: `RESULT 70 checks: 68 passed, 0 failed, 2 skipped`.
+- [x] `Linux smoke` run for the published `v0.4.0` ([run](https://github.com/pavel-purma/dockering/actions/runs/39919054541)): all four legs passed (ubuntu-24.04, ubuntu-26.04, fedora, arch); their contact sheets reviewed; `libc_floor` INFO (declares plain libc6, the binary needs glibc 2.39).
+- [ ] `macOS smoke` run for the published `v0.4.0`, started by the release event ([run](https://github.com/pavel-purma/dockering/actions/runs/39919054533)): **failed**, `log_clean` in the demo and upgrade scenarios on all three legs (the quarantine scenario passed). That run used the tag's commit, which predates the harness fix. See Open items.
+- [x] `macOS smoke` dispatched for the published `v0.4.0` on `main` at `5d0b973` ([run](https://github.com/pavel-purma/dockering/actions/runs/39919684407)): all three legs passed (macos-15, macos-15-intel, macos-26); first-frame, Settings and update-notice screenshots reviewed on macOS 26, first frames on macOS 15 and 15 Intel; `bundle_seal` INFO in the demo and upgrade scenarios and PASS in the quarantine scenario, as for an unsigned build.
+- [x] README download text and the release table in `docs/release.md` point to 0.4.0.
+- [x] The `winget` run: skipped ([run](https://github.com/pavel-purma/dockering/actions/runs/39919054608)).
+
+### Evidence for v0.4.0
+
+Exact release commit: [`6569447`](https://github.com/pavel-purma/dockering/commit/6569447b58d33b9cc9f9a2fca02d0fc862e6c64f). CI: [39860150646](https://github.com/pavel-purma/dockering/actions/runs/39860150646). Release run: [39860243215](https://github.com/pavel-purma/dockering/actions/runs/39860243215).
+Preparation PR #62: `test (macos-15)` failed once on `img_004_pull_status_line_without_pull_progress` (a 10 s `wait_until` timeout, the only failure) and passed on `gh run rerun --failed`; reported as a flake, not a pass. The local Python suite had one Windows-only error, `test_rel_085_serve_log_is_appended_…` (`Unsupported signal: 2`), which is also in #56.
+Harness fix PR #64 (merged as `5d0b973`): `test (windows-2025)` failed once on `hub_shutdown_flushes_and_returns_quickly` (0.79 s against the 500 ms limit) and passed on `gh run rerun --failed`; reported as a flake, not a pass.
+
+### Open items
+
+- The macOS smoke harness named the gpui-kit text-system warnings by their old module `gpui_macos`; gpui-kit 0.7.3 renamed it to `gpui_apple`, so the first draft-gate run and the release-event run failed `log_clean`. Fixed by #64 (allowlist accepts both). The release-event run of `v0.4.0` stays red because the workflow and script come from the tag's commit; a harness fix that lands after a tag does not apply to that release's automatic run.
+- Flaky test `hub_shutdown_flushes_and_returns_quickly` on the Windows runner (500 ms limit), as at v0.3.0.
+- Flaky macOS test `img_004_pull_status_line_without_pull_progress` (fixed 10 s `wait_until`).
+- `test_rel_085_serve_log_is_appended_…` fails on Windows (`send_signal(SIGINT)` is unsupported there). Neither this test nor the two flakes has an issue yet.
+
 ## v0.3.0 (unsigned)
 
 Released from `main` at `7bef9c1` as workspace version `0.3.0`: three `feat` commits since `v0.2.0` (keyboard navigation polish, Combined grouping, the WSLC start page) make this a minor bump under REL-011.
