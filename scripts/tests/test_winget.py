@@ -130,12 +130,9 @@ class WingetTextTests(unittest.TestCase):
         product_code = f"{app_id.group(1)}_is1"
         installer = (TEMPLATES / f"{PACKAGE_ID}.installer.yaml").read_text(encoding="utf-8")
         self.assertRegex(installer, rf'(?m)^ProductCode: "{re.escape(product_code)}"$')
-        self.assertRegex(
-            installer,
-            rf'(?ms)^AppsAndFeaturesEntries:\n  - DisplayName: Dockering\n    Publisher: Dockering contributors\n    ProductCode: "{re.escape(product_code)}"\n',
-        )
         # root-level values apply to every installer entry of an Inno package, so none of the entries may override them
-        self.assertEqual(installer.count("ProductCode:"), 2)
+        self.assertEqual(installer.count("ProductCode:"), 1)
+        self.assertNotIn("AppsAndFeaturesEntries", installer)
         self.assertRegex(iss, r'(?m)^#define AppName "Dockering"$')
         self.assertRegex(iss, r"(?m)^UninstallDisplayName=\{#AppName\}$")
         self.assertRegex(iss, r"(?m)^AppPublisher=Dockering contributors$")

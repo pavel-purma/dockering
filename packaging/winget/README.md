@@ -22,8 +22,7 @@ The manifests use schema **1.12.0**. Placeholders:
 Key choices:
 
 - `InstallerType: inno` and `UpgradeBehavior: install`.
-- `ProductCode` (and the same value in `AppsAndFeaturesEntries`) is the Inno uninstall key, `AppId` of
-  `packaging/windows/dockering.iss` plus `_is1`. winget matches the installed *Installed apps* entry to this
+- `ProductCode` is the Inno uninstall key, `AppId` of `packaging/windows/dockering.iss` plus `_is1`. winget matches the installed *Installed apps* entry to this
   package by it, so `winget list` and `winget upgrade` recognise a Dockering installed by hand. Without it the
   match falls back to the name and publisher, and the publisher in the locale file differs from the one the
   installer writes (`Dockering contributors`). A test keeps it equal to `AppId`.
