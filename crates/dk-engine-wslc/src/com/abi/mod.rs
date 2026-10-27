@@ -16,37 +16,37 @@ pub mod v3_0;
 /// A verified ABI module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiModule {
-    /// `idl/3.0.1`, service FileVersion 3.0.1.0 only (ENG-132).
+    /// IDL 3.0.1 and 3.0.3 (the same vtables; only `BuildImageOptions`, which is never called,
+    /// differs). Trusted for exactly the versions listed in [`MODULES`] (ENG-132).
     V3_0,
 }
 
-/// Static description of a module (also used on non-Windows for diagnostics/tests).
+/// Static description of one trusted version (also used on non-Windows for diagnostics/tests).
 #[derive(Debug, Clone, Copy)]
 pub struct AbiInfo {
     pub module: AbiModule,
-    pub min: WslVersion,
-    /// Inclusive.
-    pub max: WslVersion,
+    /// The one service FileVersion this entry trusts (exact, no range).
+    pub version: WslVersion,
     /// Vendored IDL directory (`crates/dk-engine-wslc/idl/<tag>`).
     pub idl_tag: &'static str,
 }
 
-/// Every verified module, newest first.
-pub const MODULES: &[AbiInfo] = &[AbiInfo {
-    module: AbiModule::V3_0,
-    min: WslVersion::new(3, 0, 1, 0),
-    max: WslVersion::new(3, 0, 1, 0),
-    idl_tag: "3.0.1",
-}];
+/// Every trusted version, newest first. Each needs its own vendored IDL and live evidence
+/// (spec 20 §5.7).
+pub const MODULES: &[AbiInfo] = &[
+    AbiInfo {
+        module: AbiModule::V3_0,
+        version: WslVersion::new(3, 0, 3, 0),
+        idl_tag: "3.0.3",
+    },
+    AbiInfo {
+        module: AbiModule::V3_0,
+        version: WslVersion::new(3, 0, 1, 0),
+        idl_tag: "3.0.1",
+    },
+];
 
 impl AbiModule {
-    pub fn info(self) -> AbiInfo {
-        // MODULES has exactly one entry per variant (tested).
-        *MODULES
-            .iter()
-            .find(|m| m.module == self)
-            .unwrap_or(&MODULES[0])
-    }
     pub fn name(self) -> &'static str {
         match self {
             AbiModule::V3_0 => "v3_0",
@@ -54,12 +54,9 @@ impl AbiModule {
     }
 }
 
-/// The ABI module verified for `v`, or `None` (→ CLI fallback). Never guesses.
+/// The ABI module verified for exactly `v`, or `None` (→ CLI fallback). Never guesses.
 pub fn select(v: &WslVersion) -> Option<AbiModule> {
-    MODULES
-        .iter()
-        .find(|m| *v >= m.min && *v <= m.max)
-        .map(|m| m.module)
+    MODULES.iter().find(|m| m.version == *v).map(|m| m.module)
 }
 
 #[cfg(test)]
@@ -70,10 +67,14 @@ mod tests {
     fn eng_132_exact_allowlist() {
         let v = |s| WslVersion::parse(s).expect("valid");
         assert_eq!(select(&v("3.0.1.0")), Some(AbiModule::V3_0));
+        assert_eq!(select(&v("3.0.3.0")), Some(AbiModule::V3_0));
         assert_eq!(select(&v("3.0.0")), None);
         assert_eq!(select(&v("3.0.17.3")), None);
         assert_eq!(select(&v("3.0.1.1")), None);
+        // Between two admitted versions: never inferred from its neighbours.
         assert_eq!(select(&v("3.0.2.0")), None);
+        assert_eq!(select(&v("3.0.3.1")), None);
+        assert_eq!(select(&v("3.0.4.0")), None);
         // Newer / older than anything verified → CLI.
         assert_eq!(select(&v("3.1.0")), None);
         assert_eq!(select(&v("4.0.0")), None);
@@ -81,13 +82,25 @@ mod tests {
         assert_eq!(select(&v("2.9.3")), None);
     }
 
+    #[test]
+    fn eng_132_one_entry_per_exact_version() {
+        for (i, a) in MODULES.iter().enumerate() {
+            for b in &MODULES[i + 1..] {
+                assert_ne!(a.version, b.version, "duplicate allowlist entry");
+                assert_ne!(a.idl_tag, b.idl_tag, "one vendored IDL per entry");
+            }
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn module_metadata_matches_submodule() {
-        let info = AbiModule::V3_0.info();
-        assert_eq!(info.min, v3_0::VERIFIED_MIN);
-        assert_eq!(info.max, v3_0::VERIFIED_MAX);
-        assert_eq!(info.idl_tag, v3_0::IDL_TAG);
+        let listed: Vec<_> = MODULES
+            .iter()
+            .filter(|m| m.module == AbiModule::V3_0)
+            .map(|m| (m.version, m.idl_tag))
+            .collect();
+        assert_eq!(listed, v3_0::VERIFIED);
     }
 
     #[test]

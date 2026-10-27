@@ -2232,12 +2232,12 @@ mod safety_tests {
     fn eng_127_live_default_explicit_identity_and_reopen() {
         assert!(crate::init_process_com_security());
         let v = crate::version::service_binary_version().expect("service FileVersion");
-        assert_eq!(v, WslVersion::new(3, 0, 1, 0));
+        let module = crate::com::abi::select(&v).expect("allowlisted service FileVersion");
         let (default, _) = block_on(WslcComEngine::connect(
             EngineId::new("binding-default"),
             None,
             v,
-            AbiModule::V3_0,
+            module,
         ))
         .unwrap();
         let target = block_on(default.validate_target()).unwrap();
@@ -2249,7 +2249,7 @@ mod safety_tests {
             EngineId::new("binding-explicit"),
             Some(target.name.clone()),
             v,
-            AbiModule::V3_0,
+            module,
         ))
         .unwrap();
         assert_eq!(block_on(explicit.validate_target()).unwrap(), target);
@@ -2345,7 +2345,13 @@ mod safety_tests {
 
     #[test]
     fn eng_132_unknown_version_zero_activation() {
-        for v in [WslVersion::new(3, 0, 1, 1), WslVersion::new(3, 0, 2, 0)] {
+        // Unadmitted versions never activate, including ones adjacent to an admitted one.
+        for v in [
+            WslVersion::new(3, 0, 1, 1),
+            WslVersion::new(3, 0, 2, 0),
+            WslVersion::new(3, 0, 3, 1),
+            WslVersion::new(3, 0, 4, 0),
+        ] {
             assert!(
                 block_on(WslcComEngine::connect(
                     EngineId::new("test"),

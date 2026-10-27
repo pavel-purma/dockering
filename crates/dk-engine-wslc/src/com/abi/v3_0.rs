@@ -1,5 +1,8 @@
 //! ABI module for the internal WSLC COM interfaces at WSL **3.0.x** (`idl/3.0.1/wslc.idl`,
-//! byte-identical to tags 2.9.13, 3.0.0 and 3.0.1, checked 2026-10-02).
+//! byte-identical to tags 2.9.13, 3.0.0 and 3.0.1, checked 2026-10-02). `idl/3.0.3/wslc.idl`
+//! differs only in `WSLCBuildImageOptions` (never called here, see `BuildImage`) and comment
+//! text, so the same declarations serve 3.0.3 (reviewed 2026-10-27, `xtask` test
+//! `vendored_3_0_1_to_3_0_3_differs_only_in_build_image_options`).
 //!
 //! Every interface declares **every** method of the IDL in IDL order so vtable offsets are
 //! exact. Methods we never call keep their real signature where it is cheap to spell, otherwise
@@ -25,13 +28,12 @@ use windows::core::{BOOL, GUID, HRESULT, IUnknown, IUnknown_Vtbl, PCSTR, PCWSTR,
 
 use crate::version::WslVersion;
 
-/// Lowest WSL version this module was verified against (IDL identical since 2.9.13; live-tested
-/// on 3.0.1 only, so the range starts at 3.0.0).
-pub const VERIFIED_MIN: WslVersion = WslVersion::new(3, 0, 1, 0);
-/// Highest WSL version (inclusive): any 3.0.x patch release.
-pub const VERIFIED_MAX: WslVersion = WslVersion::new(3, 0, 1, 0);
-/// Vendored IDL directory this module was written from.
-pub const IDL_TAG: &str = "3.0.1";
+/// The exact WSL service versions this module is trusted for, each with the vendored IDL it was
+/// verified against. Mirrors the `MODULES` entries for `V3_0` (tested); there is no range.
+pub const VERIFIED: &[(WslVersion, &str)] = &[
+    (WslVersion::new(3, 0, 3, 0), "3.0.3"),
+    (WslVersion::new(3, 0, 1, 0), "3.0.1"),
+];
 
 // ───────────────────────────── constants ─────────────────────────────
 
@@ -884,7 +886,7 @@ mod tests {
     fn slot_offsets_of_called_methods() {
         let p = size_of::<usize>();
         let base = IUNKNOWN_VTBL_SIZE;
-        // Spike F-6/F-7 proved these slots live on 3.0.1.
+        // Spike F-6/F-7 proved these slots live on 3.0.1; the 3.0.3 run is in spec 20 §5.8.
         assert_eq!(
             offset_of!(IWSLCSessionManager_Vtbl, OpenSessionByName),
             base + 5 * p
