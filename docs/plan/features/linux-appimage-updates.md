@@ -199,7 +199,7 @@ Toast:     Dockering 0.4.1 is ready to install.                       [ Restart 
 | *Download* (macOS, `.deb`, portable, read-only, degraded) | shown | Dockering X.Y.Z is available | `ViewReleaseNotes` (release page) |
 
 - **Components:** GPUI Kit `Button` (ghost, small, icon) like its neighbours, no custom element. Icon `Lucide::CircleArrowUp`,
-  added to `ExtraIcons` in `crates/dockering/src/assets.rs` (the Lucide set in `gpui-kit-assets` 0.7.0 has it; fallback
+  added to `ExtraIcons` in `crates/dockering/src/assets.rs` (the Lucide set in `gpui-kit-assets` 0.8.0 has it; fallback
   `IconName::ArrowUp`). Accessible name from `Button::accessibility_label` ('Update available: Dockering X.Y.Z';
   present in `gpui-component` 0.7.0, checked in the crate source 2026-10-18); without it an icon-only button has no
   name, which is why the Linux smoke test's AT-SPI helper can't see table icon buttons.

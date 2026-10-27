@@ -74,7 +74,7 @@ dockering ──▶ dk-hub ──▶ dk-engine-docker ──▶ dk-core
 
 | Crate | Use | Where |
 |---|---|---|
-| `gpui-kit` 0.7 (re-exports `gpui`, `gpui-component`) | UI framework and component library | dockering, dk-terminal |
+| `gpui-kit` 0.8 (re-exports `gpui`, `gpui-component`) | UI framework and component library | dockering, dk-terminal |
 | `bollard` 0.21 (`ssl`, `pipe` features) | Docker Engine API client | dk-engine-docker |
 | `tokio` 1.x (`rt-multi-thread`, `process`, `net`, `io-util`, `time`, `sync`, `macros`) | Hub runtime | dk-hub, engines |
 | `tokio-util` (`CancellationToken`, codecs) | Cancellation, line framing | dk-hub, engines |

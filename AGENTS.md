@@ -1,7 +1,7 @@
 # AGENTS.md — Shared operating manual for agents working on Dockering
 
 Dockering is a cross-platform (Windows/macOS/Linux) desktop client for container engines.
-It's written in Rust with **GPUI Kit** (`gpui-kit` 0.7) and talks to Docker over a socket, pipe,
+It's written in Rust with **GPUI Kit** (`gpui-kit` 0.8) and talks to Docker over a socket, pipe,
 or TCP, to Docker inside WSL distros, and to WSL containers (WSLC).
 
 ## Read before you work

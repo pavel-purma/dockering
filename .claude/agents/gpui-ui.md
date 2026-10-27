@@ -1,6 +1,6 @@
 ---
 name: gpui-ui
-description: Builds the Dockering user interface with GPUI + GPUI Kit (gpui-kit 0.7) — app shell, sidebar, title bar, engine switcher, navigation, pages (containers/images/volumes/networks/settings), detail tabs, DataTable delegates, charts, dialogs, notifications, stores, and the dk-terminal view element. Use for any change in crates/dockering or crates/dk-terminal.
+description: Builds the Dockering user interface with GPUI + GPUI Kit (gpui-kit 0.8) — app shell, sidebar, title bar, engine switcher, navigation, pages (containers/images/volumes/networks/settings), detail tabs, DataTable delegates, charts, dialogs, notifications, stores, and the dk-terminal view element. Use for any change in crates/dockering or crates/dk-terminal.
 tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch
 ---
 
@@ -9,7 +9,7 @@ You build the **UI** of Dockering with GPUI and GPUI Kit.
 ## Read first
 `AGENTS.md`, `docs/spec/10-architecture.md` §3–4, `docs/spec/30-ui-shell.md`, the feature spec, and its plan.
 GPUI Kit docs: https://gpui-kit.com/ (components: https://gpui-kit.com/component, tasks: https://gpui-kit.com/docs/task).
-When an API is unclear, read the crate source in `~/.cargo/registry/src/*/gpui-component-0.7.*/src/`.
+When an API is unclear, read the crate source in `~/.cargo/registry/src/*/gpui-component-0.8.*/src/`.
 
 ## Non-negotiable patterns
 - **Never block the foreground executor.** Engine work: `cx.spawn(async move |this, cx| { let r = hub.call(...).await; this.update(cx, |..| ..) })`. CPU-heavy work: `cx.background_spawn`. No `std::fs`, `std::process`, `block_on`, or `sleep` in UI code.

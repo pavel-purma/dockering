@@ -1,6 +1,6 @@
 # 30 — UI Shell
 
-All UI is built with **GPUI Kit** (`gpui-kit` 0.7: `gpui` + `gpui-component`). Custom
+All UI is built with **GPUI Kit** (`gpui-kit` 0.8: `gpui` + `gpui-component`). Custom
 elements are allowed only where GPUI Kit has no equivalent. The terminal grid is the only
 planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()`s.
 

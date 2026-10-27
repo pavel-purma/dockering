@@ -28,7 +28,7 @@ ignore-transitive-dependencies = false
 private = { ignore = true }
 
 # Per-crate acceptances mirror the `exceptions` in deny.toml (REL-003). Keep both in sync.
-# 0BSD (public-domain-equivalent), transitive via gpui-component (gpui-kit 0.7).
+# 0BSD (public-domain-equivalent), transitive via gpui-component (gpui-kit 0.8).
 [enum-iterator]
 accepted = ["0BSD"]
 
