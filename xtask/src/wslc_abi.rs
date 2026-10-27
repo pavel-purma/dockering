@@ -62,12 +62,20 @@ pub fn run(args: &[String]) -> Result<()> {
     }
     if changed {
         println!(
-            "\nThe internal WSLC ABI differs. Vendor idl/{tag}/, add a com/abi module, run the live \
-             suite on WSL {tag}; until then WSL {tag} uses the CLI fallback."
+            "\nThe internal WSLC ABI differs. Vendor idl/{tag}/, review the diff against the vtables \
+             in com/abi (a new module if a called slot or struct changed), run the live suite on \
+             WSL {tag}; until then WSL {tag} uses the CLI fallback."
         );
         std::process::exit(1);
     }
-    println!("\nNo ABI change: extend the verified range of the existing module after a live run.");
+    if idl_root.join(&tag).is_dir() {
+        println!("\nNo ABI change against the vendored idl/{tag}/.");
+    } else {
+        println!(
+            "\nNo ABI change: vendor idl/{tag}/ and add an exact MODULES entry once the live \
+             suite has passed on WSL {tag}."
+        );
+    }
     Ok(())
 }
 
@@ -513,6 +521,32 @@ mod tests {
         );
         let r = compare(&parse_idl(&src), &parse_idl(&iid));
         assert!(r.iter().any(|l| l.contains("IID")), "{r:#?}");
+    }
+
+    #[test]
+    fn vendored_3_0_1_to_3_0_3_differs_only_in_build_image_options() {
+        // The review behind admitting WSL 3.0.3.0 to the native allowlist (spec 20 §5.7, issue
+        // #53): `v3_0` never calls BuildImage, so this is the only ABI change it can ignore.
+        let read = |tag: &str, f: &str| {
+            std::fs::read_to_string(
+                workspace_root()
+                    .join("crates/dk-engine-wslc/idl")
+                    .join(tag)
+                    .join(f),
+            )
+            .expect("vendored idl")
+        };
+        let diff = |f: &str| compare(&parse_idl(&read("3.0.1", f)), &parse_idl(&read("3.0.3", f)));
+        assert!(diff("WSLCShared.idl").is_empty());
+        let r = diff("wslc.idl");
+        assert_eq!(
+            r[0], "type WSLCBuildImageOptions: members changed",
+            "{r:#?}"
+        );
+        assert!(
+            r[1..].iter().all(|l| l.starts_with("  [")),
+            "only members of that one type may differ: {r:#?}"
+        );
     }
 
     #[test]

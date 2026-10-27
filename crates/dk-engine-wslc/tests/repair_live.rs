@@ -277,7 +277,7 @@ impl Drop for OwnedProbes {
 }
 
 #[tokio::test]
-#[ignore = "mutates only own hello-world containers; needs normal-user WSL service 3.0.1.0"]
+#[ignore = "mutates only own hello-world containers; needs a normal-user WSL service on an allowlisted version"]
 async fn eng_127_128_normal_user_hello_world_acceptance() {
     let token = bounded(tokio::process::Command::new("pwsh")
         .args(["-NoProfile", "-Command", "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"])
@@ -298,7 +298,6 @@ async fn eng_127_128_normal_user_hello_world_acceptance() {
         "must use installed CLI, not override"
     );
     let v = version::detect().expect("WSL service version");
-    assert_eq!(v, version::WslVersion::new(3, 0, 1, 0));
     let module = com::select(&v).expect("exact trusted ABI");
     let (native, check) = bounded(com::WslcComEngine::connect(
         EngineId::new("acceptance-native"),

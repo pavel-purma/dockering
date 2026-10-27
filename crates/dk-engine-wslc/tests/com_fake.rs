@@ -12,9 +12,10 @@ use dk_core::{
     Capabilities, ContainerAction, ContainerQuery, ContainerState, Engine, EngineError, EngineId,
     LogOpts, LogStream, Proto, RemoveContainerOpts, ResourceKind, VolumeSpec,
 };
-use dk_engine_wslc::com::WslcComEngine;
 use dk_engine_wslc::com::fake::{self, FakeManager, OPEN_OPERATIONS, Shared};
 use dk_engine_wslc::com::ffi::hr;
+use dk_engine_wslc::com::{self, WslcComEngine};
+use dk_engine_wslc::version::WslVersion;
 use futures::StreamExt;
 use futures::executor::block_on;
 
@@ -63,6 +64,32 @@ fn self_check_through_fake() {
     assert!(matches!(bad, Err(EngineError::Protocol(_))), "{bad:?}");
     let names = block_on(e.list_session_names()).expect("sessions");
     assert_eq!(names, vec!["wslc-cli-admin-tester", "wslc-cli-tester"]);
+}
+
+#[test]
+fn eng_132_self_check_for_every_admitted_version() {
+    let _serial = serial();
+    for (admitted, triple) in [
+        (WslVersion::new(3, 0, 1, 0), (3, 0, 1)),
+        (WslVersion::new(3, 0, 3, 0), (3, 0, 3)),
+    ] {
+        assert!(
+            com::select(&admitted).is_some(),
+            "{admitted} is on the allowlist"
+        );
+        let (e, state) = engine();
+        state.lock().expect("state").version = triple;
+        let check = block_on(e.self_check(Some(admitted))).expect("self-check");
+        assert_eq!(check.com_version, triple, "{admitted}");
+        // A server of another admitted version is not this version: the triple must match.
+        let other = if triple == (3, 0, 3) {
+            WslVersion::new(3, 0, 1, 0)
+        } else {
+            WslVersion::new(3, 0, 3, 0)
+        };
+        let bad = block_on(e.self_check(Some(other)));
+        assert!(matches!(bad, Err(EngineError::Protocol(_))), "{bad:?}");
+    }
 }
 
 #[test]
