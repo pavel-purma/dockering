@@ -14,17 +14,17 @@ all-features = true
 [advisories]
 # RustSec advisories are checked on every CI run (`cargo deny check`).
 # Vulnerabilities always fail. The ignores below are *unmaintained* notices for
-# crates we only get transitively through the exactly pinned `gpui-kit` 0.7 and
+# crates we only get transitively through the exactly pinned `gpui-kit` 0.8 and
 # cannot replace ourselves. Re-check them on every gpui-kit upgrade PR; cargo-deny
 # warns (advisory-not-detected) once an ignore becomes stale so it can be removed.
 ignore = [
-  { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, transitive via gpui-base (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained proc-macro, transitive via gpui-component and metal (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained, transitive via fontdb/usvg/cosmic-text (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: unmaintained, transitive via usvg/resvg (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2026-0370", reason = "zvariant: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2026-0371", reason = "zbus_names: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.7)" },
-  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.7)" },
+  { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, transitive via gpui-base (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained proc-macro, transitive via gpui-component and metal (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained, transitive via fontdb/usvg/cosmic-text (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2026-0206", reason = "rustybuzz: unmaintained, transitive via usvg/resvg (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.8)" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: unmaintained, transitive via atspi-common/accesskit_unix (gpui-kit 0.8)" },
 ]
 
 [licenses]
@@ -44,7 +44,7 @@ allow = [
 # Keep non-project-wide allowances narrow and document why each crate needs it.
 # Only permissive licences may appear here; GPL/AGPL/LGPL must never be excepted.
 exceptions = [
-  # 0BSD is a public-domain-equivalent permissive licence; transitive via gpui-component (gpui-kit 0.7).
+  # 0BSD is a public-domain-equivalent permissive licence; transitive via gpui-component (gpui-kit 0.8).
   { crate = "enum-iterator", allow = ["0BSD"] },
   { crate = "enum-iterator-derive", allow = ["0BSD"] },
 ]
