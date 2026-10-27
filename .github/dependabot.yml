@@ -15,6 +15,11 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # dk-engine-wslc's #[interface]/#[implement] macros expand to ::windows_core paths, so this must
+      # match the `windows` crate (0.62.x), and `windows` has no 0.100 yet. Bump both by hand once it does.
+      - dependency-name: windows-core
+        versions: [">=0.63"]
 
   - package-ecosystem: github-actions
     directory: /
