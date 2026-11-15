@@ -1550,34 +1550,55 @@ fn kbd_026_f5_refetches_everything(cx: &mut TestAppContext) {
     h.shutdown();
 }
 
+/// Clicks `dx` px right of the centre of the element with `selector`.
+fn click_selector(
+    h: &crate::testing::Harness,
+    cx: &mut TestAppContext,
+    selector: &'static str,
+    dx: f32,
+) {
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    let b = visual
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} rendered"));
+    let at = gpui_kit::point(b.center().x + gpui_kit::px(dx), b.center().y);
+    visual.simulate_click(at, Default::default());
+    cx.run_until_parked();
+}
+
+fn bounds_of(
+    h: &crate::testing::Harness,
+    cx: &mut TestAppContext,
+    selector: &'static str,
+) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+    h.draw(cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
+    visual.debug_bounds(selector)
+}
+
 /// Pointer commands resolve where the user clicked, not wherever keyboard focus was left
 /// (KBD-007). Opening the engine switcher with the mouse and dismissing it with a click on
-/// the title bar used to leave focus in the title bar; header buttons dispatch their action
-/// from the focused element, so the group-by menu and the row ⋮ menu stopped opening.
+/// its backdrop must leave header buttons working: they dispatch their action from where they
+/// were clicked, so the group-by menu and the row ⋮ menu still open.
 #[gpui_kit::test]
-fn kbd_007_header_menus_open_after_switcher_dismissed_by_title_click(cx: &mut TestAppContext) {
+fn kbd_007_header_menus_open_after_switcher_dismissed_by_backdrop_click(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     let page = h.wait_containers(cx);
-    let click = |cx: &mut TestAppContext, selector: &'static str, dx: f32| {
-        h.draw(cx);
+    let switcher_click_away = |cx: &mut TestAppContext| {
+        click_selector(&h, cx, "sidebar-engine", 0.);
+        assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+        // The dimmed backdrop, left of the panel.
+        let panel = bounds_of(&h, cx, "overlay-panel").expect("switcher panel");
+        let at = gpui_kit::point(panel.left() - gpui_kit::px(40.), panel.center().y);
         let mut visual = gpui_kit::VisualTestContext::from_window(h.any_window(), cx);
-        let b = visual
-            .debug_bounds(selector)
-            .unwrap_or_else(|| panic!("{selector} rendered"));
-        let at = gpui_kit::point(b.center().x + gpui_kit::px(dx), b.center().y);
         visual.simulate_click(at, Default::default());
         cx.run_until_parked();
-    };
-    let switcher_click_away = |cx: &mut TestAppContext| {
-        click(cx, "engine-switcher-button", 0.);
-        assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
-        // Empty title-bar space left of the switcher button.
-        click(cx, "engine-switcher-button", -260.);
         assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
     };
 
     switcher_click_away(cx);
-    click(cx, "group-by", 0.);
+    click_selector(&h, cx, "group-by", 0.);
     assert!(
         cx.read(|cx| page.read(cx).menu_open()),
         "group-by menu opens after the switcher was dismissed"
@@ -1586,10 +1607,276 @@ fn kbd_007_header_menus_open_after_switcher_dismissed_by_title_click(cx: &mut Te
     assert!(!cx.read(|cx| page.read(cx).menu_open()));
 
     switcher_click_away(cx);
-    click(cx, "row-more-1", 0.);
+    click_selector(&h, cx, "row-more-1", 0.);
     assert!(
         cx.read(|cx| page.read(cx).table().read(cx).key_menu_open()),
         "row ⋮ menu opens after the switcher was dismissed"
     );
+    h.shutdown();
+}
+
+// ── engine picker (ENG-100, ENG-101, ENG-165, ENG-166) ───────────────────────────────────
+
+/// Whether the table holds focus (the invoker the switcher returns to).
+fn table_focused(h: &crate::testing::Harness, cx: &mut TestAppContext) -> bool {
+    let page = h.page(cx).expect("containers page");
+    cx.update_window(h.any_window(), |_, window, cx| {
+        page.read(cx).table().focus_handle(cx).is_focused(window)
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn eng_100_title_bar_has_no_engine_button(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let title = bounds_of(&h, cx, "title-actions").expect("title actions");
+    assert!(bounds_of(&h, cx, "engine-switcher-button").is_none());
+    // The engine is shown in the sidebar footer and the status bar, below the title bar.
+    for selector in ["sidebar-engine", "status-engine-button"] {
+        let b = bounds_of(&h, cx, selector).unwrap_or_else(|| panic!("{selector}"));
+        assert!(
+            b.top() > title.bottom(),
+            "{selector} is not in the title bar"
+        );
+    }
+    // KBD-005: with no update offer the title region's default is *Refresh*.
+    let refresh = h.read(cx, |s, _, _| s.refresh_focus().clone());
+    h.focus_table(cx);
+    h.press(cx, "shift-f6 shift-f6");
+    assert_eq!(
+        h.read(cx, |s, window, cx| s.current_region(window, cx)),
+        Some(Region::TitleBar)
+    );
+    assert!(h.is_focused(cx, &refresh));
+    h.shutdown();
+}
+
+/// The switcher panel's bounds while it is open.
+fn switcher_panel(
+    h: &crate::testing::Harness,
+    cx: &mut TestAppContext,
+) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    bounds_of(h, cx, "overlay-panel").expect("switcher panel")
+}
+
+#[gpui_kit::test]
+fn eng_101_switcher_is_fixed_size_modal(cx: &mut TestAppContext) {
+    // One engine.
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "secondary-k");
+    let one = switcher_panel(&h, cx);
+    assert_eq!(one.size.width, gpui_kit::px(560.), "as wide as the palette");
+    assert!(
+        (one.size.height.as_f32() - 560.).abs() < 1.,
+        "as tall as the palette's cap, got {:?}",
+        one.size
+    );
+    h.press(cx, "escape");
+    h.press(cx, "secondary-shift-p");
+    let palette = bounds_of(&h, cx, "overlay-panel").expect("palette panel");
+    assert_eq!(one.origin, palette.origin, "placed like the palette");
+    h.press(cx, "escape");
+    h.shutdown();
+
+    // Many engines, then a filter that matches nothing: the same panel.
+    let h = start(
+        cx,
+        Setup {
+            extra_engines: (0..16)
+                .map(|i| dk_core::fake::FakeEngine::new(format!("extra{i}")))
+                .collect(),
+            ..Default::default()
+        },
+    );
+    h.wait_containers(cx);
+    h.wait_until(cx, "seventeen engines listed", |_, cx| {
+        h.shell.read(cx).engines().read(cx).engines().len() == 17
+    });
+    h.focus_table(cx);
+    h.press(cx, "secondary-k");
+    let many = switcher_panel(&h, cx);
+    assert_eq!(many, one, "the engine count doesn't size the panel");
+    h.type_text(cx, "no such engine");
+    cx.run_until_parked();
+    let none = switcher_panel(&h, cx);
+    assert_eq!(none, one, "filtering doesn't size the panel");
+    h.press(cx, "escape");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    assert!(table_focused(&h, cx), "focus returns to the invoker");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_165_sidebar_card_opens_switcher(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    // The card is pinned to the bottom of the sidebar, just above the status bar.
+    let card = bounds_of(&h, cx, "sidebar-engine").expect("engine card");
+    let status = bounds_of(&h, cx, "status-engine-button").expect("status bar");
+    assert!(status.top() - card.bottom() < gpui_kit::px(24.), "{card:?}");
+    click_selector(&h, cx, "sidebar-engine", 0.);
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.press(cx, "escape");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    assert!(
+        table_focused(&h, cx),
+        "a click doesn't move focus into the sidebar"
+    );
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_165_collapsed_card_opens_switcher(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "secondary-b");
+    assert!(h.read(cx, |s, _, _| s.sidebar_collapsed()));
+    let card = bounds_of(&h, cx, "sidebar-engine").expect("engine icon button");
+    assert_eq!(card.size.width, gpui_kit::px(32.), "an icon button");
+    // ENG-108: collapsed, the status bar names the engine first.
+    let button = bounds_of(&h, cx, "status-engine-button").expect("left section");
+    let name = bounds_of(&h, cx, "status-engine-name").expect("engine name");
+    let facts = bounds_of(&h, cx, "status-engine").expect("kind and facts");
+    assert!(
+        name.left() - button.left() < gpui_kit::px(8.),
+        "{name:?} in {button:?}"
+    );
+    let state = bounds_of(&h, cx, "status-state").expect("state label, no dot");
+    assert!(name.right() < state.left() && state.right() < facts.left());
+    click_selector(&h, cx, "sidebar-engine", 0.);
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_165_sidebar_cursor_enter_opens_switcher(cx: &mut TestAppContext) {
+    use crate::shell::app_shell::SidebarEntry;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    let nav = h.read(cx, |s, _, _| s.sidebar_focus().clone());
+    h.focus(cx, &nav);
+    // The card is the cursor's last entry; reaching it doesn't navigate.
+    h.press(cx, "end");
+    let at = h.read(cx, |s, _, cx| {
+        s.sidebar_entries(cx)[s.sidebar_cursor()].clone()
+    });
+    assert_eq!(at, SidebarEntry::Engine);
+    assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Containers);
+    h.press(cx, "enter");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.press(cx, "escape");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    assert!(h.is_focused(cx, &nav), "focus returns to the sidebar");
+    assert_eq!(h.read(cx, |s, _, _| s.route().clone()), Route::Containers);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_165_card_on_settings_routes(cx: &mut TestAppContext) {
+    use crate::nav::SettingsSection;
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "secondary-,");
+    let general = Route::Settings {
+        section: SettingsSection::General,
+    };
+    h.wait_until(cx, "settings", |_, cx| *h.shell.read(cx).route() == general);
+    assert!(bounds_of(&h, cx, "sidebar-engine").is_some());
+    // The cursor moves onto the card and the section stays.
+    let nav = h.read(cx, |s, _, _| s.sidebar_focus().clone());
+    h.focus(cx, &nav);
+    h.press(cx, "end");
+    assert_eq!(h.read(cx, |s, _, _| s.route().clone()), general);
+    h.press(cx, "enter");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.press(cx, "escape");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::None);
+    click_selector(&h, cx, "sidebar-engine", 0.);
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    assert_eq!(h.read(cx, |s, _, _| s.route().clone()), general);
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_166_status_engine_click_opens_switcher(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.wait_until(cx, "info loaded", |_, cx| {
+        h.shell.read(cx).store().unwrap().read(cx).info().is_some()
+    });
+    h.focus_table(cx);
+    // ENG-108: the expanded sidebar's card shows the name and state, so the status bar doesn't.
+    assert!(bounds_of(&h, cx, "status-engine-name").is_none());
+    assert!(bounds_of(&h, cx, "status-state").is_none());
+    let button = bounds_of(&h, cx, "status-engine-button").expect("left section");
+    let facts = bounds_of(&h, cx, "status-engine").expect("kind and facts");
+    assert!(facts.right() <= button.right());
+    // Anywhere on the section opens the switcher, here on the facts.
+    let dx = (facts.center().x - button.center().x).as_f32();
+    click_selector(&h, cx, "status-engine-button", dx);
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.press(cx, "escape");
+    assert!(table_focused(&h, cx), "focus returns to the page");
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_108_status_bar_keeps_its_height_without_state(cx: &mut TestAppContext) {
+    let ui_state = dk_hub::UiState {
+        last_engine: Some(dk_core::EngineId::new("demo")),
+        ..Default::default()
+    };
+    let h = start(
+        cx,
+        Setup {
+            ui_state,
+            failing: vec![("demo".into(), EngineError::unreachable("down"))],
+            ..Default::default()
+        },
+    );
+    h.wait_until(cx, "engine failed", |_, cx| {
+        h.shell
+            .read(cx)
+            .engines()
+            .read(cx)
+            .active()
+            .is_some_and(|s| matches!(s.state, dk_core::EngineState::Failed { .. }))
+    });
+    assert!(!h.read(cx, |s, _, _| s.sidebar_collapsed()));
+    // Expanded sidebar: never a connection state, even before there are details.
+    assert!(bounds_of(&h, cx, "status-state").is_none());
+    // The bar stays, as tall as the connected bar (text, padding, border).
+    let height = bounds_of(&h, cx, "status-bar")
+        .expect("status bar")
+        .size
+        .height;
+    assert_eq!(height, gpui_kit::px(25.));
+    h.shutdown();
+}
+
+#[gpui_kit::test]
+fn eng_166_status_region_enter_opens_switcher(cx: &mut TestAppContext) {
+    let h = start(cx, Setup::default());
+    h.wait_containers(cx);
+    h.focus_table(cx);
+    h.press(cx, "f6");
+    assert_eq!(
+        h.read(cx, |s, window, cx| s.current_region(window, cx)),
+        Some(Region::StatusBar)
+    );
+    h.press(cx, "enter");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
+    h.press(cx, "escape");
+    let status = h.read(cx, |s, _, _| s.status_focus().clone());
+    assert!(h.is_focused(cx, &status), "focus returns to the status bar");
+    h.press(cx, "space");
+    assert_eq!(h.read(cx, |s, _, _| s.overlay()), Overlay::Switcher);
     h.shutdown();
 }

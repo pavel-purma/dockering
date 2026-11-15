@@ -1,8 +1,8 @@
-//! Engine switcher popover (`Mod+K`, ENG-101/KBD-021/075): grouped Local / WSL distros /
-//! WSL containers / Remote; status dot, version, OS/arch tooltip, "also reachable via"
-//! (ENG-009), unsupported entries greyed with the reason (ENG-112), stopped WSL distros
-//! offer *Start & connect* (ENG-106); filter as you type; arrows + Enter; Manage engines… in
-//! the footer. Rescan lives in Settings › Engines (ENG-113).
+//! Engine switcher, a fixed-size modal panel (`Mod+K`, ENG-101/KBD-021/075): grouped Local /
+//! WSL distros / WSL containers / Remote; status dot, version, OS/arch tooltip, "also
+//! reachable via" (ENG-009), unsupported entries greyed with the reason (ENG-112), stopped WSL
+//! distros offer *Start & connect* (ENG-106); filter as you type; arrows + Enter; Manage
+//! engines… in the footer. Rescan lives in Settings › Engines (ENG-113).
 
 use dk_core::{EngineGroup, EngineKind, EngineState, EngineStatus};
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -10,8 +10,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, Render,
-    SharedString, Subscription, Window, div, px,
+    App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, Pixels,
+    Render, SharedString, Subscription, Window, div, px,
 };
 
 use crate::actions::{ManageEngines, switcher};
@@ -73,6 +73,7 @@ pub struct EngineSwitcher {
     query: String,
     cursor: usize,
     focus: FocusHandle,
+    height: Pixels,
     _subs: Vec<Subscription>,
 }
 
@@ -98,11 +99,18 @@ impl EngineSwitcher {
             query: String::new(),
             cursor: 0,
             focus: cx.focus_handle(),
+            height: px(480.),
             _subs: subs,
         };
         let active = this.entries(cx).iter().position(|e| e.active);
         this.cursor = active.unwrap_or(0);
         this
+    }
+
+    /// The view's fixed height; the rows take what the filter and footer leave, so the panel
+    /// never resizes with the rows or the filter (ENG-101).
+    pub fn set_height(&mut self, h: Pixels) {
+        self.height = h;
     }
 
     pub fn focus_filter(&self, window: &mut Window, cx: &mut App) {
@@ -309,13 +317,15 @@ impl Render for EngineSwitcher {
             .on_action(cx.listener(Self::on_down))
             .on_action(cx.listener(Self::on_choose))
             .on_action(cx.listener(Self::on_close))
-            .w(px(380.))
+            .w_full()
+            .h(self.height)
             .gap_1()
             .child(Input::new(&self.filter).small())
             .child(
                 v_flex()
                     .id("engine-rows")
-                    .max_h(px(360.))
+                    .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
                     .children(children),
             )

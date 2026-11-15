@@ -8,7 +8,6 @@ use std::rc::Rc;
 
 use dk_core::{EngineError, EngineId, EngineState};
 use dk_hub::{ALREADY_APPLYING, ApplyOutcome, OfferStage, ThemeMode, UpdateStatus};
-use gpui_kit::component::ThemeStyled as _;
 use gpui_kit::component::badge::Badge;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::command::CommandState;
@@ -30,7 +29,7 @@ use super::engine_views;
 use super::menus;
 use super::regions::{Region, RegionSlot, Regions};
 use super::shortcuts::ShortcutList;
-use super::sidebar_nav::{NavItem, NavMenu};
+use super::sidebar_nav::{EngineCard, NavItem, NavMenu};
 use super::switcher::{Choice, EngineSwitcher as SwitcherView, SwitcherEvent, kind_icon};
 use super::{ShellState, palette, update_button};
 use crate::actions::*;
@@ -51,7 +50,7 @@ use crate::ui::menu::{KeyMenu, MenuAnchor};
 use crate::ui::notify;
 use crate::ui::page::PageView;
 use crate::ui::setup_dialog::{SetupDialog, SetupDialogEvent};
-use crate::ui::status_chip::{dot, engine_dot_color, engine_state_label};
+use crate::ui::status_chip::{engine_dot_color, engine_state_label};
 use crate::ui::toast::{self, Toast, ToastAction, ToastHost};
 
 /// The mounted page.
@@ -118,12 +117,13 @@ impl ShellPage {
 }
 
 /// One sidebar entry: the main pages, or on Settings routes *Back* plus the sections
-/// (SET-080).
+/// (SET-080); always last, the engine card in the footer (ENG-165).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SidebarEntry {
     Page(Page),
     Back(Route),
     Section(SettingsSection),
+    Engine,
 }
 
 /// Which overlay is open (for the Escape chain, KBD-006).
@@ -166,15 +166,14 @@ pub struct AppShell {
     /// The first-run / no-engine page was on screen at the last check (initial focus, ENG-159).
     landing_was_shown: bool,
     status_focus: FocusHandle,
-    switcher_btn_focus: FocusHandle,
+    /// The title bar's *Refresh* button: the title region's default without an update offer.
+    refresh_focus: FocusHandle,
     overflow_focus: FocusHandle,
     /// The title-bar update button's focus handle (UPD-015); owned here so focus can return to
     /// `title_focus` when the button disappears.
     update_focus: FocusHandle,
     /// Painted bounds of the title-bar overflow button (its menu opens below it).
     overflow_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
-    /// Painted bounds of the engine switcher button (the switcher opens below it).
-    switcher_btn_bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
     /// Sidebar roving cursor (index into [`AppShell::sidebar_entries`]).
     sidebar_cursor: usize,
     switcher: Option<Entity<SwitcherView>>,
@@ -215,14 +214,14 @@ impl AppShell {
         let content_focus = cx.focus_handle();
         let start_focus = cx.focus_handle();
         let status_focus = cx.focus_handle().tab_stop(true);
-        let switcher_btn_focus = cx.focus_handle().tab_stop(true);
+        let refresh_focus = cx.focus_handle().tab_stop(true);
         let overflow_focus = cx.focus_handle().tab_stop(true);
         let update_focus = cx.focus_handle().tab_stop(true);
         let regions = Regions::new(vec![
             RegionSlot {
                 region: Region::TitleBar,
                 container: title_focus.clone(),
-                default: switcher_btn_focus.clone(),
+                default: refresh_focus.clone(),
                 last: None,
             },
             RegionSlot {
@@ -294,11 +293,10 @@ impl AppShell {
             setup_dialog: None,
             landing_was_shown: false,
             status_focus,
-            switcher_btn_focus,
+            refresh_focus,
             overflow_focus,
             update_focus,
             overflow_bounds: Default::default(),
-            switcher_btn_bounds: Default::default(),
             sidebar_cursor: 0,
             switcher: None,
             palette: None,
@@ -511,9 +509,12 @@ impl AppShell {
     pub fn update_focus(&self) -> &FocusHandle {
         &self.update_focus
     }
-    /// The engine switcher button's focus handle (the title region's default).
-    pub fn switcher_button_focus(&self) -> &FocusHandle {
-        &self.switcher_btn_focus
+    /// The title-bar *Refresh* button's focus handle (KBD-005).
+    pub fn refresh_focus(&self) -> &FocusHandle {
+        &self.refresh_focus
+    }
+    pub fn status_focus(&self) -> &FocusHandle {
+        &self.status_focus
     }
 
     pub fn route(&self) -> &Route {
@@ -562,22 +563,25 @@ impl AppShell {
     pub fn sidebar_pages(&self, cx: &App) -> Vec<Page> {
         self.visible_pages(cx)
     }
-    /// What the sidebar lists for the current route (SET-080).
+    /// What the sidebar lists for the current route (SET-080), then the engine card (ENG-165).
     pub fn sidebar_entries(&self, cx: &App) -> Vec<SidebarEntry> {
-        if matches!(self.history.current(), Route::Settings { .. }) {
-            std::iter::once(SidebarEntry::Back(self.app_route.clone()))
-                .chain(
-                    SettingsSection::ALL
-                        .iter()
-                        .map(|s| SidebarEntry::Section(*s)),
-                )
-                .collect()
-        } else {
-            self.visible_pages(cx)
-                .into_iter()
-                .map(SidebarEntry::Page)
-                .collect()
-        }
+        let mut entries: Vec<SidebarEntry> =
+            if matches!(self.history.current(), Route::Settings { .. }) {
+                std::iter::once(SidebarEntry::Back(self.app_route.clone()))
+                    .chain(
+                        SettingsSection::ALL
+                            .iter()
+                            .map(|s| SidebarEntry::Section(*s)),
+                    )
+                    .collect()
+            } else {
+                self.visible_pages(cx)
+                    .into_iter()
+                    .map(SidebarEntry::Page)
+                    .collect()
+            };
+        entries.push(SidebarEntry::Engine);
+        entries
     }
     pub fn sidebar_cursor(&self) -> usize {
         self.sidebar_cursor
@@ -1424,7 +1428,8 @@ impl AppShell {
     ) {
         self.sidebar_set_cursor(usize::MAX, window, cx);
     }
-    /// `Enter` / `Space`: open the page, go *Back*, or step into the section's first control.
+    /// `Enter` / `Space`: open the page, go *Back*, step into the section's first control, or
+    /// open the engine switcher (KBD-021).
     fn on_sidebar_activate(
         &mut self,
         _: &crate::actions::sidebar::Activate,
@@ -1439,6 +1444,7 @@ impl AppShell {
                 // The content column follows the sidebar in the Tab order.
                 window.focus_next(cx);
             }
+            Some(SidebarEntry::Engine) => window.dispatch_action(Box::new(EngineSwitcher), cx),
             None => {}
         }
     }
@@ -1642,24 +1648,14 @@ impl AppShell {
     // ── rendering ──────────────────────────────────────────────────────────────────────
 
     fn render_title_bar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let status = self.active_status(cx);
-        let name: SharedString = status
-            .as_ref()
-            .map(|s| s.config.name.clone().into())
-            .unwrap_or_else(|| s::NO_ENGINE.into());
-        let dot_color = status
-            .as_ref()
-            .map(|s| engine_dot_color(&s.state, cx))
-            .unwrap_or(cx.theme().muted_foreground);
-        let state_label = status
-            .as_ref()
-            .map(|s| engine_state_label(&s.state))
-            .unwrap_or("");
-        let kind = status.as_ref().and_then(|s| s.config.endpoint.kind());
-        let insecure = status
-            .as_ref()
-            .is_some_and(|s| s.config.endpoint.is_insecure_tcp());
         let update_button = self.update_button(cx);
+        // KBD-005: the region's default is its first button.
+        let first = if update_button.is_some() {
+            self.update_focus.clone()
+        } else {
+            self.refresh_focus.clone()
+        };
+        self.regions.set_default(Region::TitleBar, first);
         // The GPUI Kit `TitleBar` marks the whole bar as a window drag area. On Windows a
         // drag area under the pointer answers `WM_NCHITTEST` with `HTCAPTION`, which turns
         // the click into a window drag and never reaches our controls. Every interactive
@@ -1684,69 +1680,6 @@ impl AppShell {
                     .child(div().flex_1())
                     .child(
                         h_flex()
-                            .id("engine-switcher-button")
-                            .debug_selector(|| "engine-switcher-button".into())
-                            .occlude()
-                            .track_focus(&self.switcher_btn_focus)
-                            .gap_2()
-                            .px_2()
-                            .py_0p5()
-                            .items_center()
-                            .rounded(cx.theme().radius)
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .cursor_pointer()
-                            .on_click(dispatch::on_click(
-                                &self.title_focus,
-                                Box::new(EngineSwitcher),
-                            ))
-                            .on_key_down(cx.listener(
-                                |_, e: &gpui_kit::KeyDownEvent, window, cx| {
-                                    if matches!(e.keystroke.key.as_str(), "enter" | "space") {
-                                        window.dispatch_action(Box::new(EngineSwitcher), cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .tooltip(move |window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(s::SWITCH_ENGINE)
-                                    .action(&EngineSwitcher, None)
-                                    .build(window, cx)
-                            })
-                            .child(Icon::new(kind_icon(kind)).small())
-                            .child(div().text_sm().child(name))
-                            .child(dot(dot_color))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(state_label),
-                            )
-                            .child(Icon::new(IconName::ChevronDown).small())
-                            .on_bounds({
-                                let this = cx.entity().downgrade();
-                                move |b, _, cx| {
-                                    this.update(cx, |s, _| s.switcher_btn_bounds = b).ok();
-                                }
-                            }),
-                    )
-                    .when(insecure, |this| {
-                        this.child(
-                            div()
-                                .id("insecure-tcp")
-                                .occlude()
-                                .tooltip(|window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(
-                                        s::INSECURE_TCP_TOOLTIP,
-                                    )
-                                    .build(window, cx)
-                                })
-                                .child(Tag::warning().small().child(s::INSECURE_TCP)),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(
-                        h_flex()
                             .id("title-actions")
                             .debug_selector(|| "title-actions".into())
                             .occlude()
@@ -1762,18 +1695,27 @@ impl AppShell {
                                     cx,
                                 ))
                             })
-                            .child(
-                                Button::new("title-refresh")
-                                    .ghost()
-                                    .small()
-                                    .icon(IconName::RefreshCw)
-                                    .debug_selector(|| "title-refresh".into())
-                                    .tooltip_with_action(s::REFRESH, &Refresh, None)
-                                    .on_click(dispatch::on_click(
-                                        &self.title_focus,
-                                        Box::new(Refresh),
-                                    )),
-                            )
+                            .child({
+                                let origin = self.title_focus.clone();
+                                crate::ui::widgets::focus_wrap(
+                                    "title-refresh-wrap",
+                                    &self.refresh_focus,
+                                    Button::new("title-refresh")
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::RefreshCw)
+                                        .debug_selector(|| "title-refresh".into())
+                                        .tooltip_with_action(s::REFRESH, &Refresh, None)
+                                        .on_click(dispatch::on_click(
+                                            &self.title_focus,
+                                            Box::new(Refresh),
+                                        )),
+                                    move |_, window, cx| {
+                                        dispatch::dispatch_from(&origin, &Refresh, window, cx)
+                                    },
+                                    cx,
+                                )
+                            })
                             .child(
                                 Button::new("title-theme")
                                     .ghost()
@@ -1857,13 +1799,14 @@ impl AppShell {
                 s.count(Collection::Networks),
             ]
         });
-        let items: Vec<NavItem> = self
-            .sidebar_entries(cx)
+        let entries = self.sidebar_entries(cx);
+        let engine_cursor = focused && entries.get(cursor) == Some(&SidebarEntry::Engine);
+        let items: Vec<NavItem> = entries
             .into_iter()
             .enumerate()
-            .map(|(ix, entry)| {
+            .filter_map(|(ix, entry)| {
                 let cursor = focused && ix == cursor;
-                match entry {
+                Some(match entry {
                     SidebarEntry::Page(p) => {
                         let count = counts.and_then(|c| {
                             c[match p {
@@ -1904,7 +1847,8 @@ impl AppShell {
                         active: route == Route::Settings { section },
                         cursor,
                     },
-                }
+                    SidebarEntry::Engine => return None,
+                })
             })
             .collect();
         // Settings: *Back* on its own, then the sections under a heading.
@@ -1915,6 +1859,7 @@ impl AppShell {
         } else {
             NavMenu::new(items)
         };
+        let card = self.engine_card(engine_cursor, cx);
         div()
             .id("sidebar-region")
             .key_context(ctx::SIDEBAR)
@@ -1929,9 +1874,36 @@ impl AppShell {
                 Sidebar::new("sidebar")
                     .collapsed(self.sidebar_collapsed)
                     .w(px(220.))
-                    .child(menu),
+                    .child(menu)
+                    .footer(card),
             )
             .into_any_element()
+    }
+
+    /// The sidebar footer's active-engine card (ENG-165).
+    fn engine_card(&self, cursor: bool, cx: &App) -> gpui_kit::AnyElement {
+        let status = self.active_status(cx);
+        EngineCard {
+            name: status
+                .as_ref()
+                .map(|s| s.config.name.clone().into())
+                .unwrap_or_else(|| s::NO_ENGINE.into()),
+            icon: kind_icon(status.as_ref().and_then(|s| s.config.endpoint.kind())),
+            dot: status
+                .as_ref()
+                .map(|s| engine_dot_color(&s.state, cx))
+                .unwrap_or(cx.theme().muted_foreground),
+            state: status
+                .as_ref()
+                .map(|s| engine_state_label(&s.state))
+                .unwrap_or(""),
+            insecure: status
+                .as_ref()
+                .is_some_and(|s| s.config.endpoint.is_insecure_tcp()),
+            cursor,
+            collapsed: self.sidebar_collapsed,
+        }
+        .render(&self.sidebar_focus, cx)
     }
 
     fn render_status_bar(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -1944,13 +1916,45 @@ impl AppShell {
         let state = status.as_ref().map(|s| s.state.clone());
         let engine = info.as_ref().map(s::StatusBarEngine::of);
         let foreground = cx.theme().foreground;
+        let hover_bg = cx.theme().secondary_hover;
+        let name: SharedString = status
+            .as_ref()
+            .map(|s| s.config.name.clone().into())
+            .unwrap_or_else(|| s::NO_ENGINE.into());
+        let kind = status.as_ref().and_then(|s| s.config.endpoint.kind());
+        // The expanded sidebar's engine card already shows the name and state (ENG-108).
+        let show_name = self.sidebar_collapsed;
+        let state = state.filter(|_| show_name);
         let divider = || Separator::vertical().h(px(12.));
-        let left = h_flex()
+        let content = h_flex()
+            .debug_selector(|| "status-left".into())
+            .min_w_0()
             .gap_2()
             .items_center()
+            .when(show_name, |this| {
+                this.child(
+                    h_flex()
+                        .debug_selector(|| "status-engine-name".into())
+                        .gap_1p5()
+                        .items_center()
+                        .min_w_0()
+                        .text_color(foreground)
+                        .child(Icon::new(kind_icon(kind)).xsmall())
+                        .child(
+                            div()
+                                .max_w(px(200.))
+                                .truncate()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child(name),
+                        ),
+                )
+            })
             .when_some(state.as_ref(), |this, st| {
-                this.child(dot(engine_dot_color(st, cx)))
-                    .child(engine_state_label(st))
+                this.child(
+                    h_flex()
+                        .debug_selector(|| "status-state".into())
+                        .child(engine_state_label(st)),
+                )
             })
             .when_some(engine, |this, e| {
                 this.when(state.is_some(), |this| this.child(divider()))
@@ -1975,6 +1979,31 @@ impl AppShell {
                         )
                     })
             });
+        // ENG-166: the whole left section is one button that opens the switcher.
+        let left = h_flex()
+            .id("status-engine-button")
+            .debug_selector(|| "status-engine-button".into())
+            .role(gpui_kit::Role::Button)
+            .aria_label(SharedString::from(s::SWITCH_ENGINE))
+            .min_w_0()
+            .px_1()
+            .rounded(cx.theme().radius)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg))
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(s::SWITCH_ENGINE)
+                    .action(&EngineSwitcher, None)
+                    .build(window, cx)
+            })
+            // A click leaves focus where it was, like the sidebar items.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .on_click(dispatch::on_click(
+                &self.status_focus,
+                Box::new(EngineSwitcher),
+            ))
+            // An invisible line of text keeps the bar's height before there are any details.
+            .child(div().w_0().overflow_hidden().invisible().child("x"))
+            .child(content);
         let resources = info.as_ref().map(|i| {
             s::status_bar_resources(i.cpus, i.mem_total.map(dk_core::format::format_size))
         });
@@ -1988,10 +2017,20 @@ impl AppShell {
         });
         div()
             .id("status-region")
+            .debug_selector(|| "status-bar".into())
             .track_focus(&self.status_focus)
+            .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, window, cx| {
+                if matches!(e.keystroke.key.as_str(), "enter" | "space")
+                    && !e.keystroke.modifiers.modified()
+                    && this.status_focus.is_focused(window)
+                {
+                    cx.stop_propagation();
+                    window.dispatch_action(Box::new(EngineSwitcher), cx);
+                }
+            }))
             .child(
                 StatusBar::new()
-                    .left(left.debug_selector(|| "status-left".into()))
+                    .left(left)
                     .when_some(right, |this, r| this.right(r)),
             )
             .into_any_element()
@@ -2096,50 +2135,6 @@ impl AppShell {
         }
     }
 
-    /// The engine switcher as a dropdown under its title-bar button (centred on it, kept
-    /// inside the window), over a click-to-dismiss backdrop like the other overlays.
-    fn switcher_dropdown(&self, child: gpui_kit::AnyElement, cx: &App) -> gpui_kit::AnyElement {
-        const WIDTH: f32 = 404.;
-        let b = self.switcher_btn_bounds;
-        let (position, anchor) = if b.size.width > px(0.) {
-            (
-                gpui_kit::point(b.center().x, b.bottom() + px(4.)),
-                gpui_kit::Anchor::TopCenter,
-            )
-        } else {
-            (gpui_kit::point(px(0.), px(44.)), gpui_kit::Anchor::TopLeft)
-        };
-        gpui_kit::deferred(
-            div()
-                .id("overlay-backdrop")
-                .absolute()
-                .inset_0()
-                .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                    window.dispatch_action(Box::new(crate::actions::palette::Dismiss), cx)
-                })
-                .child(
-                    gpui_kit::anchored()
-                        .anchor(anchor)
-                        .position(position)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
-                            div()
-                                .id("overlay-panel")
-                                .key_context(ctx::PALETTE)
-                                .occlude()
-                                .w(px(WIDTH))
-                                .max_h(px(560.))
-                                .p_2()
-                                .popover_style(cx)
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .child(child),
-                        ),
-                ),
-        )
-        .with_priority(2)
-        .into_any_element()
-    }
-
     fn render_overlay(
         &mut self,
         window: &Window,
@@ -2182,7 +2177,9 @@ impl AppShell {
             .into_any_element()
         };
         if let Some(sw) = &self.switcher {
-            return Some(self.switcher_dropdown(sw.clone().into_any_element(), cx));
+            let chrome = px(PANEL_PADDING_H) * rem_scale(window) + px(2.);
+            sw.update(cx, |v, _| v.set_height(cap - chrome));
+            return Some(panel(sw.clone().into_any_element(), 560., cx));
         }
         if let Some(state) = &self.palette {
             let ctx = CommandContext {
@@ -2231,14 +2228,16 @@ impl AppShell {
     }
 }
 
-/// Distance of the palette and shortcut panels from the window top.
+/// Distance of the overlay panels from the window top.
 const OVERLAY_TOP: f32 = 64.;
-/// Tallest the palette and shortcut panels get.
+/// Tallest the overlay panels get; the engine switcher is always this tall (ENG-101).
 const OVERLAY_MAX_H: f32 = 560.;
 /// What the palette's panel spends outside its list: padding, border, search field.
 const PALETTE_CHROME_H: f32 = 64.;
 /// What the shortcut panel spends outside its list: padding, border, title, filter, gaps.
 const SHORTCUTS_CHROME_H: f32 = 136.;
+/// The overlay panel's vertical padding (its 1 px borders are added unscaled).
+const PANEL_PADDING_H: f32 = 24.;
 
 /// The chrome heights above are measured at GPUI's default 16 px rem; the panel padding and
 /// text are rem-based, so they grow with the UI zoom.

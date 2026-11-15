@@ -5,21 +5,25 @@
 //! gets the hover tint; nothing draws a focus ring.
 //!
 //! The same items render the main pages and, on Settings routes, *Back to <Page>* plus the
-//! settings sections (SET-080), so both menus look and behave alike.
+//! settings sections (SET-080), so both menus look and behave alike. The footer's
+//! [`EngineCard`] shows the active engine and opens the switcher (ENG-165).
 
 use gpui_kit::component::sidebar::SidebarItem;
+use gpui_kit::component::tag::Tag;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Collapsible, Icon, Sizable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Collapsible, Icon, IconName, Sizable, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, ElementId, FocusHandle, IntoElement, MouseButton, SharedString, Window, div, px,
+    App, ElementId, FocusHandle, Hsla, IntoElement, MouseButton, SharedString, Window, div, px,
     transparent_black,
 };
 
-use crate::actions::Navigate;
+use crate::actions::{EngineSwitcher, Navigate};
 use crate::nav::Route;
+use crate::strings as s;
 use crate::theme::accent_text;
 use crate::ui::dispatch;
+use crate::ui::status_chip::dot;
 
 /// One sidebar entry: a page, a settings section, or *Back*.
 #[derive(Clone)]
@@ -184,4 +188,116 @@ fn render_item(
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .on_click(dispatch::on_click(origin, Box::new(Navigate { route })))
         .into_any_element()
+}
+
+/// The active engine in the sidebar footer (ENG-165): a card, or an icon button when collapsed.
+pub struct EngineCard {
+    pub name: SharedString,
+    pub icon: IconName,
+    pub dot: Hsla,
+    /// The engine's state label; empty without an engine.
+    pub state: &'static str,
+    pub insecure: bool,
+    /// The keyboard cursor while the sidebar region has focus.
+    pub cursor: bool,
+    pub collapsed: bool,
+}
+
+impl EngineCard {
+    pub fn render(self, origin: &FocusHandle, cx: &App) -> gpui_kit::AnyElement {
+        let theme = cx.theme();
+        let hover_bg = theme.sidebar_accent;
+        let muted = theme.muted_foreground;
+        let radius = theme.radius;
+        let collapsed = self.collapsed;
+        let tip_name = collapsed.then(|| self.name.clone());
+        let tip_insecure = collapsed && self.insecure;
+        let state = self.state;
+        let card = h_flex()
+            .id("sidebar-engine")
+            .debug_selector(|| "sidebar-engine".into())
+            .role(gpui_kit::Role::Button)
+            .aria_label(SharedString::from(s::SWITCH_ENGINE))
+            .relative()
+            .h(px(32.))
+            .gap_2()
+            .items_center()
+            .rounded(radius)
+            .text_sm()
+            .cursor_pointer()
+            .when(self.cursor, |this| this.bg(hover_bg))
+            .hover(move |s| s.bg(hover_bg))
+            .tooltip(move |window, cx| {
+                let name = tip_name.clone();
+                Tooltip::element(move |_, cx| {
+                    let muted = cx.theme().muted_foreground;
+                    let detail = match (&name, state.is_empty()) {
+                        (Some(name), false) => Some(s::engine_and_state(name, state)),
+                        (Some(name), true) => Some(name.to_string()),
+                        (None, false) => Some(state.to_owned()),
+                        (None, true) => None,
+                    };
+                    v_flex()
+                        .child(s::SWITCH_ENGINE)
+                        .when_some(detail, |this, d| {
+                            this.child(div().text_xs().text_color(muted).child(d))
+                        })
+                        .when(tip_insecure, |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().warning)
+                                    .child(s::INSECURE_TCP),
+                            )
+                        })
+                })
+                .action(&EngineSwitcher, None)
+                .build(window, cx)
+            })
+            // Like a nav item: a click doesn't move focus into the sidebar region.
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .on_click(dispatch::on_click(origin, Box::new(EngineSwitcher)));
+        let card = if collapsed {
+            card.size(px(32.))
+                .justify_center()
+                .child(Icon::new(IconName::ChevronsUpDown).small())
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(4.))
+                        .right(px(4.))
+                        .child(dot(self.dot)),
+                )
+        } else {
+            card.w_full()
+                .px_2()
+                .text_color(theme.foreground)
+                .child(Icon::new(self.icon).small())
+                .child(div().flex_1().min_w_0().truncate().child(self.name))
+                .when(self.insecure, |this| {
+                    this.child(
+                        div()
+                            .id("sidebar-engine-insecure")
+                            .tooltip(|window, cx| {
+                                Tooltip::new(s::INSECURE_TCP_TOOLTIP).build(window, cx)
+                            })
+                            .child(Tag::warning().xsmall().child(s::INSECURE_TAG)),
+                    )
+                })
+                .child(dot(self.dot))
+                .child(
+                    Icon::new(IconName::ChevronsUpDown)
+                        .small()
+                        .text_color(muted),
+                )
+        };
+        div()
+            .w_full()
+            .pt_2()
+            .border_t_1()
+            .border_color(theme.sidebar_border)
+            .when(collapsed, |this| this.flex().justify_center())
+            .child(card)
+            .into_any_element()
+    }
 }
