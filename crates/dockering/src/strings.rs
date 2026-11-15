@@ -19,6 +19,12 @@ pub const OPEN_SETTINGS: &str = "Settings";
 pub const MORE_COMMANDS: &str = "More commands";
 pub const INSECURE_TCP: &str = "Unencrypted TCP";
 pub const INSECURE_TCP_TOOLTIP: &str = "This engine is reached over plain TCP without TLS. Traffic, including credentials, is not encrypted.";
+/// The warning tag on the sidebar engine card (ENG-165).
+pub const INSECURE_TAG: &str = "Insecure";
+/// Second line of the collapsed engine card's tooltip (ENG-165).
+pub fn engine_and_state(name: &str, state: &str) -> String {
+    format!("{name} · {state}")
+}
 pub const BACK: &str = "Back";
 /// The first sidebar item on Settings routes (SET-080).
 pub fn back_to(page: &str) -> String {

@@ -1155,26 +1155,25 @@ fn upd_015_focus_returns_to_title_bar(cx: &mut TestAppContext) {
 fn kbd_076_title_update_button_in_tab_order_and_f6(cx: &mut TestAppContext) {
     let h = start(cx, Setup::default());
     h.wait_containers(cx);
-    let (switcher, button) = h.read(cx, |s, _, _| {
-        (s.switcher_button_focus().clone(), s.update_focus().clone())
+    let (refresh, button) = h.read(cx, |s, _, _| {
+        (s.refresh_focus().clone(), s.update_focus().clone())
     });
     let region = |cx: &mut TestAppContext| h.read(cx, |s, window, cx| s.current_region(window, cx));
     set_offer(&h, cx, ready("9.9.9", false));
-    // Tab order: the engine switcher, then the update button (the first of the action group),
-    // then *Refresh* and the rest.
-    h.focus(cx, &switcher);
-    h.press(cx, "tab");
+    // KBD-005: F6 into the title region lands on its first button, the update button.
+    h.focus_table(cx);
+    h.press(cx, "shift-f6 shift-f6");
+    assert_eq!(region(cx), Some(Region::TitleBar));
     assert!(
         h.is_focused(cx, &button),
-        "Tab from the switcher reaches the button"
+        "the update button is the title region's default"
     );
-    assert_eq!(
-        region(cx),
-        Some(Region::TitleBar),
-        "the button is in the title region"
-    );
+    // Tab order: the update button (the first of the action group), then *Refresh*.
     h.press(cx, "tab");
-    assert!(!h.is_focused(cx, &button));
+    assert!(
+        h.is_focused(cx, &refresh),
+        "Tab from the button reaches Refresh"
+    );
     assert_eq!(region(cx), Some(Region::TitleBar));
     h.press(cx, "shift-tab");
     assert!(h.is_focused(cx, &button), "and Shift+Tab comes back");

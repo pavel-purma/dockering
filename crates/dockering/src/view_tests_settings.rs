@@ -225,11 +225,13 @@ fn set_080_settings_sidebar_back_returns_to_app_page(cx: &mut TestAppContext) {
         *h.shell.read(cx).route() == Route::Images
     });
     open(&h, cx, SettingsSection::Logs);
-    // Settings mode: Back to the last app page, then every section (same nav component).
+    // Settings mode: Back to the last app page, then every section (same nav component), then
+    // the engine card (ENG-165).
     let entries = h.read(cx, |s, _, cx| s.sidebar_entries(cx));
     assert_eq!(entries[0], SidebarEntry::Back(Route::Images));
+    assert_eq!(entries.last(), Some(&SidebarEntry::Engine));
     assert_eq!(
-        entries[1..].to_vec(),
+        entries[1..entries.len() - 1].to_vec(),
         SettingsSection::ALL
             .iter()
             .map(|s| SidebarEntry::Section(*s))
@@ -250,9 +252,11 @@ fn set_080_settings_sidebar_back_returns_to_app_page(cx: &mut TestAppContext) {
     h.wait_until(cx, "back on images", |_, cx| {
         *h.shell.read(cx).route() == Route::Images
     });
-    // Outside Settings the sidebar lists the main pages again.
+    // Outside Settings the sidebar lists the main pages again, then the engine card.
     let entries = h.read(cx, |s, _, cx| s.sidebar_entries(cx));
-    assert!(entries.iter().all(|e| matches!(e, SidebarEntry::Page(_))));
+    let (card, pages) = entries.split_last().expect("entries");
+    assert_eq!(card, &SidebarEntry::Engine);
+    assert!(pages.iter().all(|e| matches!(e, SidebarEntry::Page(_))));
     h.shutdown();
 }
 
@@ -275,7 +279,13 @@ fn set_route_section_arrows_and_back_forward(cx: &mut TestAppContext) {
                 section: SettingsSection::Engines,
             }
     });
+    // End reaches the engine card (KBD-021): the section stays; Up shows the last section.
     h.press(cx, "end");
+    assert_eq!(
+        cx.read(|cx| page.read(cx).section()),
+        SettingsSection::Engines
+    );
+    h.press(cx, "up");
     assert_eq!(
         cx.read(|cx| page.read(cx).section()),
         SettingsSection::Keyboard

@@ -8,7 +8,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
-│ TitleBar:  ◧ Dockering          [● Ubuntu-22.04 (WSL) ▾]          ⟳   ☾   ⚙        │
+│ TitleBar:  ◧ Dockering                                             ⟳   ☾   ⚙        │
 ├───────────────┬──────────────────────────────────────────────────────────────────────┤
 │ Sidebar       │ Containers                                        [Filter] [Group▾] │
 │               │ [Search…        ]                       12 running · 3 stopped  [⋮] │
@@ -21,16 +21,18 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 │               │ ☐   └ db-1         postgres:16   Up 2h       0.1%  5432      ■ ⟳ ⋮ │
 │               │ ☐  redis           redis:7       Exited (0)                   ▶ ⟳ ⋮ │
 │               │                                                                      │
+│───────────────│                                                                      │
+│ ◧ Ubuntu-2… ● ⇅│                                                                     │
 ├───────────────┴──────────────────────────────────────────────────────────────────────┤
-│ ● Connected │ Docker 27.3.1 · API 1.47 · linux/amd64 │ via unix  CPUs 8 · RAM 16 GB │
+│ Docker 27.3.1 · API 1.47 · linux/amd64 │ via unix                     CPUs 8 · RAM 16 GB │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Region | GPUI Kit component | Notes |
 |---|---|---|
-| Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | Engine switcher in the centre, plus refresh, theme toggle, and settings. While an update is offered, an update button is the first of these buttons, the same on every platform (UPD-015) |
-| Engine switcher | `Popover` + `List` (or `Select`) | Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…" (Rescan lives in Settings → Engines, ENG-113) |
-| Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080) |
+| Title bar | `TitleBar` (custom-drawn on Windows/Linux, native traffic lights on macOS) | App name on the left; refresh, theme toggle, and settings on the right. No engine control: it moved to the sidebar and the status bar (ENG-100, changed 2026-11-15, planned). While an update is offered, an update button is the first of these buttons, the same on every platform (UPD-015) |
+| Engine switcher | Modal panel over a dimmed backdrop, the same chrome as the command palette: filter `Input` + scrolling rows | Fixed size, never resized by the number of engines or the filter (ENG-101). Status dot, kind icon, name, version; groups: *Local*, *WSL*, *WSLC*, *Remote*; footer: "Manage engines…" (Rescan lives in Settings → Engines, ENG-113). Opened by `Mod+K`, the sidebar engine card (ENG-165) and the status bar's engine section (ENG-166) |
+| Sidebar | `Sidebar` with the app's `NavMenu` items (icon, label, count badge) and a `footer` | Collapsible to icons (`SidebarToggleButton`). On Settings routes it switches to Settings mode: *Back to <Page>* plus the settings sections, same item component (SET-080). The footer is the active-engine card, an icon button when collapsed (ENG-165) |
 | Page header | `v_flex` of two rows: the title on the left and the view controls (filters, group-by, page buttons) on the right; then the search `Input` on the left and, on the right, the summary counts (or the selection actions while rows are checked, SHL-005) followed by the page `⋮`. A small gap separates the header from the table | `chrome::page_header` |
 | Lists | `DataTable` (`TableState` + `TableDelegate`) | Grouped containers: the delegate flattens a tree into rows with `depth` and `expanded`, and renders a disclosure chevron in column 0 (CON-011) |
 | Detail pages | `ui::segmented::Segmented` (icon + label), built on GPUI Kit base `Tabs`/`Tab` | SHL-025 |
@@ -41,7 +43,7 @@ planned one. Prefer GPUI Kit components and theme tokens over hand-styled `div()
 | Toasts | Dockering's own `ToastHost` (`ui/toast.rs`) | Not GPUI Kit's `Notification`: it has no countdown and can't be moved below the content (SHL-003) |
 | Empty states | `empty` component + illustration icon + CTA | |
 | Loading | `Skeleton` rows (first load), `Spinner` in header (refresh) | |
-| Status bar | `StatusBar` | Left: state dot and label │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, and the transient update item (*Downloading…*, and *Checking…* or the error during a manual check; UPD-008). The state dot is the only colour: never a route note or coloured chip (ENG-108, ENG-110) |
+| Status bar | `StatusBar` | Left, one click target that opens the engine switcher (ENG-166): only while the sidebar is collapsed, kind icon and engine name, then the state label, no dot (expanded, the sidebar card shows them; the bar stays at its height even with no details yet, ENG-108) │ engine kind label (foreground) + version · API · OS/arch (muted) │ `via <transport>` tag, separated by thin dividers. Right: CPUs/RAM, and the transient update item (*Downloading…*, and *Checking…* or the error during a manual check; UPD-008). No status dot and no colour of its own: never a route note or coloured chip (ENG-108, ENG-110) |
 
 ## 1a. Native menus & window chrome (SHL-020…)
 
@@ -85,7 +87,7 @@ pub enum Route {
 - **SHL-007** Relative times ("2 hours ago") refresh every 30 s through a single app-wide ticker, not per row.
 - **SHL-008** Ids are shortened to 12 characters with a copy-to-clipboard button. Sizes use SI units (`1.2 GB`), as Docker Desktop does.
 - **SHL-009** Theme: Light, Dark, or System. The default is System. GPUI Kit `Theme` is used with a violet accent (`#6E56CF`), also used for the row cursor, text selection, and the active sidebar page. Links and accent text are lifted in dark mode for contrast. Theme switching takes effect live.
-- **SHL-010** Keyboard: the **whole UI is keyboard-operable**. Requirements, the full default keymap, focus regions, the command palette (`Mod+Shift+P`), and the shortcut reference (`Mod+/`, `F1`) are in [features/keyboard.md](features/keyboard.md) (KBD-*). Summary: `Mod+1..4` pages, `Mod+F` search, `Mod+R`/`F5` refresh, `Del` delete (confirm), `Mod+,` settings, `Mod+K` engine switcher, `F6` region cycling, single-letter row actions in lists.
+- **SHL-010** Keyboard: the **whole UI is keyboard-operable**. Requirements, the full default keymap, focus regions, the command palette (`Mod+Shift+P`), and the shortcut reference (`Mod+/`, `F1`) are in [features/keyboard.md](features/keyboard.md) (KBD-*). Summary: `Mod+1..4` pages, `Mod+F` search, `Mod+R`/`F5` refresh, `Del` delete (confirm), `Mod+,` settings, `Mod+K` engine switcher (also opened from the sidebar's engine card and the status bar), `F6` region cycling, single-letter row actions in lists.
 - **SHL-011** Window state (size, position, sidebar collapsed, column widths, group expand state per engine) persists in `state.json`.
 - **SHL-012** No modal blocks the app while an operation runs. Dialogs close immediately, and progress continues in the row or a notification.
 - **SHL-013** A `Stopped` engine that has a `StartPrompt` (ENG-139) shows a calm full-page empty state, not an error `Alert`: the prompt's title and body and a primary start button (plus *Switch engine*; no *Retry*, since the hub rechecks, ENG-140). Disconnected engine: list pages show a full-page `Alert` with the error, the hint, and *Retry* / *Switch engine*. Last known list data isn't shown, so the user can't act on stale ids. While **Degraded** (ping failing, reconnecting), data stays visible read-only with a banner and actions disabled. Open detail pages keep their logs and terminal scrollback visible, read-only.

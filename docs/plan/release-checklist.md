@@ -4,6 +4,15 @@ Use the exact release commit. Record run URLs and tested platforms; leave unavai
 checks unchecked. Each release has its own section, newest first. The `/release` skill copies the
 [template](../../.agents/skills/release/checklist-template.md) for the next release; ticks only what it verified.
 
+## Engine picker in the sidebar and status bar (not executed)
+
+[Spec](../spec/features/engines.md), [plan](features/engine-picker-sidebar.md), ENG-100/101/108/165/166, KBD-005/021. Unchecked until a person runs them on each OS with real engines.
+
+- [ ] The title bar shows no engine. The sidebar footer card names the active engine with its icon and dot, and the status bar shows only its details (no name, no state dot, also while connecting or failed, and its height doesn't change when the details arrive), in light and dark themes; with the sidebar collapsed (`Mod+B`) the footer is the ⇅ button with the dot and the status bar starts with the engine's icon, name and state label. The status bar never shows a coloured dot.
+- [ ] A click on the sidebar card, on the collapsed button and on the status bar's engine section each opens the switcher; so do `Mod+K`, the sidebar cursor (`End`, `Enter`) and `F6` to the status bar then `Enter`. `Esc` or a backdrop click closes it and focus returns to where it was.
+- [ ] The switcher has the same size with one engine, with several, and after a filter that matches nothing; with many engines the rows scroll inside it. Switching engines from it works, and *Start & connect* works for a stopped WSL distro (Windows).
+- [ ] A TCP engine without TLS shows the *Insecure* tag on the sidebar card.
+
 ## Windows engine start and setup (not executed)
 
 [Spec](../spec/features/windows-engine-start.md), [plan](features/windows-engine-start.md), ENG-142…164 / REL-088, REL-089. Unchecked until a person runs them on the named machine.
