@@ -1,8 +1,10 @@
 # Updater signing keys (UPD-003)
 
-The app only trusts an update manifest (`dockering-update.json`) whose minisign signature checks
-out against one of the public keys in [`src/keys.rs`](../src/keys.rs). If that list is empty, every
-manifest is rejected (fail closed).
+If [`src/keys.rs`](../src/keys.rs) lists public keys, the app only trusts an update manifest
+(`dockering-update.json`) whose minisign signature checks out against one of them. While that list is
+empty the updater runs on the **unsigned channel** (ADR-0007, 2026-11-16): the manifest is accepted as
+served over HTTPS from the project's GitHub release, and each asset's size and SHA-256 are checked.
+Adding a key switches every later build to mandatory signatures.
 
 ## One-time setup
 

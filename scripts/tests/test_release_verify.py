@@ -397,10 +397,14 @@ class ReleaseVerifyTests(unittest.TestCase):
         for label, env, updater, sign_manifest, unsigned in rows:
             with self.subTest(label):
                 self.assertChannel(env, updater, sign_manifest, unsigned, label=label)
+        # ADR-0007: with no public key in keys.rs the updater ships an unsigned manifest.
+        for label, env, updater, sign_manifest, unsigned in rows:
+            if updater == "all" and unsigned == "true":
+                with self.subTest(f"{label}, no public key"):
+                    self.assertChannel(env, updater, "false", unsigned, keys=KEYS_EMPTY, label=label)
 
     def test_rel_083_needs_key_and_public_key(self):
         no_key = "UPDATER=all requires UPDATE_SIGNING_KEY"
-        no_public = "UPDATER=all requires a public key in crates/dk-update/src/keys.rs"
         # Unsigned builds with the updater: the variable, or the input on a branch.
         for env in (
             {"UPDATER": "all"},
@@ -408,14 +412,19 @@ class ReleaseVerifyTests(unittest.TestCase):
             self.unsigned_tag(UPDATER="all"),
         ):
             with self.subTest(env=env):
+                # A key in keys.rs means every build verifies a signature, so the run needs the secret.
                 result, _ = self.run_verify(env)
                 self.assertRejected(result, no_key)
-                for keys in (KEYS_EMPTY, KEYS_COMMENTED):
-                    result, _ = self.run_verify({**env, "HAS_UPDATE_KEY": "true"}, keys=keys)
-                    self.assertRejected(result, no_public)
                 result, outputs = self.run_verify({**env, "HAS_UPDATE_KEY": "true"})
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual((outputs["updater"], outputs["sign_manifest"]), ("all", "true"))
+                # No public key in keys.rs (empty or only commented out): the manifest ships unsigned (ADR-0007),
+                # with or without the secret.
+                for keys in (KEYS_EMPTY, KEYS_COMMENTED):
+                    for secret in ({}, {"HAS_UPDATE_KEY": "true"}):
+                        result, outputs = self.run_verify({**env, **secret}, keys=keys)
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertEqual((outputs["updater"], outputs["sign_manifest"]), ("all", "false"))
         # Without the updater an unsigned build needs neither.
         result, outputs = self.run_verify({"UPDATER": "none"}, keys=KEYS_EMPTY)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -516,8 +525,14 @@ class ReleaseVerifyTests(unittest.TestCase):
                 self.assertEqual(outputs["sign_manifest"], "true")
                 result, _ = self.run_verify({**env, "HAS_UPDATE_KEY": "false"})
                 self.assertRejected(result, "requires UPDATE_SIGNING_KEY")
-                result, _ = self.run_verify(env, keys=KEYS_EMPTY)
-                self.assertRejected(result, "requires a public key in crates/dk-update/src/keys.rs")
+                if env.get("REQUESTED_UNSIGNED") == "false":
+                    result, _ = self.run_verify(env, keys=KEYS_EMPTY)
+                    self.assertRejected(result, "requires a public key in crates/dk-update/src/keys.rs")
+                else:
+                    # OS-unsigned with the updater and no public key: the manifest ships unsigned instead.
+                    result, outputs = self.run_verify(env, keys=KEYS_EMPTY)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertEqual(outputs["sign_manifest"], "false")
         # ... and `assemble` signs and verifies the manifest on that output alone.
         for prefix in ("Sign the update manifest", "Manifest signature verifies against the app's public keys"):
             with self.subTest(prefix):
@@ -831,7 +846,6 @@ class ReleaseStepScriptTests(unittest.TestCase):
 
     ALL_WORDING = (
         "Dockering checks for updates in these builds",
-        "the update manifest is signed with the project's update key",
         "Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click",
         "macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button",
     )
@@ -844,6 +858,11 @@ class ReleaseStepScriptTests(unittest.TestCase):
     def test_rel_083_release_notes_state_the_channel(self):
         cases = {
             "unsigned, updater all": ({"UNSIGNED": "true", "UPDATER": "all", "SIGN_MANIFEST": "true"}, "all", True),
+            "unsigned, updater all, unsigned manifest": (
+                {"UNSIGNED": "true", "UPDATER": "all", "SIGN_MANIFEST": "false"},
+                "all",
+                False,
+            ),
             "unsigned, updater none": ({"UNSIGNED": "true", "UPDATER": "none", "SIGN_MANIFEST": "false"}, "none", False),
             "signed, updater none": (
                 {"UNSIGNED": "false", "UPDATER": "none", "SIGN_MANIFEST": "true"},
@@ -874,6 +893,10 @@ class ReleaseStepScriptTests(unittest.TestCase):
                 if updater == "all":
                     for wording in self.ALL_WORDING:
                         self.assertIn(wording, notes)
+                    if signed_manifest:
+                        self.assertIn("and the update manifest is signed with the project's update key", notes)
+                    else:
+                        self.assertIn("The update manifest has no signature: each download is checked against the size and SHA-256", notes)
                     self.assertNotIn(self.NONE_WORDING, notes)
                 else:
                     self.assertIn(self.NONE_WORDING, notes)
@@ -881,10 +904,10 @@ class ReleaseStepScriptTests(unittest.TestCase):
                     self.assertNotIn("Download button", notes)
                 signed_sentence = "the update manifest is signed with the project's update key"
                 self.assertEqual(signed_sentence in notes, signed_manifest)
-                self.assertEqual("the update manifest has no signature" in notes, not signed_manifest)
+                self.assertEqual("manifest has no signature" in notes.lower(), not signed_manifest)
 
     def test_rel_083_release_notes_reject_an_inconsistent_channel(self):
-        for updater, sign_manifest in (("all", "false"), ("none", ""), ("", "true"), ("inherit", "true"), ("all", "")):
+        for updater, sign_manifest in (("none", ""), ("", "true"), ("inherit", "true"), ("all", "")):
             with self.subTest(updater=updater, sign_manifest=sign_manifest):
                 result, _ = self.notes(UPDATER=updater, SIGN_MANIFEST=sign_manifest)
                 self.assertNotEqual(result.returncode, 0)

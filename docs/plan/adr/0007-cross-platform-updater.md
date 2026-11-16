@@ -26,6 +26,10 @@ and 0006 are not in this checkout; spec 10/21 and AGENTS.md carry their layering
 | Windows installer safety | Open with `FILE_SHARE_READ` only and hold the handle from the final check until the app exits; a per-machine (UAC) install that can't be held falls back to *Download*. |
 | Linux relaunch | Stage in the target's directory, run `--version` on the staged file, `rename`, start with `--update-relaunch=1` and a piped stdin that the old process holds until it exits; the new process blocks on stdin EOF (30 s) before it reads any state. |
 
+## Amendment 2026-11-16: the unsigned channel
+
+No update key exists, and every release so far (v0.1.0 to v0.4.0) has shipped without an updater, so no installed copy can update itself. The maintainer chose to make the loop work **without** manifest signing for now. The embedded key list is the switch: with no keys, `dk-update` accepts the manifest as served and treats a missing `dockering-update.json.minisig` (HTTP 404) as an empty signature; with keys it verifies exactly as before, and an empty or invalid signature fails closed. `release.yml` computes `sign_manifest = not unsigned or (updater == all and keys.rs lists a key)`, `verify-update-artifacts` and `verify-release.ps1` accept the unsigned shape only while `keys.rs` is empty, and the notes carry a fourth sentence. What remains: HTTPS to the pinned GitHub host and repository, the pinned asset URL of the manifest's own version (UPD-001), and size plus SHA-256 of each asset. What is lost: protection against someone who can rewrite the release assets or the manifest together (the threat rows on a forged manifest, replay and key compromise do not apply until keys exist). Adding keys later is a release like any other; the app never downgrades from signed to unsigned.
+
 ## Threat model and limits
 
 - **Network attacker / compromised CDN:** can't forge a manifest (signature) or swap an asset (SHA-256, size); host and URL are pinned (UPD-001, UPD-010).

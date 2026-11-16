@@ -29,7 +29,7 @@ use super::model::{Offer, State};
 use super::{ApplyOutcome, DisabledReason, OfferMode};
 use crate::hub::{HubInner, lock};
 
-/// Updates are off (policy, env, demo, no keys, no feature): no actions (UPD-017 (8)).
+/// Updates are off (policy, env, demo, no feature): no actions (UPD-017 (8)).
 pub(crate) const MSG_DISABLED: &str = "updates are disabled";
 /// A second *Restart to update* while one runs (the UI ignores this error silently).
 pub(crate) const MSG_BUSY: &str = super::ALREADY_APPLYING;
@@ -394,7 +394,7 @@ pub(crate) fn apply(inner: &Arc<HubInner>) -> EngineResult<ApplyOutcome> {
     let Some(u) = inner.updates.as_ref() else {
         return Err(EngineError::protocol(MSG_DISABLED));
     };
-    if super::flow::current_disabled(inner, u).is_some_and(DisabledReason::is_hard) {
+    if super::flow::current_disabled(inner).is_some_and(DisabledReason::is_hard) {
         return Err(EngineError::protocol(MSG_DISABLED));
     }
     let Some(_scope) = ApplyScope::enter(u) else {

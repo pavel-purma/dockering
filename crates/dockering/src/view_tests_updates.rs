@@ -835,7 +835,7 @@ fn upd_015_button_survives_checks_off_and_offline_start(cx: &mut TestAppContext)
         );
         assert!(shown(&h, cx, "title-update"), "offline: {held:?}");
     }
-    // A hard disable (policy, the environment switch, demo, no feature, no trust keys) hides it
+    // A hard disable (policy, the environment switch, demo, no feature) hides it
     // and keeps the stored offer: the hub leaves it out of the snapshot, and the UI doesn't act
     // on one it was given anyway.
     for reason in [DisabledReason::Policy, DisabledReason::Unavailable] {

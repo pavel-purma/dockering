@@ -966,10 +966,10 @@ async fn upd_003_bad_signature_over_http() {
         assert!(is_error(&snap, &message), "{what}");
         assert_eq!(rig.update_entries(), Vec::<String>::new(), "{what}");
     }
-    // The signature file is missing altogether: also a failed check.
+    // The signature file is missing altogether: with keys configured, also a failed check.
     rig.make_latest(&good);
     rig.server.remove_route(&signature_path());
-    assert_eq!(failed_check(&hub).await, "server returned HTTP 404");
+    assert_eq!(failed_check(&hub).await, "the update signature is invalid");
     assert_eq!(
         rig.counts(),
         counts(5, 5, 0),
@@ -1260,6 +1260,31 @@ async fn upd_e2e_s3_bad_signature_over_http() {
     );
 }
 
+/// UPD-003, unsigned channel: GitHub answers `404` for `dockering-update.json.minisig` (the
+/// shape of every release so far) and a build with no embedded keys offers the update anyway.
+/// The asset's SHA-256 and size are still enforced.
+#[tokio::test]
+async fn upd_e2e_unsigned_release_without_minisig_is_offered() {
+    if updater_env_off() {
+        return;
+    }
+    let rig = Rig::new();
+    rig.fake_appimage();
+    rig.publish("0.2.0", PAYLOAD);
+    rig.server.remove_route(&signature_path());
+    let mut opts = Opts::manual();
+    opts.keys = Some(Vec::new());
+    let hub = rig.start_with(opts);
+    assert_eq!(
+        hub.check_for_updates().await,
+        Ok(UpdateCheck::Available {
+            version: "0.2.0".into()
+        })
+    );
+    eventually("the payload to be ready", || rig.payload("0.2.0").exists()).await;
+    assert_eq!(rig.counts(), counts(1, 1, 1));
+}
+
 #[tokio::test]
 async fn upd_e2e_s4_bad_hash_over_http() {
     if updater_env_off() {
@@ -1463,15 +1488,12 @@ async fn upd_e2e_s7_opt_outs_make_no_requests() {
         let hub = rig.start_with(opts);
         Case { what, rig, hub }
     };
-    let mut keys = fast();
-    keys.keys = Some(Vec::new());
     let mut demo = fast();
     demo.demo = true;
     let control = make("control", fast());
     let cases = [
         make("the setting is off", fast().checks_off()),
         make("demo mode", demo),
-        make("no trust keys", keys),
     ];
 
     // The control checks at least three times; by then the others had the same three periods.
@@ -1503,19 +1525,6 @@ async fn upd_e2e_s7_opt_outs_make_no_requests() {
     assert_eq!(current(&demo.hub).await, UpdateSnapshot::unavailable());
     assert_eq!(
         demo.hub.check_for_updates().await,
-        Ok(UpdateCheck::Disabled)
-    );
-    let no_keys = &cases[2];
-    let snap = current(&no_keys.hub).await;
-    assert_eq!(
-        snap.status,
-        UpdateStatus::Disabled {
-            reason: DisabledReason::Unavailable
-        }
-    );
-    assert_eq!(snap.offer, None);
-    assert_eq!(
-        no_keys.hub.check_for_updates().await,
         Ok(UpdateCheck::Disabled)
     );
     for case in &cases[1..] {

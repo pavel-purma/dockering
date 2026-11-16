@@ -9,14 +9,14 @@
 # release or tag. Tag runs create a DRAFT only. Unsigned mode explicitly disables OS code
 # signing and notarisation, even when credentials are configured (REL-016/017); it does not
 # decide the updater. The updater is its own gate (REL-083): `verify` computes the outputs
-# `updater` (none|all), `unsigned` (OS signing) and `sign_manifest` (= updater is all, or the
-# build is OS-signed); `package` and `assemble` only read them.
+# `updater` (none|all), `unsigned` (OS signing) and `sign_manifest` (= the build is OS-signed, or the
+# updater is all and keys.rs lists a public key); `package` and `assemble` only read them.
 # Secrets live only in the GitHub environment `release` (restricted to main and v* refs).
 #
 # Repository variables:
-#   UPDATER           none | all (default none): the in-app updater in all six targets, and
-#                     a signed update manifest; needs UPDATE_SIGNING_KEY and a public
-#                     key in crates/dk-update/src/keys.rs when all            REL-083, UPD-005
+#   UPDATER           none | all (default none): the in-app updater in all six targets. The
+#                     manifest is signed when keys.rs lists a public key (needs
+#                     UPDATE_SIGNING_KEY), else it ships unsigned (ADR-0007)  REL-083, UPD-005
 #   PUBLIC_RELEASES   'true' → OS-signed channel; tags are OS-signed. It does not
 #                     decide the updater                                  REL-031, REL-060
 #   WINDOWS_SIGNING   azure | none (default none)                        REL-031
@@ -26,7 +26,7 @@
 #   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
 #   AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE    (azure)
 #   UPDATE_SIGNING_KEY (+ optional UPDATE_SIGNING_KEY_PASSWORD)          UPD-003 manifest signature;
-#                                    required when sign_manifest is true (UPDATER=all or OS-signed)
+#                                    required when sign_manifest is true (keys.rs lists a key, or OS-signed)
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #   APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_P8                    (macOS, MACOS_SIGNING=apple)
 # Manual run inputs (a branch run is a rehearsal from main, REL-016):
@@ -151,9 +151,20 @@ jobs:
           fi
           updater="$variable_updater"
           if [[ "$requested_updater" != inherit ]]; then updater="$requested_updater"; fi
-          # The manifest is signed whenever the updater is built or the build is OS-signed.
+          # The public-key list in keys.rs is the switch for the update manifest: empty means releases ship
+          # an unsigned manifest (ADR-0007), non-empty means every build verifies a signature, so one must ship.
+          keys_present=$(python3 - <<'PY'
+          import re
+          source = open('crates/dk-update/src/keys.rs', encoding='utf-8').read()
+          match = re.search(r'PUBLIC_KEYS[^=]*=\s*&\[(.*?)\];', source, re.S)
+          body = re.sub(r'(?m)^\s*//.*$', '', match.group(1)) if match else ''
+          print('true' if re.search(r'"[^"]+"', body) else 'false')
+          PY
+          )
+          # The manifest is signed when the build is OS-signed, or the updater is built and keys.rs lists a key.
           sign_manifest=false
-          if [[ "$updater" == all || "$unsigned" == false ]]; then sign_manifest=true; fi
+          if [[ "$unsigned" == false ]]; then sign_manifest=true; fi
+          if [[ "$updater" == all && "$keys_present" == true ]]; then sign_manifest=true; fi
           echo "updater=$updater" >> "$GITHUB_OUTPUT"
           echo "sign_manifest=$sign_manifest" >> "$GITHUB_OUTPUT"
           os_signed=false
@@ -184,7 +195,7 @@ jobs:
               *) echo "::error::MACOS_SIGNING must be apple or none"; exit 1 ;;
             esac
           fi
-          # Whenever the manifest is signed (updater=all, or OS-signed mode) the run needs the secret
+          # Whenever the manifest is signed (a key in keys.rs, or OS-signed mode) the run needs the secret
           # key and a compiled-in public key that can verify what it ships (UPD-003, REL-031/032/083).
           if [[ "$sign_manifest" == true ]]; then
             if [[ "$unsigned" == false ]]; then reason='signed mode'; else reason='UPDATER=all'; fi
@@ -554,6 +565,8 @@ jobs:
           case "$UPDATER:$SIGN_MANIFEST" in
             all:true)
               updates="Dockering checks for updates in these builds, and the update manifest is signed with the project's update key. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page." ;;
+            all:false)
+              updates="Dockering checks for updates in these builds. The update manifest has no signature: each download is checked against the size and SHA-256 in the manifest, which is fetched over HTTPS from this project's GitHub release. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page." ;;
             none:true)
               updates="Automatic updates are not included in these builds; the update manifest is signed with the project's update key." ;;
             none:false)

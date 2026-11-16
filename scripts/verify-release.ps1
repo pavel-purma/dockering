@@ -5,9 +5,10 @@
 #          [-Repo owner/name] [-Attest -Commit <sha> [-SourceRef <ref>]] [-Published] [-LaunchSmoke]
 # -Expect is the OS code-signing mode (Authenticode, certificate tables, the Signed/Unsigned notes). -Updater (default none) is the
 #   update channel the draft was built for (REL-083, the `updater` output of release.yml's verify job), independent of -Expect: the
-#   manifest is signed (sign_manifest) when -Updater is all OR -Expect is Signed, and then dockering-update.json.minisig is
-#   required in the file set; otherwise it is forbidden. The notes must carry the one update sentence of release.yml's notes step
-#   for the case: updater all, updater none with a signed manifest, or updater none with an unsigned one.
+#   manifest is signed (sign_manifest) when -Expect is Signed, or -Updater is all and the release ships a .minisig (keys.rs lists a
+#   key); then dockering-update.json.minisig is required in the file set; otherwise it is forbidden. The notes must carry the one
+#   update sentence of release.yml's notes step for the case: updater all (signed or unsigned manifest), or updater none with a
+#   signed or an unsigned one.
 # This script has no cargo and no minisign. `cargo xtask verify-update-artifacts --assets <dir> --version <semver> --updater <none|all>`
 #   runs next to it (the /release skill and the signing rehearsal run both): it verifies the .minisig against the app's compiled-in
 #   keys and that the FIRST (current) key made it, the manifest version, and every platform entry's kind, URL, size and SHA-256 (REL-084).
@@ -59,10 +60,11 @@ $LinuxArchs = @(
 )
 $DigestSha256 = '2.16.840.1.101.3.4.2.1'
 # The one sentence about updates that release.yml's "Release notes from CHANGELOG.md" step writes into the notes (REL-083), by
-# channel: the updater is built ('all'), or not, with a signed ('none-signed') or an unsigned ('none-unsigned') manifest.
+# channel: the updater is built (signed 'all' or 'all-unsigned' manifest), or not, with a signed ('none-signed') or an unsigned ('none-unsigned') manifest.
 # scripts/tests/test_verify_release_wording.py fails when these and the workflow's sentences differ.
 $UpdateNotes = [ordered]@{
     'all'           = "Dockering checks for updates in these builds, and the update manifest is signed with the project's update key. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page."
+    'all-unsigned'  = "Dockering checks for updates in these builds. The update manifest has no signature: each download is checked against the size and SHA-256 in the manifest, which is fetched over HTTPS from this project's GitHub release. Windows installs made with the installer (Inno) and Linux AppImages in a writable location can install an update from within the app after a click; macOS and every other install (portable zip, .deb, .tar.gz, read-only locations) show a Download button that opens the release page."
     'none-signed'   = "Automatic updates are not included in these builds; the update manifest is signed with the project's update key."
     'none-unsigned' = "Automatic updates are not included in these builds; the update manifest has no signature."
 }
@@ -235,14 +237,22 @@ function Get-ChangelogSection([string] $Text, [string] $Version) {
 }
 
 function Get-UpdaterChannel {
-    # Same formula as release.yml: sign_manifest = (updater == all) or the build is OS-signed (REL-083).
-    if ($script:Ctx.Updater -ceq 'all') { return 'all' }
-    if ($script:Ctx.Expect -eq 'Signed') { return 'none-signed' }
+    # release.yml: sign_manifest = the build is OS-signed, or the updater is all and keys.rs lists a public key (REL-083).
+    # This script can't read the key list, so with -Updater all the shipped .minisig decides ('all' signed, 'all-unsigned' not);
+    # `cargo xtask verify-update-artifacts` checks that it matches keys.rs.
+    if ($script:Ctx.Expect -eq 'Signed') {
+        if ($script:Ctx.Updater -ceq 'all') { return 'all' }
+        return 'none-signed'
+    }
+    if ($script:Ctx.Updater -ceq 'all') {
+        if (Test-Path -LiteralPath (Join-Path $script:Ctx.Dir 'dockering-update.json.minisig')) { return 'all' }
+        return 'all-unsigned'
+    }
     'none-unsigned'
 }
 
 # dockering-update.json.minisig is shipped exactly when sign_manifest is true (REL-017, REL-083).
-function Test-ManifestSigned { (Get-UpdaterChannel) -cne 'none-unsigned' }
+function Test-ManifestSigned { (Get-UpdaterChannel) -cnotin 'none-unsigned', 'all-unsigned' }
 
 function Get-ExpectedFiles {
     $names = @($Distributions) + @($Metadata)

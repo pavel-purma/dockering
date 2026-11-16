@@ -26,6 +26,21 @@ pub fn verify_manifest(json: &[u8], signature: &str, keys: &[&str]) -> Result<()
     }
 }
 
+/// Authenticates a manifest against the embedded `keys` (UPD-003). With keys, [`verify_manifest`]
+/// applies and an empty `signature` fails. With **no** keys the release channel is unsigned
+/// (ADR-0007, 2026-11-16): the manifest is accepted as served, and size, SHA-256 and the pinned
+/// GitHub URLs of each asset remain the only checks.
+pub fn authenticate_manifest(
+    json: &[u8],
+    signature: &str,
+    keys: &[&str],
+) -> Result<(), UpdateError> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    verify_manifest(json, signature, keys)
+}
+
 /// The base64 line of a public key given either bare or as a whole `.pub` file.
 fn key_line(key: &str) -> &str {
     key.lines()
@@ -207,6 +222,23 @@ mod tests {
         );
         assert_eq!(
             verify_manifest(b"manifest", &sig, crate::keys::PUBLIC_KEYS),
+            Err(UpdateError::Signature)
+        );
+    }
+
+    #[test]
+    fn upd_003_unsigned_channel_accepts_a_manifest_only_without_keys() {
+        assert_eq!(authenticate_manifest(b"manifest", "", &[]), Ok(()));
+        let kp = keypair();
+        let key = kp.pk.to_base64();
+        assert_eq!(
+            authenticate_manifest(b"manifest", "", &[&key]),
+            Err(UpdateError::Signature)
+        );
+        let sig = sign(&kp, b"manifest");
+        assert_eq!(authenticate_manifest(b"manifest", &sig, &[&key]), Ok(()));
+        assert_eq!(
+            authenticate_manifest(b"other", &sig, &[&key]),
             Err(UpdateError::Signature)
         );
     }

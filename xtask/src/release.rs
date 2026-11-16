@@ -520,11 +520,20 @@ fn check_manifest_signature(
 ) {
     let signature_path = assets.join(format!("{MANIFEST}.minisig"));
     if !signature_path.is_file() {
-        match updater {
-            Updater::All => findings.fail(format!(
-                "{MANIFEST}.minisig is missing: a build with the updater (--updater all) needs a signed manifest (REL-083)"
+        let listed = fs::read_to_string(keys_path)
+            .with_context(|| format!("reading {}", keys_path.display()))
+            .and_then(|source| parse_public_keys(&source));
+        match (updater, listed) {
+            (Updater::All, Ok(keys)) if !keys.is_empty() => findings.fail(format!(
+                "{MANIFEST}.minisig is missing, but {} lists a public key: every build would reject the manifest (REL-083)",
+                keys_path.display()
             )),
-            Updater::None => findings.pass(format!(
+            (Updater::All, Ok(_)) => findings.pass(format!(
+                "no {MANIFEST}.minisig and no public key in {}: an unsigned manifest (--updater all, ADR-0007)",
+                keys_path.display()
+            )),
+            (Updater::All, Err(error)) => findings.fail(format!("{error:#}")),
+            (Updater::None, _) => findings.pass(format!(
                 "no {MANIFEST}.minisig (--updater none): the signature is not checked"
             )),
         }
@@ -1213,6 +1222,16 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("--updater all"), "{error}");
+
+        // ADR-0007: with no public key in keys.rs an unsigned manifest is the channel.
+        let keys = fs::read_to_string(fixture.keys()).unwrap();
+        fs::write(fixture.keys(), keys_source(&[])).unwrap();
+        let passed = fixture.check(Updater::All).unwrap();
+        assert!(
+            passed.iter().any(|l| l.contains("an unsigned manifest")),
+            "{passed:?}"
+        );
+        fs::write(fixture.keys(), keys).unwrap();
 
         // `none` with no signature checks nothing about signing, not even the keys file.
         fs::remove_file(fixture.keys()).unwrap();

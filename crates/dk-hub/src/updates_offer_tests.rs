@@ -736,21 +736,14 @@ async fn upd_017_hard_disable_hides_button_keeps_file() {
     std::fs::create_dir_all(dir.join("0.1.5")).expect("mkdir");
     let requests = f.source.requests();
 
-    // No trust keys (like a policy, the env switch, demo or a build without the feature) fail
-    // closed: no offer in the snapshot, no actions, no network ...
-    let hub = f.launch().config(Config::default()).no_keys().go();
+    // Demo mode (like a policy, the env switch or a build without the feature) is a hard
+    // disable: no offer in the snapshot, no actions, no network ...
+    let demo = f.launch().demo().go();
     tokio::time::sleep(DAY * 2).await;
-    let snap = current(&hub).await;
+    assert_eq!(current(&demo).await, UpdateSnapshot::unavailable());
+    assert_eq!(demo.check_for_updates().await, Ok(UpdateCheck::Disabled));
     assert_eq!(
-        snap.status,
-        UpdateStatus::Disabled {
-            reason: DisabledReason::Unavailable
-        }
-    );
-    assert_eq!(snap.offer, None);
-    assert_eq!(hub.check_for_updates().await, Ok(UpdateCheck::Disabled));
-    assert_eq!(
-        hub.apply_update().await,
+        demo.apply_update().await,
         Err(protocol("updates are disabled"))
     );
     assert_eq!(f.strategy.calls(), 0);
@@ -759,17 +752,7 @@ async fn upd_017_hard_disable_hides_button_keeps_file() {
     assert_eq!(offer_json(&f), json);
     assert!(f.payload("0.2.0").exists());
     assert!(dir.join("0.1.5").exists());
-    hub.shutdown();
-
-    // Demo mode has no updater at all, and leaves the files alone too.
-    let demo = f.launch().demo().go();
-    assert_eq!(current(&demo).await, UpdateSnapshot::unavailable());
-    assert_eq!(
-        demo.apply_update().await,
-        Err(protocol("updates are disabled"))
-    );
     demo.shutdown();
-    assert_eq!(offer_json(&f), json);
 
     // Lifting the disable brings the offer back, as it was.
     let hub = f.start();
