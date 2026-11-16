@@ -23,7 +23,7 @@ provider the workflow supports (`WINDOWS_SIGNING=azure`); Apple Developer ID is 
 |---|---|---|---|
 | `dockering.exe` (Windows x64, ARM64) | none today. In the OS-signed channel: Authenticode, SHA-256, RFC 3161 timestamp | the configured provider (Azure Artifact Signing) | `release.yml`, `scripts/verify-release.ps1`, the app's updater (UPD-003) |
 | `Dockering-Setup-<arch>.exe` | the same | the same | the same |
-| `dockering-update.json` | minisign (Ed25519) → `dockering-update.json.minisig`, whenever `sign_manifest` is true: `UPDATER=all` **or** an OS-signed build (REL-083) | the Dockering update key (the **first** key of `PUBLIC_KEYS`) | `cargo xtask verify-update-artifacts` (REL-084; `verify-manifest` is its narrower form), the app |
+| `dockering-update.json` | minisign (Ed25519) → `dockering-update.json.minisig`, whenever `sign_manifest` is true: an OS-signed build, or `UPDATER=all` with a public key in `keys.rs` (REL-083); with `UPDATER=all` and no key it ships unsigned (ADR-0007, 2026-11-16) | the Dockering update key (the **first** key of `PUBLIC_KEYS`) | `cargo xtask verify-update-artifacts` (REL-084; `verify-manifest` is its narrower form), the app |
 | every release file | GitHub build-provenance attestation | GitHub Actions | `gh attestation verify` |
 | macOS DMGs | none today. With `MACOS_SIGNING=apple`: Developer ID + notarisation (REL-034) | not set up | `codesign`, `spctl` |
 | Portable zips | none; in the OS-signed channel the `dockering.exe` inside is signed, the zip itself is not | | `SHA256SUMS`, attestations |
@@ -94,9 +94,9 @@ until then.
 
 ### Phase 4: update-manifest key (you; the agent only receives the public keys)
 
-The updater accepts only a manifest signed with a key whose public half is compiled into the app
-(UPD-003). Until then `PUBLIC_KEYS` in `crates/dk-update/src/keys.rs` is empty and updates fail
-closed. This phase needs no OS code signing. No agent generates, sees or stores a private key, so **you**:
+Once a public key is compiled into the app (UPD-003) the updater accepts only a manifest signed with it.
+Until then `PUBLIC_KEYS` in `crates/dk-update/src/keys.rs` is empty and the updater runs on the unsigned
+channel (ADR-0007, 2026-11-16): no `.minisig`, trust is HTTPS to the project's release plus each asset's size and SHA-256. This phase needs no OS code signing. No agent generates, sees or stores a private key, so **you**:
 
 1. run `cargo xtask gen-update-keys <temporary directory outside the repo>` (it writes `current.key`, `next.key` and the `.pub` files, and prints only the public keys; the secret files are created with mode 0600 on Unix, and the command refuses to overwrite an existing key);
 2. set the secret straight from the file, so the key never appears in a command line or a chat: `gh secret set UPDATE_SIGNING_KEY --env release < <dir>/current.key`;

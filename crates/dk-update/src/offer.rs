@@ -24,7 +24,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::UpdateError;
 use crate::manifest::{PlatformAsset, UpdateManifest, evaluate};
-use crate::verify::verify_manifest;
+use crate::verify::authenticate_manifest;
 
 /// The retained offer's file name inside the updates directory (UPD-012).
 pub const OFFER_FILE: &str = "offer.json";
@@ -296,9 +296,9 @@ pub fn is_obsolete(offer: &StoredOffer, running: &Version) -> bool {
 /// than `running`, has an entry for `platform` and is fresh at `now`; `None` otherwise.
 ///
 /// - An unreadable file is deleted ([`read_or_discard`]).
-/// - No `keys` fails closed (`None`) and leaves the file alone: a build without trust keys keeps
-///   the offer but never shows it (UPD-017 (8)).
-/// - The signature is checked against `keys` with [`verify_manifest`]; the version and platform
+/// - The manifest is authenticated against `keys` with [`authenticate_manifest`]: with keys the
+///   signature must verify, with none the channel is unsigned and it is accepted (UPD-003).
+/// - The version and platform
 ///   rules are those of [`evaluate`] (strictly newer, a stable build never gets a pre-release).
 /// - A valid but expired or obsolete file is **not** deleted here; the caller decides (see
 ///   [`discard`]).
@@ -310,11 +310,8 @@ pub fn restore(
     platform: &str,
     now: SystemTime,
 ) -> Option<StoredOffer> {
-    if keys.is_empty() {
-        return None;
-    }
     let offer = read_or_discard(dir)?;
-    verify_manifest(offer.manifest.as_bytes(), &offer.signature, keys).ok()?;
+    authenticate_manifest(offer.manifest.as_bytes(), &offer.signature, keys).ok()?;
     evaluate(offer.manifest.as_bytes(), running, platform).ok()??;
     is_fresh(&offer, now).then_some(offer)
 }
@@ -956,8 +953,8 @@ mod tests {
             "no signature"
         );
 
-        // Key problems: the wrong key, an unparsable key, and no keys (fail closed, and the
-        // file stays: a build without keys keeps the offer, UPD-017 (8)).
+        // Key problems: the wrong key and an unparsable key fail closed. No keys at all is the
+        // unsigned channel (UPD-003): the offer is accepted as stored.
         put(&text, &signature);
         assert_eq!(
             restore_with(&[&other], &running(), PLATFORM),
@@ -969,7 +966,10 @@ mod tests {
             None,
             "bad key"
         );
-        assert_eq!(restore_with(&[], &running(), PLATFORM), None, "no keys");
+        assert!(
+            restore_with(&[], &running(), PLATFORM).is_some(),
+            "no keys: unsigned channel"
+        );
         assert!(offer_path(tmp.path()).exists());
         assert!(restore_with(&[&key], &running(), PLATFORM).is_some());
 

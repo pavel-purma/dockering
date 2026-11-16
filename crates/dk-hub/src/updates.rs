@@ -116,13 +116,12 @@ pub enum DisabledReason {
     Policy,
     /// The user turned automatic checks off; *Check now* and the retained offer still work.
     Setting,
-    /// Not in this build (no `updater` feature), `DOCKERING_DISABLE_UPDATES`, demo mode, or no
-    /// trust keys.
+    /// Not in this build (no `updater` feature), `DOCKERING_DISABLE_UPDATES` or demo mode.
     Unavailable,
 }
 
 impl DisabledReason {
-    /// Policy, env, demo, no feature and no keys suppress every action and the button but keep
+    /// Policy, env, demo and no feature suppress every action and the button but keep
     /// the retained file (UPD-017 (8)); only the setting leaves explicit actions alone.
     #[must_use]
     pub fn is_hard(self) -> bool {

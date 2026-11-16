@@ -826,7 +826,7 @@ async fn upd_012_sweep_wired_for_appimage_only() {
         .expect("open")
         .set_modified(f.host.now() - Duration::from_secs(7200))
         .expect("mtime");
-    let hub = f.launch().no_keys().go();
+    let hub = f.launch().demo().go();
     tokio::time::sleep(Duration::from_secs(60)).await;
     assert!(stale.exists());
     hub.shutdown();

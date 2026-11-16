@@ -6,7 +6,7 @@
 //! *Check for updates automatically* being off never erase the offer (UPD-009). An
 //! administrator policy (a Windows registry value) switches updates off: the switch is disabled
 //! and *Check now* hidden; the other hard disables (no `updater` feature, the environment
-//! switch, demo mode, no trust keys) disable the actions and say why. Nothing here reads the
+//! switch, demo mode) disable the actions and say why. Nothing here reads the
 //! operating system.
 
 use dk_hub::{DisabledReason, OfferMode, OfferStage, UpdateCheck, UpdateOffer, UpdateStatus};
@@ -28,7 +28,7 @@ use crate::strings as s;
 enum Mode {
     /// Policy: everything disabled, with a note; *Check now* hidden.
     Policy,
-    /// Not compiled in, `DOCKERING_DISABLE_UPDATES`, demo, or no trust keys: a note; *Check
+    /// Not compiled in, `DOCKERING_DISABLE_UPDATES`, or demo: a note; *Check
     /// now* and the offer's actions disabled.
     Unavailable,
     /// Normal, including "automatic checks off" (*Check now* and the offer still work).

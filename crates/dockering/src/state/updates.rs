@@ -109,7 +109,7 @@ impl UpdateStore {
         self.snapshot.offer.as_ref()
     }
 
-    /// Policy, `DOCKERING_DISABLE_UPDATES`, demo mode, no `updater` feature or no trust keys
+    /// Policy, `DOCKERING_DISABLE_UPDATES`, demo mode or no `updater` feature
     /// (UPD-005): the retained offer is inert. The hub already leaves it out of the snapshot
     /// then; this keeps the UI from acting on one anyway (UPD-015, UPD-017 (8)). *Check for
     /// updates automatically* being off is not a hard disable.

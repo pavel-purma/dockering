@@ -36,7 +36,7 @@ VERIFIER = ROOT / "scripts/verify-release.ps1"
 PWSH = shutil.which("pwsh")
 
 # workflow `case "$UPDATER:$SIGN_MANIFEST"` label -> `$UpdateNotes` key in the verifier
-CHANNELS = {"all:true": "all", "none:true": "none-signed", "none:false": "none-unsigned"}
+CHANNELS = {"all:true": "all", "all:false": "all-unsigned", "none:true": "none-signed", "none:false": "none-unsigned"}
 
 DISTRIBUTIONS = (
     "Dockering-Setup-x64.exe",
@@ -72,7 +72,7 @@ def verifier_text():
 def workflow_sentences():
     """channel key -> the update sentence of release.yml's notes step."""
     script = step_script_of(find_step("assemble", "Release notes from CHANGELOG.md"))
-    found = re.findall(r'^\s*(all:true|none:true|none:false)\)\s*\n\s*updates="([^"]*)" ;;', script, re.M)
+    found = re.findall(r'^\s*(all:true|all:false|none:true|none:false)\)\s*\n\s*updates="([^"]*)" ;;', script, re.M)
     return {CHANNELS[label]: sentence for label, sentence in found}
 
 
@@ -96,8 +96,8 @@ class VerifierWordingStaticTests(unittest.TestCase):
     def test_rel_084_notes_sentences_agree_between_workflow_and_verifier(self):
         workflow = workflow_sentences()
         verifier = verifier_sentences()
-        self.assertEqual(sorted(workflow), sorted(CHANNELS.values()), "the workflow case lists the three channels")
-        self.assertEqual(sorted(verifier), sorted(CHANNELS.values()), "the verifier lists the three channels")
+        self.assertEqual(sorted(workflow), sorted(CHANNELS.values()), "the workflow case lists the four channels")
+        self.assertEqual(sorted(verifier), sorted(CHANNELS.values()), "the verifier lists the four channels")
         for channel in CHANNELS.values():
             with self.subTest(channel):
                 self.assertEqual(verifier[channel], workflow[channel])
@@ -173,6 +173,7 @@ class VerifierFakeBundleTests(unittest.TestCase):
         # (-Expect, -Updater, sign_manifest, UNSIGNED)
         ("Unsigned", "none", False, "true"),
         ("Unsigned", "all", True, "true"),
+        ("Unsigned", "all", False, "true"),
         ("Signed", "none", True, "false"),
         ("Signed", "all", True, "false"),
     )
@@ -193,7 +194,7 @@ class VerifierFakeBundleTests(unittest.TestCase):
     @staticmethod
     def channel(updater, sign_manifest):
         if updater == "all":
-            return "all"
+            return "all" if sign_manifest else "all-unsigned"
         return "none-signed" if sign_manifest else "none-unsigned"
 
     def notes_by_workflow(self, root, *, updater, sign_manifest, unsigned):
@@ -314,6 +315,9 @@ class VerifierFakeBundleTests(unittest.TestCase):
     def test_rel_084_minisig_follows_updater_or_signed(self):
         for combo in self.COMBINATIONS:
             expect, updater, sign_manifest, *_ = combo
+            if updater == "all" and expect == "Unsigned":
+                # With the updater, the .minisig itself says whether keys.rs lists a key (ADR-0007): either shape is a channel.
+                continue
             with self.subTest(expect=expect, updater=updater), tempfile.TemporaryDirectory(prefix="dockering-vr-") as temp:
                 root = Path(temp)
                 # The opposite of what sign_manifest says: a missing .minisig, or one that must not be there.

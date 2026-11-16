@@ -642,26 +642,61 @@ impl Launch<'_> {
     }
 }
 
+/// UPD-003 (unsigned channel): a build with no embedded keys is not disabled. It accepts the
+/// manifest as served, with or without a `.minisig`, and still verifies size and SHA-256.
 #[tokio::test(start_paused = true)]
-async fn upd_005_no_keys_fails_closed_before_network() {
+async fn upd_003_no_keys_is_the_unsigned_channel() {
     if updater_env_off() {
         return;
     }
     let f = Fixture::new(InstallKind::InnoUser);
     f.publish("0.2.0");
-    // Even with automatic checks on, even for a manual check: no key, no request.
-    let hub = f.launch().config(Config::default()).no_keys().go();
-    tokio::time::sleep(INTERVAL * 2).await;
-    assert_eq!(hub.check_for_updates().await, Ok(UpdateCheck::Disabled));
-    assert_eq!(f.source.requests(), 0);
-    let snap = current(&hub).await;
+    // A release with no signature file at all: the source hands over an empty signature.
+    let (json, _) = f
+        .source
+        .inner
+        .manifest
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("manifest");
+    *lock(&f.source.inner.manifest) = Ok((json, String::new()));
+    let hub = f.launch().config(quiet()).no_keys().go();
     assert_eq!(
-        snap.status,
-        UpdateStatus::Disabled {
-            reason: crate::DisabledReason::Unavailable
-        }
+        hub.check_for_updates().await,
+        Ok(UpdateCheck::Available {
+            version: "0.2.0".into()
+        })
     );
-    assert_eq!(snap.offer, None);
+    let snap = until(&hub, Duration::from_secs(1), |s| {
+        s.offer
+            .as_ref()
+            .is_some_and(|o| o.stage == crate::OfferStage::Ready)
+    })
+    .await;
+    assert_eq!(snap.offer.expect("offer").version, "0.2.0");
+}
+
+/// With keys configured, a missing signature still fails closed.
+#[tokio::test(start_paused = true)]
+async fn upd_003_keys_require_a_signature() {
+    if updater_env_off() {
+        return;
+    }
+    let f = Fixture::new(InstallKind::InnoUser);
+    f.publish("0.2.0");
+    let (json, _) = f
+        .source
+        .inner
+        .manifest
+        .lock()
+        .expect("lock")
+        .clone()
+        .expect("manifest");
+    *lock(&f.source.inner.manifest) = Ok((json, String::new()));
+    let hub = f.launch().config(quiet()).go();
+    assert!(hub.check_for_updates().await.is_err());
+    assert_eq!(current(&hub).await.offer, None);
 }
 
 #[tokio::test(start_paused = true)]

@@ -27,17 +27,11 @@ use crate::hub::{HubInner, lock};
 /// How often the expiry timer looks at the wall clock again at the latest (see `expiry`).
 const EXPIRY_RECHECK: Duration = Duration::from_secs(3600);
 
-/// Why updates are off right now, if they are: [`disabled_reason`] plus the trust keys. A build
-/// with no keys fails closed before any network access (UPD-005) and, like a policy, hides the
-/// retained offer without touching its file (UPD-017 (8)).
-pub(crate) fn current_disabled(inner: &HubInner, u: &State) -> Option<DisabledReason> {
+/// Why updates are off right now, if they are: [`disabled_reason`]. An empty key list is the
+/// unsigned channel (UPD-003), not a disable.
+pub(crate) fn current_disabled(inner: &HubInner) -> Option<DisabledReason> {
     let setting = lock(&inner.config).updates.check;
-    match disabled_reason(true, inner.demo, setting) {
-        None | Some(DisabledReason::Setting) if u.keys.is_empty() => {
-            Some(DisabledReason::Unavailable)
-        }
-        other => other,
-    }
+    disabled_reason(true, inner.demo, setting)
 }
 
 fn idle_status(inner: &HubInner) -> UpdateStatus {
@@ -61,7 +55,7 @@ async fn blocking<T: Send + 'static>(
 
 // ── start ──────────────────────────────────────────────────────────────────────────────────
 
-/// Called from `HubInner::start_with`. A hard disable (policy, env, demo, no keys) stops here:
+/// Called from `HubInner::start_with`. A hard disable (policy, env, demo) stops here:
 /// no restore, no cleanup, no network, and the offer file stays as it is (UPD-017 (8)).
 /// Otherwise the retained offer is restored *before* any check can run, then the schedule starts
 /// (unless only the setting is off).
@@ -69,7 +63,7 @@ pub(crate) fn start(inner: &Arc<HubInner>) {
     let Some(u) = inner.updates.as_ref() else {
         return;
     };
-    let reason = current_disabled(inner, u);
+    let reason = current_disabled(inner);
     u.set_disabled(reason, idle_status(inner));
     if reason.is_some_and(DisabledReason::is_hard) {
         return;
@@ -93,7 +87,7 @@ async fn init(inner: Arc<HubInner>, busy: Option<OwnedMutexGuard<()>>) {
     cleanup(&inner, u).await;
     sweep_staging(u).await;
     drop(busy);
-    if current_disabled(&inner, u).is_none() {
+    if current_disabled(&inner).is_none() {
         start_schedule(&inner);
     }
 }
@@ -140,10 +134,7 @@ async fn restore(inner: &Arc<HubInner>, u: &State) {
             let platform = host.platform();
             let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
             let restored = offer::restore(&dir, &key_refs, &running, &platform, host.now());
-            if restored.is_none()
-                && !keys.is_empty()
-                && offer::read(&dir).is_ok_and(|o| o.is_some())
-            {
+            if restored.is_none() && offer::read(&dir).is_ok_and(|o| o.is_some()) {
                 // Bad signature, the running version caught up, no entry for this platform,
                 // expired: nothing in the file is worth keeping (UPD-017 (2), (5)).
                 offer::discard(&dir);
@@ -180,7 +171,7 @@ pub(crate) fn settings_changed(inner: &Arc<HubInner>) {
     let Some(u) = inner.updates.as_ref() else {
         return;
     };
-    let reason = current_disabled(inner, u);
+    let reason = current_disabled(inner);
     if reason.is_some()
         && let Some(token) = lock(&u.schedule).take()
     {
@@ -265,7 +256,7 @@ pub(crate) async fn check(inner: &Arc<HubInner>, manual: bool) -> EngineResult<U
     let Some(u) = inner.updates.as_ref() else {
         return Ok(UpdateCheck::Disabled);
     };
-    if let Some(reason) = current_disabled(inner, u) {
+    if let Some(reason) = current_disabled(inner) {
         // A manual check while only the setting is off still runs (Settings → *Check now*),
         // but never against policy, env, demo or missing keys.
         if reason.is_hard() || !manual {
@@ -309,7 +300,7 @@ pub(crate) async fn check(inner: &Arc<HubInner>, manual: bool) -> EngineResult<U
         (Err(e), true) => UpdateStatus::Error {
             message: e.to_string(),
         },
-        _ => match current_disabled(inner, u) {
+        _ => match current_disabled(inner) {
             Some(reason) => UpdateStatus::Disabled { reason },
             None => UpdateStatus::Idle {
                 last_check: Some(checked_at),
@@ -332,7 +323,7 @@ async fn run_check(inner: &Arc<HubInner>, u: &State) -> Result<UpdateCheck, Upda
     .await?;
     let (json, sig) = u.source.fetch_manifest().await?;
     let keys: Vec<&str> = u.keys.iter().map(String::as_str).collect();
-    dk_update::verify::verify_manifest(&json, &sig, &keys)?;
+    dk_update::verify::authenticate_manifest(&json, &sig, &keys)?;
     let platform = u.host.platform();
     let checked_at = rfc3339(u.host.now());
     let newer = NewerManifest::from_authenticated(&json, &sig, &u.current, &platform, &checked_at)?;

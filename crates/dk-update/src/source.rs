@@ -44,7 +44,8 @@ pub fn release_asset_name(url: &str, version: &str) -> Result<String, UpdateErro
 
 /// Where update metadata and installers come from.
 pub trait UpdateSource: Send + Sync {
-    /// `(manifest bytes, minisign signature text)`.
+    /// `(manifest bytes, minisign signature text)`. The signature is empty when the release has
+    /// none (an unsigned channel, UPD-003): the caller decides whether that is acceptable.
     fn fetch_manifest(&self) -> BoxFuture<'_, Result<(Vec<u8>, String), UpdateError>>;
 
     /// Downloads `asset` into `dir/<file_name>` and verifies its size and SHA-256.
@@ -212,8 +213,11 @@ impl UpdateSource for GithubSource {
     fn fetch_manifest(&self) -> BoxFuture<'_, Result<(Vec<u8>, String), UpdateError>> {
         Box::pin(async move {
             let manifest = self.get_small(&self.manifest_url).await?;
-            let signature = self.get_small(&self.signature_url).await?;
-            let signature = String::from_utf8(signature).map_err(|_| UpdateError::Signature)?;
+            let signature = match self.get_small(&self.signature_url).await {
+                Ok(bytes) => String::from_utf8(bytes).map_err(|_| UpdateError::Signature)?,
+                Err(UpdateError::Http(404)) => String::new(),
+                Err(e) => return Err(e),
+            };
             Ok((manifest, signature))
         })
     }
