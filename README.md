@@ -34,8 +34,8 @@ Public GitHub release builds generate build-provenance attestations: `gh attesta
 
 > Downloads are unsigned. Windows may show SmartScreen prompts; macOS builds
 > are not notarized and may require approval in Privacy & Security. See [installation details](docs/release.md#unsigned-installation).
-> Automatic updates and winget are not available yet: the current release is updated by hand, and the
-> [planned updater](docs/plan/features/linux-appimage-updates.md) needs no code signing.
+> From 0.5.0 Dockering checks for updates itself (see [Updates](#updates)); an older release is
+> updated to 0.5.0 by hand once. winget is not available yet.
 
 ### Install on Windows
 
@@ -45,7 +45,7 @@ Public GitHub release builds generate build-provenance attestations: `gh attesta
   `Dockering-Setup-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
 - **winget (planned):** available after the first signed release. Use the installer or portable zip for now.
 - **Portable:** unzip `Dockering-x64.zip` anywhere and run `dockering.exe`. The portable build
-  uses manual downloads for updates in the unsigned release.
+  doesn't install updates itself: its update button opens the release page (**Download**).
 
 Requires Windows 10 22H2 or newer, x64 or ARM64.
 
@@ -95,19 +95,18 @@ release, an automated test installs the x86_64 packages on Ubuntu, Fedora, and A
 
 ## Updates
 
-The first unsigned release uses manual updates from the [Releases page](https://github.com/pavel-purma/dockering/releases).
-
-The [planned updater](docs/plan/features/linux-appimage-updates.md) (not shipped yet) works the same
-on Windows, macOS and Linux and needs no OS code signing: once a day it checks the latest release's signed
+From 0.5.0 Dockering has an [updater](docs/plan/features/linux-appimage-updates.md) that works the same
+on Windows, macOS and Linux and needs no OS code signing: once a day it checks the latest release's
 manifest, shows one notification per version and a button in the title bar, and Settings shows the offer.
 On Windows (installer) and on a Linux AppImage in a writable place, **Restart to update** installs it; on
 macOS and every other install the button opens the release page (**Download**). Nothing installs without
-your click. Existing releases still need manual updates.
+your click. Releases before 0.5.0 have no updater: install 0.5.0 by hand from the
+[Releases page](https://github.com/pavel-purma/dockering/releases) once.
 
 ## Privacy & network
 
 Dockering talks only to the engines you configure and, through them, to registries. The one
-other request, in future builds with the updater enabled, is the update check: an anonymous HTTPS
+other request, made by release builds from 0.5.0, is the update check: an anonymous HTTPS
 GET of the latest release manifest from `github.com`, with no ids or cookies. On installs that can update themselves (the Windows installer, a Linux AppImage), a newer version is also downloaded in the background from GitHub's release assets, again anonymously, and is never installed without your click.
 
 You can turn the update check off three ways:
@@ -116,7 +115,9 @@ You can turn the update check off three ways:
 - with the environment variable `DOCKERING_DISABLE_UPDATES=1`;
 - for a whole machine, with the policy value `HKLM\Software\Policies\Dockering\DisableUpdates = 1` (DWORD).
 
-Before anything runs, a download is checked against a signed manifest and its SHA-256 hash.
+Before anything runs, a download is checked against the size and SHA-256 hash in the manifest. The
+manifest is fetched over HTTPS from this project's GitHub release; it has no signature yet, so its
+integrity rests on GitHub and HTTPS.
 
 ## Build from source
 
