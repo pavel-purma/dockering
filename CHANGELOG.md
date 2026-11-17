@@ -9,6 +9,33 @@ Both changelogs are written only at release time, by the `/release` skill in the
 (REL-011, REL-019): feature pull requests don't edit them. Edit the wording in the release PR
 before merging it.
 
+## [0.5.0] - 2026-11-17
+
+Downloads are unsigned, as in 0.4.0. This is the first release with the in-app updater: it checks
+GitHub Releases for new versions and can be switched off in Settings. Earlier releases have no
+updater, so update an installed copy to 0.5.0 by hand once.
+
+### Added
+
+- Dockering checks for updates: 30 seconds after it starts and then once a day, it reads the latest
+  release's update manifest from GitHub. A newer version shows one notification and an update
+  button in the title bar, and *Settings › Updates* shows the offer. With the Windows installer and
+  with a Linux AppImage in a writable place, the update downloads in the background and
+  **Restart to update** installs it after its size and SHA-256 are checked; macOS and every other
+  install show **Download**, which opens the release page. Nothing installs without a click. Turn
+  the check off with *Check for updates automatically* in Settings, with
+  `DOCKERING_DISABLE_UPDATES=1`, or on Windows with the `DisableUpdates` policy value.
+- WSLC: WSL 3.0.3 is supported through the native interface, as 3.0.1 is. Dockering no longer falls
+  back to `wslc.exe` on 3.0.3, so image pulls show their progress.
+
+### Changed
+
+- The active engine is shown at the bottom of the sidebar, with its status dot, instead of in the
+  title bar; with the sidebar collapsed it is an icon button, and the status bar names the engine
+  and its state. The sidebar card, the engine section of the status bar, `Ctrl+K` (`Cmd+K` on
+  macOS) and the command palette open the engine switcher, now a fixed-size panel like the
+  command palette with a filter field.
+
 ## [0.4.0] - 2026-10-23
 
 Downloads are unsigned, as in 0.3.0. Automatic updates and winget remain deferred.
