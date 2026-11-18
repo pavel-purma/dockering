@@ -397,6 +397,7 @@ pub(crate) fn map_cli_error(
         "WSLC_E_CONTAINER_IS_RUNNING"
             | "WSLC_E_CONTAINER_NOT_RUNNING"
             | "WSLC_E_CONTAINER_PREFIX_AMBIGUOUS"
+            | "WSLC_E_NETWORK_PREFIX_AMBIGUOUS"
             | "ERROR_ALREADY_EXISTS"
             | "ERROR_SHARING_VIOLATION"
     ) || lower.contains("is running")

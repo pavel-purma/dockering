@@ -2,7 +2,11 @@
 //! byte-identical to tags 2.9.13, 3.0.0 and 3.0.1, checked 2026-10-02). `idl/3.0.3/wslc.idl`
 //! differs only in `WSLCBuildImageOptions` (never called here, see `BuildImage`) and comment
 //! text, so the same declarations serve 3.0.3 (reviewed 2026-10-27, `xtask` test
-//! `vendored_3_0_1_to_3_0_3_differs_only_in_build_image_options`).
+//! `vendored_3_0_1_to_3_0_3_differs_only_in_build_image_options`). `idl/3.0.5/wslc.idl` appends
+//! `IWSLCContainer::StartWithProcess` (slot 20, not declared here), renames network parameters,
+//! and grows `WSLCContainerOptions`/`WSLCNetworkOptions`, which only the never-called
+//! `CreateContainer`/`CreateNetwork` take; the declarations below match 3.0.1/3.0.3 for those two
+//! structs (reviewed 2026-11-18, `xtask` test `vendored_3_0_3_to_3_0_5_leaves_called_slots_alone`).
 //!
 //! Every interface declares **every** method of the IDL in IDL order so vtable offsets are
 //! exact. Methods we never call keep their real signature where it is cheap to spell, otherwise
@@ -31,6 +35,7 @@ use crate::version::WslVersion;
 /// The exact WSL service versions this module is trusted for, each with the vendored IDL it was
 /// verified against. Mirrors the `MODULES` entries for `V3_0` (tested); there is no range.
 pub const VERIFIED: &[(WslVersion, &str)] = &[
+    (WslVersion::new(3, 0, 5, 0), "3.0.5"),
     (WslVersion::new(3, 0, 3, 0), "3.0.3"),
     (WslVersion::new(3, 0, 1, 0), "3.0.1"),
 ];
@@ -886,7 +891,7 @@ mod tests {
     fn slot_offsets_of_called_methods() {
         let p = size_of::<usize>();
         let base = IUNKNOWN_VTBL_SIZE;
-        // Spike F-6/F-7 proved these slots live on 3.0.1; the 3.0.3 run is in spec 20 §5.8.
+        // Spike F-6/F-7 proved these slots live on 3.0.1; the 3.0.3/3.0.5 runs are in spec 20 §5.8.
         assert_eq!(
             offset_of!(IWSLCSessionManager_Vtbl, OpenSessionByName),
             base + 5 * p

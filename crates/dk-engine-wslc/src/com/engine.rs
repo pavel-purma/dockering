@@ -2351,6 +2351,8 @@ mod safety_tests {
             WslVersion::new(3, 0, 2, 0),
             WslVersion::new(3, 0, 3, 1),
             WslVersion::new(3, 0, 4, 0),
+            WslVersion::new(3, 0, 5, 1),
+            WslVersion::new(3, 0, 6, 0),
         ] {
             assert!(
                 block_on(WslcComEngine::connect(

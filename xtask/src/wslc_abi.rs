@@ -550,6 +550,52 @@ mod tests {
     }
 
     #[test]
+    fn vendored_3_0_3_to_3_0_5_leaves_called_slots_alone() {
+        // The review behind admitting WSL 3.0.5.0 (issue #81): `v3_0` declares 20 IWSLCContainer
+        // slots, so the appended slot 20 is unreachable; renamed parameters keep their types;
+        // the grown structs are taken only by CreateContainer/CreateNetwork, which are never called.
+        let read = |tag: &str, f: &str| {
+            std::fs::read_to_string(
+                workspace_root()
+                    .join("crates/dk-engine-wslc/idl")
+                    .join(tag)
+                    .join(f),
+            )
+            .expect("vendored idl")
+        };
+        let diff = |f: &str| compare(&parse_idl(&read("3.0.3", f)), &parse_idl(&read("3.0.5", f)));
+        assert!(diff("WSLCShared.idl").is_empty());
+        let r = diff("wslc.idl");
+        let allowed_heads = [
+            "interface IWSLCContainer slot 16: `HRESULT DisconnectFromNetwork([in] LPCSTR NetworkName)`",
+            "interface IWSLCContainer slot 20: added `HRESULT StartWithProcess(",
+            "interface IWSLCSession slot 38: `HRESULT DeleteNetwork([in] LPCSTR Name)`",
+            "interface IWSLCSession slot 40: `HRESULT InspectNetwork([in] LPCSTR Name,",
+            "type WSLCContainerOptions: members changed",
+            "type WSLCMountSpecFlags: members changed",
+            "type WSLCNetworkOptions: members changed",
+            "type WSLCContainerRestartPolicy: ADDED",
+            "#define WSLCMountSpecFlagsValid:",
+            "#define WSLC_E_CAPABILITY_ADDITIONS_DISABLED: ADDED",
+            "#define WSLC_E_NETWORK_PREFIX_AMBIGUOUS: ADDED",
+            "#define WSLC_E_RUNTIME_UPDATE_NEEDED: ADDED",
+        ];
+        for line in r.iter().filter(|l| !l.starts_with("  [")) {
+            assert!(
+                allowed_heads.iter().any(|h| line.starts_with(h)),
+                "unreviewed ABI change: {line}"
+            );
+        }
+        // Renames only: the parameter types of the called network slots are unchanged.
+        for l in r.iter().filter(|l| l.contains("Network(")) {
+            assert!(l.matches("LPCSTR").count() == 2, "{l}");
+        }
+        // Appended members only; nothing before them moved.
+        let members: Vec<_> = r.iter().filter(|l| l.starts_with("  [")).collect();
+        assert!(members.iter().all(|l| l.contains("`-` ->")), "{members:#?}");
+    }
+
+    #[test]
     fn tag_validation() {
         assert!(validate_tag("3.0.1").is_ok());
         assert!(validate_tag("-x").is_err());

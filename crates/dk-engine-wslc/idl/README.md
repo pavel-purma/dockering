@@ -8,6 +8,7 @@ vtables in `src/com/abi/` (ADR-0003, spec 20 §5.3).
 |---|---|---|---|
 | `3.0.1/` | [`3.0.1`](https://github.com/microsoft/WSL/tree/3.0.1) | `91f161fa240dc355c1a88daabc8aac4273e35ba5` | `src/windows/service/inc/wslc.idl`, `src/windows/service/inc/WSLCShared.idl` |
 | `3.0.3/` | [`3.0.3`](https://github.com/microsoft/WSL/tree/3.0.3) | `15ea3b3846c5f18318722d1381186b2ff6ed72eb` | `src/windows/service/inc/wslc.idl`, `src/windows/service/inc/WSLCShared.idl` |
+| `3.0.5/` | [`3.0.5`](https://github.com/microsoft/WSL/tree/3.0.5) | `e7ef9a88db1e5e5745ed93bdce3eb9d8ee5f8aee` | `src/windows/service/inc/wslc.idl`, `src/windows/service/inc/WSLCShared.idl` |
 
 `3.0.1/` was byte-compared with
 `https://raw.githubusercontent.com/microsoft/WSL/3.0.1/src/windows/service/inc/{wslc.idl,WSLCShared.idl}`
@@ -15,6 +16,11 @@ on 2026-10-02 (identical, LF line endings). `3.0.3/` was byte-compared with the 
 `15ea3b38…` on 2026-10-27 (identical sha256, LF line endings). Against `3.0.1/` it differs only in
 `WSLCBuildImageOptions` (an ABI change that the `v3_0` module does not use) and in comment text;
 `WSLCShared.idl` is identical.
+`3.0.5/` was byte-compared with the same files at commit `e7ef9a88…` on 2026-11-18 (identical
+sha256, LF line endings). Against `3.0.3/` it appends `IWSLCContainer::StartWithProcess`, renames
+the network parameters, grows `WSLCContainerOptions`/`WSLCNetworkOptions`, adds a mount flag, an
+enum and three HRESULTs; `WSLCShared.idl` is identical. None of it reaches a slot or struct that
+the `v3_0` module calls.
 
 `wslc.idl` imports only `unknwn.idl`, `wtypes.idl` (Windows SDK) and `WSLCShared.idl`, so no other
 upstream file is needed for type information. The `WSLC_E_*` HRESULTs are defined at the end of
