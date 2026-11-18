@@ -59,7 +59,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: release-plz release-pr
         if: env.RELEASE_BOT_APP_ID != ''
-        uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release-pr
         env:
@@ -93,7 +93,7 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - name: release-plz release
         if: env.RELEASE_BOT_APP_ID != ''
-        uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
         with:
           command: release
         env:
