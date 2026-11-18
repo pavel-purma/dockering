@@ -9,7 +9,7 @@ Both changelogs are written only at release time, by the `/release` skill in the
 (REL-011, REL-019): feature pull requests don't edit them. Edit the wording in the release PR
 before merging it.
 
-## [0.5.0] - 2026-11-17
+## [0.5.0] - 2026-11-18
 
 Downloads are unsigned, as in 0.4.0. This is the first release with the in-app updater: it checks
 GitHub Releases for new versions and can be switched off in Settings. Earlier releases have no

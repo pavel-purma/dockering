@@ -100,7 +100,61 @@ These unchecked gates do not alter any historical release result below.
 - [ ] Linux, `.deb` and tarball installs: the offer is *Download* (UPD-006). *Covered by Tier 1 tests; not run on a real `.deb`.*
 - [ ] macOS: the update shows a *Download* offer (no in-app install; UPD-016 is deferred).
 - [ ] Attach exact commit, artifact, OS and architecture to each result. Linux runs and mocks do not complete the Windows items.
-- [ ] First updater release installed by hand, then a second release updates it by itself.
+- [ ] First updater release installed by hand (v0.5.0, 2026-11-18), then a second release updates it by itself.
+
+## v0.5.0 (unsigned, first updater release)
+
+Released from `main` at `ffb9f4a` as workspace version `0.5.0`: `feat` commits since `v0.4.0` (WSL 3.0.3 on the native COM interface, the engine picker in the sidebar, the unsigned updater channel) make this a minor bump under REL-011. The first release built with the updater (`UPDATER=all`, unsigned manifest).
+
+### Before execution
+
+- [x] The maintainer chose to turn the updater on ("Turn updater on (all)", 2026-11-17), approved the release at Gate 1 ("Open the release PR", 2026-11-17) and publication at Gate 2 ("Publish", 2026-11-18).
+- [x] `UPDATER=all` was set on 2026-11-17, before the release PR was opened, and not changed afterwards (rule 6).
+- [x] Preparation [PR #83](https://github.com/pavel-purma/dockering/pull/83) merged as `ffb9f4a`; all checks passed on `845fd68` ([CI run](https://github.com/pavel-purma/dockering/actions/runs/44191984687)). The first push (`c42b7ee`, [run](https://github.com/pavel-purma/dockering/actions/runs/44188982320)) failed `lint` on a new cargo-deny advisory (see the evidence notes); [PR #84](https://github.com/pavel-purma/dockering/pull/84) fixed it and #83 was rebased.
+- [x] Workspace version and `CHANGELOG.md` match `v0.5.0`; the changelog date is the UTC publication date (the heading said 2026-11-17 and is corrected to 2026-11-18 in the record PR).
+- [x] Before the tag: `main` was `ffb9f4a`, no tag or release for `v0.5.0` existed, no release run was active.
+- [x] Channel: `UPDATER=all`; `PUBLIC_RELEASES`, `WINDOWS_SIGNING`, `MACOS_SIGNING` and `WINDOWS_SIGNER_SUBJECT` unset; `crates/dk-update/src/keys.rs` lists no key. So OS-unsigned, updater all, manifest unsigned (UPD-003 unsigned channel).
+- [ ] Third-party notices are current: CI checks this; `cargo about` was not run locally (not installed).
+
+### Draft verification
+
+- [x] The release matrix passed on all six targets ([run](https://github.com/pavel-purma/dockering/actions/runs/44195128478)).
+- [x] `scripts/verify-release.ps1 -Expect Unsigned -Updater all -Attest`: `RESULT 57 checks: 56 passed, 0 failed, 1 skipped` (the skip is `windows.arm64.exe.run` on an x64 host).
+- [x] Update channel (REL-084): the `updater-evidence-0.5.0` artifact of the release run has six files, every one `updater=true` and `seam=false`; `cargo xtask verify-update-artifacts --assets <dir> --version 0.5.0 --updater all`: no `.minisig` and no key in `keys.rs` (unsigned manifest); version 0.5.0; six entries matching their assets' kind, URL, size and SHA-256.
+- [x] Exactly 15 files; all `SHA256SUMS` entries and the six-platform manifest match.
+- [x] All 15 attestations pass `gh attestation verify` with source digest `ffb9f4a`, ref `refs/tags/v0.5.0`, the `release.yml` signer, self-hosted runners denied.
+- [x] Notes identify unsigned downloads and carry the sentence for the update channel (*Dockering checks for updates in these builds. The update manifest has no signature…*).
+- [x] CI on the exact commit passed, including the Windows x64 and ARM64 builds ([run](https://github.com/pavel-purma/dockering/actions/runs/44195088454)).
+- [x] Launch check on this machine (`-LaunchSmoke`, profile written by the installed release, then `--demo`): ran and passed; `state.json` and `config.toml` restored byte for byte.
+- [ ] Windows machine: install over 0.4.0, launch from the Start Menu, Docker connection, uninstall.
+- [ ] macOS machine (a physical Mac): mount the DMG, copy and launch the app, Docker-compatible connection. Install, launch, the page walk, quit and Gatekeeper's dialog on a quarantined copy are covered by the macOS smoke runs, which use `--demo` and a hosted runner.
+- [x] **Draft gate** (before publication, on the draft's own files): `Linux smoke` ([run](https://github.com/pavel-purma/dockering/actions/runs/44200104552)): all four legs passed; `macOS smoke` ([run](https://github.com/pavel-purma/dockering/actions/runs/44200110292)): all three legs passed (macos-15, macos-15-intel, macos-26). Reviewed: the four Linux contact sheets, the first frames on macOS 15, macOS 15 Intel and macOS 26, and the update notice on macOS 15 Intel. They show the engine card at the foot of the sidebar and no engine in the title bar.
+- [ ] Real Linux machine (not a container): launch the app with the machine's GPU driver and connect to Docker. Install and launch in clean containers are covered by the Linux smoke runs, which use `--demo` and software rendering.
+- [ ] Application sanity: containers, detail and logs, terminal, one lifecycle operation, images, volumes, networks, engine switching, Settings, keyboard navigation (new: the engine picker in the sidebar and status bar, *Settings › Updates*).
+- [ ] WSL and WSLC recorded separately, including WSL 3.0.3 on the native COM interface. Hosted CI does not verify these.
+- [ ] Updater: 0.5.0 can only offer an update once a later release exists; the check, offer and apply (spike W1 on Windows) are not exercised by this release. See *Planned updater gates*.
+
+### Publication
+
+- [x] Draft and notes reviewed; the maintainer's approval covers publication.
+- [x] The existing draft was published; no assets were replaced.
+- [x] Published as `v0.5.0`, stable/latest, `draft=false`, at `2026-11-18T08:18:27Z`.
+- [x] `verify-release.ps1 -Updater all -Published`: `RESULT 70 checks: 68 passed, 0 failed, 2 skipped` (no `-Changelog`; `windows.arm64.exe.run` on an x64 host).
+- [x] `Linux smoke` run for the published `v0.5.0` ([run](https://github.com/pavel-purma/dockering/actions/runs/44265858836)): all four legs passed (ubuntu-24.04, ubuntu-26.04, fedora, arch); their contact sheets reviewed; `libc_floor` INFO (the binary needs glibc 2.39).
+- [x] `macOS smoke` run for the published `v0.5.0` ([run](https://github.com/pavel-purma/dockering/actions/runs/44265858791)): all three legs passed (macos-15, macos-15-intel, macos-26); first frames on macOS 15 and 15 Intel and the update notice on macOS 26 reviewed; `bundle_seal` INFO, as for an unsigned build.
+- [x] README download text and the release table in `docs/release.md` point to 0.5.0; the distribution status line says the updater ships from v0.5.0.
+- [x] The `winget` run: skipped ([run](https://github.com/pavel-purma/dockering/actions/runs/44265858751)).
+
+### Evidence for v0.5.0
+
+Exact release commit: [`ffb9f4a`](https://github.com/pavel-purma/dockering/commit/ffb9f4a5f6f5f9e2b7f66073f07b9f933f832b1a). CI: [44195088454](https://github.com/pavel-purma/dockering/actions/runs/44195088454). Release run: [44195128478](https://github.com/pavel-purma/dockering/actions/runs/44195128478).
+Preparation PR #83: the first `lint` run failed in `cargo deny` on RUSTSEC-2026-0543 (`chrono` unmaintained, transitive via `gpui-kit` 0.8, no safe upgrade); #84 added it to the `deny.toml` ignore list and merged first. The same run warned that `async-executor` 1.14.0 is yanked (a warning, not a failure). Local checks ran with `cargo test` because `cargo nextest`, `cargo deny` and `cargo about` are not installed; the local Python suite had the known Windows-only error `test_rel_085_serve_log_is_appended_…` (`Unsupported signal: 2`).
+
+### Open items
+
+- `async-executor` 1.14.0 is yanked (transitive via `gpui-kit`); a warning only.
+- `test_rel_085_serve_log_is_appended_…` fails on Windows (`send_signal(SIGINT)` is unsupported there); no issue yet.
+- First updater release: a live proof of the update path (offer, download, apply, spike W1 on Windows) needs the next release.
 
 ## v0.4.0 (unsigned)
 

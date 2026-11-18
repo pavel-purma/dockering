@@ -12,6 +12,7 @@ REL-018). The rest of this page is what it automates, so a maintainer can follow
 
 | Release | Published | Release commit | Record |
 |---|---|---|---|
+| [0.5.0](https://github.com/pavel-purma/dockering/releases/tag/v0.5.0) | 2026-11-18 08:18 UTC | [`ffb9f4a`](https://github.com/pavel-purma/dockering/commit/ffb9f4a5f6f5f9e2b7f66073f07b9f933f832b1a) | [checklist](plan/release-checklist.md#evidence-for-v050); first release with the updater (unsigned manifest) |
 | [0.4.0](https://github.com/pavel-purma/dockering/releases/tag/v0.4.0) | 2026-10-23 07:37 UTC | [`6569447`](https://github.com/pavel-purma/dockering/commit/6569447b58d33b9cc9f9a2fca02d0fc862e6c64f) | [checklist](plan/release-checklist.md#evidence-for-v040) |
 | [0.3.0](https://github.com/pavel-purma/dockering/releases/tag/v0.3.0) | 2026-10-11 17:29 UTC | [`7bef9c1`](https://github.com/pavel-purma/dockering/commit/7bef9c151f8246801a6d00a10a64e1157e8cda35) | [checklist](plan/release-checklist.md#evidence-for-v030) |
 | [0.2.0](https://github.com/pavel-purma/dockering/releases/tag/v0.2.0) | 2026-10-06 00:37 UTC | [`2d25f6c`](https://github.com/pavel-purma/dockering/commit/2d25f6c108f2749f7a2225b4b968742516713d23) | [checklist](plan/release-checklist.md#evidence-for-v020); a first build (`813f543`) crashed at launch after an upgrade and was withdrawn |
