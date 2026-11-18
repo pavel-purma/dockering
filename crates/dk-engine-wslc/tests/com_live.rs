@@ -303,6 +303,39 @@ fn live_volume_create_remove() {
     });
 }
 
+#[test]
+#[ignore = "needs WSL ≥ 3.0 with WSLC; creates and removes its own network"]
+fn live_network_inspect_remove() {
+    // Slots 38/40 (DeleteNetwork/InspectNetwork) take a name or id since 3.0.5. CreateNetwork is
+    // not declared with its real options, so the network comes from the CLI.
+    init();
+    let name = format!("dk-com-net-{:08x}", rand_u32());
+    let wslc = dk_engine_wslc::cli::wslc_exe().expect("wslc.exe");
+    let out = std::process::Command::new(&wslc)
+        .args(["network", "create", &name])
+        .output()
+        .expect("spawn wslc");
+    assert!(out.status.success(), "{out:?}");
+    block_on(async {
+        let e = com_engine().await;
+        let by_name = e
+            .inspect_network_json(&name)
+            .await
+            .expect("inspect by name");
+        assert_eq!(by_name["Name"], name.as_str());
+        let id = by_name["Id"].as_str().expect("network id").to_owned();
+        let by_id = e.inspect_network_json(&id).await.expect("inspect by id");
+        assert_eq!(by_id["Name"], name.as_str());
+        e.remove_network(&id).await.expect("DeleteNetwork by id");
+        let gone = e.inspect_network_json(&name).await;
+        eprintln!("network {name} ({}) after remove: {gone:?}", &id[..12]);
+        assert!(
+            matches!(gone, Err(dk_core::EngineError::NotFound { .. })),
+            "{gone:?}"
+        );
+    });
+}
+
 fn rand_u32() -> u32 {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

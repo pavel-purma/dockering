@@ -16,8 +16,8 @@ pub mod v3_0;
 /// A verified ABI module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiModule {
-    /// IDL 3.0.1 and 3.0.3 (the same vtables; only `BuildImageOptions`, which is never called,
-    /// differs). Trusted for exactly the versions listed in [`MODULES`] (ENG-132).
+    /// IDL 3.0.1, 3.0.3 and 3.0.5 (the same vtables for every called slot; see the module docs).
+    /// Trusted for exactly the versions listed in [`MODULES`] (ENG-132).
     V3_0,
 }
 
@@ -34,6 +34,11 @@ pub struct AbiInfo {
 /// Every trusted version, newest first. Each needs its own vendored IDL and live evidence
 /// (spec 20 §5.7).
 pub const MODULES: &[AbiInfo] = &[
+    AbiInfo {
+        module: AbiModule::V3_0,
+        version: WslVersion::new(3, 0, 5, 0),
+        idl_tag: "3.0.5",
+    },
     AbiInfo {
         module: AbiModule::V3_0,
         version: WslVersion::new(3, 0, 3, 0),
@@ -68,6 +73,7 @@ mod tests {
         let v = |s| WslVersion::parse(s).expect("valid");
         assert_eq!(select(&v("3.0.1.0")), Some(AbiModule::V3_0));
         assert_eq!(select(&v("3.0.3.0")), Some(AbiModule::V3_0));
+        assert_eq!(select(&v("3.0.5.0")), Some(AbiModule::V3_0));
         assert_eq!(select(&v("3.0.0")), None);
         assert_eq!(select(&v("3.0.17.3")), None);
         assert_eq!(select(&v("3.0.1.1")), None);
@@ -75,6 +81,8 @@ mod tests {
         assert_eq!(select(&v("3.0.2.0")), None);
         assert_eq!(select(&v("3.0.3.1")), None);
         assert_eq!(select(&v("3.0.4.0")), None);
+        assert_eq!(select(&v("3.0.5.1")), None);
+        assert_eq!(select(&v("3.0.6.0")), None);
         // Newer / older than anything verified → CLI.
         assert_eq!(select(&v("3.1.0")), None);
         assert_eq!(select(&v("4.0.0")), None);

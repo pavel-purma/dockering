@@ -31,6 +31,10 @@ pub mod hr {
     pub const WSLC_E_EVENTS_LOST: i32 = 0x8004_0611_u32 as i32;
     pub const WSLC_E_EVENT_STREAM_FINISHED: i32 = 0x8004_0612_u32 as i32;
     pub const WSLC_E_CONTAINER_DELETED: i32 = 0x8004_0613_u32 as i32;
+    pub const WSLC_E_CAPABILITY_ADDITIONS_DISABLED: i32 = 0x8004_0614_u32 as i32;
+    pub const WSLC_E_RUNTIME_UPDATE_NEEDED: i32 = 0x8004_0615_u32 as i32;
+    /// Since 3.0.5: network operations accept an id prefix.
+    pub const WSLC_E_NETWORK_PREFIX_AMBIGUOUS: i32 = 0x8004_0616_u32 as i32;
 
     pub const E_ABORT: i32 = 0x8000_4004_u32 as i32;
     pub const E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
@@ -117,6 +121,7 @@ pub fn map_hresult(code: i32, message: &str, subject: Option<Subject<'_>>) -> En
         hr::WSLC_E_CONTAINER_IS_RUNNING
         | hr::WSLC_E_CONTAINER_NOT_RUNNING
         | hr::WSLC_E_CONTAINER_PREFIX_AMBIGUOUS
+        | hr::WSLC_E_NETWORK_PREFIX_AMBIGUOUS
         | hr::ERROR_ALREADY_EXISTS => EngineError::Conflict(text),
         hr::WSLC_E_CONTAINER_DISABLED => EngineError::Unreachable {
             reason: text,
@@ -592,6 +597,9 @@ mod tests {
         assert_eq!(hr::WSLC_E_EVENTS_LOST, make(17));
         assert_eq!(hr::WSLC_E_EVENT_STREAM_FINISHED, make(18));
         assert_eq!(hr::WSLC_E_CONTAINER_DELETED, make(19));
+        assert_eq!(hr::WSLC_E_CAPABILITY_ADDITIONS_DISABLED, make(20));
+        assert_eq!(hr::WSLC_E_RUNTIME_UPDATE_NEEDED, make(21));
+        assert_eq!(hr::WSLC_E_NETWORK_PREFIX_AMBIGUOUS, make(22));
     }
 
     #[test]
@@ -635,6 +643,7 @@ mod tests {
             hr::WSLC_E_CONTAINER_IS_RUNNING,
             hr::WSLC_E_CONTAINER_NOT_RUNNING,
             hr::WSLC_E_CONTAINER_PREFIX_AMBIGUOUS,
+            hr::WSLC_E_NETWORK_PREFIX_AMBIGUOUS,
         ] {
             assert!(
                 matches!(map_hresult(code, "m", c), EngineError::Conflict(_)),

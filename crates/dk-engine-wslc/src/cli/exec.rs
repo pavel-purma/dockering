@@ -348,8 +348,13 @@ mod imp {
                                     chunk = rest;
                                 }
                             }
-                            if cancel_r.is_cancelled() { continue; }
                             if chunk.is_empty() {
+                                continue;
+                            }
+                            if cancel_r.is_cancelled() {
+                                // ConPTY flushes the tail after the child exits: keep it, but
+                                // never block teardown on a consumer that stopped reading.
+                                let _ = tx.try_send(Ok(chunk));
                                 continue;
                             }
                             let sent = futures::executor::block_on(async {

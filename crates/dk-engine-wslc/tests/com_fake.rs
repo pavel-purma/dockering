@@ -72,6 +72,7 @@ fn eng_132_self_check_for_every_admitted_version() {
     for (admitted, triple) in [
         (WslVersion::new(3, 0, 1, 0), (3, 0, 1)),
         (WslVersion::new(3, 0, 3, 0), (3, 0, 3)),
+        (WslVersion::new(3, 0, 5, 0), (3, 0, 5)),
     ] {
         assert!(
             com::select(&admitted).is_some(),
@@ -82,10 +83,10 @@ fn eng_132_self_check_for_every_admitted_version() {
         let check = block_on(e.self_check(Some(admitted))).expect("self-check");
         assert_eq!(check.com_version, triple, "{admitted}");
         // A server of another admitted version is not this version: the triple must match.
-        let other = if triple == (3, 0, 3) {
-            WslVersion::new(3, 0, 1, 0)
-        } else {
+        let other = if triple == (3, 0, 1) {
             WslVersion::new(3, 0, 3, 0)
+        } else {
+            WslVersion::new(3, 0, 1, 0)
         };
         let bad = block_on(e.self_check(Some(other)));
         assert!(matches!(bad, Err(EngineError::Protocol(_))), "{bad:?}");
