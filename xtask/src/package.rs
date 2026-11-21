@@ -369,8 +369,8 @@ fn toml_string(s: &str) -> String {
 }
 
 /// Portable archive: `.zip` on Windows, `.tar.gz` on Linux. Bundles the binary, the licence
-/// files, and the third-party notices (REL-002). On Linux it also bundles the desktop entry and
-/// icon (SHL-023).
+/// files, and the third-party notices (REL-002). On Linux it also bundles the desktop entry,
+/// icon and an `install.sh` that copies them into `~/.local` (SHL-023).
 fn portable_archive(
     root: &Path,
     os: TargetOs,
@@ -402,6 +402,10 @@ fn portable_archive(
         files.push((
             root.join("assets/app-icon/icon-512.png"),
             stage.join("share/icons/hicolor/512x512/apps/dev.dockering.Dockering.png"),
+        ));
+        files.push((
+            root.join("packaging/linux/install.sh"),
+            stage.join("install.sh"),
         ));
     }
     for (src, dst) in &files {

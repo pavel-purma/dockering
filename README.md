@@ -53,12 +53,15 @@ Requires Windows 10 22H2 or newer, x64 or ARM64.
 
 - **Ubuntu (`.deb`):** `sudo apt install ./Dockering-x86_64.deb`. apt installs the declared libraries and,
   through the recommends of `libvulkan1`, `mesa-vulkan-drivers`.
-- **Fedora (`.tar.gz`):** install these libraries, then unpack the archive and run `./dockering`:
+- **Fedora (`.tar.gz`):** install these libraries, then unpack the archive and run `./install.sh`. It
+  copies `dockering` to `~/.local/bin` and the menu entry and icon to `~/.local/share`, so the app
+  appears in your launcher with its icon (`./install.sh --uninstall` removes them; set `PREFIX` to
+  install elsewhere). You can also run `./dockering` in place, without a menu entry:
 
   ```sh
   sudo dnf install vulkan-loader mesa-vulkan-drivers libwayland-client libxkbcommon libxkbcommon-x11 libX11-xcb libxcb fontconfig freetype libzstd
   tar -xzf Dockering-x86_64.tar.gz
-  cd dockering-x86_64-unknown-linux-gnu && ./dockering
+  cd dockering-x86_64-unknown-linux-gnu && ./install.sh
   ```
 
 - **Arch (`.tar.gz`):** the same with these libraries. If you have a GPU Vulkan driver, install it instead
@@ -67,7 +70,7 @@ Requires Windows 10 22H2 or newer, x64 or ARM64.
   ```sh
   sudo pacman -S vulkan-icd-loader vulkan-swrast wayland libxkbcommon libxkbcommon-x11 libxcb libx11 fontconfig freetype2 zstd
   tar -xzf Dockering-x86_64.tar.gz
-  cd dockering-x86_64-unknown-linux-gnu && ./dockering
+  cd dockering-x86_64-unknown-linux-gnu && ./install.sh
   ```
 
 - **AppImage:** `chmod +x Dockering-x86_64.AppImage`, then run it. If FUSE is missing, run it with
